@@ -1,0 +1,11 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "rootDir": ".",
+    "outDir": "../dist/examples",
+    "tsBuildInfoFile": "../dist/examples/.tsbuildinfo"
+  },
+  "include": ["typescript/**/*.ts"],
+  "references": [{ "path": "../packages/sdk" }]
+}

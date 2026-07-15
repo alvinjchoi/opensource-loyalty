@@ -1,0 +1,20 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "rootDir": ".",
+    "outDir": "../dist/tests",
+    "tsBuildInfoFile": "../dist/tests/.tsbuildinfo",
+    "types": ["node", "vitest/globals"]
+  },
+  "include": ["**/*.ts"],
+  "references": [
+    { "path": "../packages/protocol" },
+    { "path": "../packages/reference" },
+    { "path": "../packages/storage" },
+    { "path": "../packages/storage-sqlite" },
+    { "path": "../packages/server" },
+    { "path": "../packages/cli" },
+    { "path": "../packages/sdk" }
+  ]
+}
