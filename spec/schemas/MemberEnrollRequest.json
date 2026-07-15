@@ -1,0 +1,142 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://loyalty-interchange.org/schema/v1/MemberEnrollRequest.json",
+  "title": "MemberEnrollRequest",
+  "additionalProperties": false,
+  "type": "object",
+  "required": [
+    "context",
+    "program_id",
+    "identity"
+  ],
+  "properties": {
+    "context": {
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "protocol_version",
+        "profile",
+        "request_id",
+        "idempotency_key",
+        "occurred_at",
+        "source"
+      ],
+      "properties": {
+        "protocol_version": {
+          "const": "1.0",
+          "type": "string"
+        },
+        "profile": {
+          "const": "foodservice/1.0",
+          "type": "string"
+        },
+        "request_id": {
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+          "description": "Opaque, stable identifier within the owning system.",
+          "type": "string"
+        },
+        "idempotency_key": {
+          "minLength": 8,
+          "maxLength": 255,
+          "type": "string"
+        },
+        "occurred_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "source": {
+          "additionalProperties": false,
+          "type": "object",
+          "required": [
+            "system"
+          ],
+          "properties": {
+            "system": {
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+              "description": "Opaque, stable identifier within the owning system.",
+              "type": "string"
+            },
+            "instance": {
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+              "description": "Opaque, stable identifier within the owning system.",
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "program_id": {
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+      "description": "Opaque, stable identifier within the owning system.",
+      "type": "string"
+    },
+    "identity": {
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "type",
+        "value"
+      ],
+      "properties": {
+        "type": {
+          "anyOf": [
+            {
+              "const": "loyalty_id",
+              "type": "string"
+            },
+            {
+              "const": "token",
+              "type": "string"
+            },
+            {
+              "const": "email_hash",
+              "type": "string"
+            },
+            {
+              "const": "phone_hash",
+              "type": "string"
+            },
+            {
+              "const": "external",
+              "type": "string"
+            }
+          ]
+        },
+        "value": {
+          "minLength": 1,
+          "maxLength": 512,
+          "type": "string"
+        },
+        "issuer": {
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+          "description": "Opaque, stable identifier within the owning system.",
+          "type": "string"
+        }
+      }
+    },
+    "member_id": {
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+      "description": "Opaque, stable identifier within the owning system.",
+      "type": "string"
+    },
+    "attributes": {
+      "description": "Non-normative extension data. Consumers must ignore unknown keys.",
+      "type": "object",
+      "patternProperties": {
+        "^(.*)$": {}
+      }
+    }
+  }
+}

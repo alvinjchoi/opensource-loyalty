@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://loyalty-interchange.org/schema/v1/ResponseContext.json",
+  "title": "ResponseContext",
+  "additionalProperties": false,
+  "type": "object",
+  "required": [
+    "protocol_version",
+    "profile",
+    "request_id",
+    "processed_at"
+  ],
+  "properties": {
+    "protocol_version": {
+      "const": "1.0",
+      "type": "string"
+    },
+    "profile": {
+      "const": "foodservice/1.0",
+      "type": "string"
+    },
+    "request_id": {
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+      "description": "Opaque, stable identifier within the owning system.",
+      "type": "string"
+    },
+    "processed_at": {
+      "format": "date-time",
+      "type": "string"
+    }
+  }
+}

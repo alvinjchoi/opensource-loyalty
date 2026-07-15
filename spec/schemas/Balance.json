@@ -1,0 +1,83 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://loyalty-interchange.org/schema/v1/Balance.json",
+  "title": "Balance",
+  "additionalProperties": false,
+  "type": "object",
+  "required": [
+    "account_id",
+    "member_id",
+    "program_id",
+    "unit",
+    "amount",
+    "reserved",
+    "available",
+    "as_of"
+  ],
+  "properties": {
+    "account_id": {
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+      "description": "Opaque, stable identifier within the owning system.",
+      "type": "string"
+    },
+    "member_id": {
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+      "description": "Opaque, stable identifier within the owning system.",
+      "type": "string"
+    },
+    "program_id": {
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+      "description": "Opaque, stable identifier within the owning system.",
+      "type": "string"
+    },
+    "unit": {
+      "anyOf": [
+        {
+          "const": "points",
+          "type": "string"
+        },
+        {
+          "const": "visits",
+          "type": "string"
+        },
+        {
+          "const": "stamps",
+          "type": "string"
+        },
+        {
+          "const": "credits",
+          "type": "string"
+        },
+        {
+          "const": "custom",
+          "type": "string"
+        }
+      ]
+    },
+    "unit_label": {
+      "minLength": 1,
+      "maxLength": 64,
+      "type": "string"
+    },
+    "amount": {
+      "type": "integer"
+    },
+    "reserved": {
+      "minimum": 0,
+      "type": "integer"
+    },
+    "available": {
+      "type": "integer"
+    },
+    "as_of": {
+      "format": "date-time",
+      "type": "string"
+    }
+  }
+}

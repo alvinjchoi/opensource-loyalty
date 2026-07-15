@@ -1,0 +1,179 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://loyalty-interchange.org/schema/v1/OrderLine.json",
+  "title": "OrderLine",
+  "additionalProperties": false,
+  "type": "object",
+  "required": [
+    "line_id",
+    "kind",
+    "product_id",
+    "quantity",
+    "unit_price",
+    "subtotal",
+    "discount",
+    "tax"
+  ],
+  "properties": {
+    "line_id": {
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+      "description": "Opaque, stable identifier within the owning system.",
+      "type": "string"
+    },
+    "kind": {
+      "anyOf": [
+        {
+          "const": "item",
+          "type": "string"
+        },
+        {
+          "const": "modifier",
+          "type": "string"
+        },
+        {
+          "const": "fee",
+          "type": "string"
+        }
+      ]
+    },
+    "product_id": {
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+      "description": "Opaque, stable identifier within the owning system.",
+      "type": "string"
+    },
+    "sku": {
+      "minLength": 1,
+      "maxLength": 128,
+      "type": "string"
+    },
+    "name": {
+      "minLength": 1,
+      "maxLength": 255,
+      "type": "string"
+    },
+    "parent_line_id": {
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+      "description": "Opaque, stable identifier within the owning system.",
+      "type": "string"
+    },
+    "quantity": {
+      "minimum": 1,
+      "type": "integer"
+    },
+    "unit_price": {
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "amount",
+        "currency"
+      ],
+      "properties": {
+        "amount": {
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991,
+          "description": "Signed amount in the currency's minor unit.",
+          "type": "integer"
+        },
+        "currency": {
+          "pattern": "^[A-Z]{3}$",
+          "type": "string"
+        }
+      }
+    },
+    "subtotal": {
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "amount",
+        "currency"
+      ],
+      "properties": {
+        "amount": {
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991,
+          "description": "Signed amount in the currency's minor unit.",
+          "type": "integer"
+        },
+        "currency": {
+          "pattern": "^[A-Z]{3}$",
+          "type": "string"
+        }
+      }
+    },
+    "discount": {
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "amount",
+        "currency"
+      ],
+      "properties": {
+        "amount": {
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991,
+          "description": "Signed amount in the currency's minor unit.",
+          "type": "integer"
+        },
+        "currency": {
+          "pattern": "^[A-Z]{3}$",
+          "type": "string"
+        }
+      }
+    },
+    "tax": {
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "amount",
+        "currency"
+      ],
+      "properties": {
+        "amount": {
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991,
+          "description": "Signed amount in the currency's minor unit.",
+          "type": "integer"
+        },
+        "currency": {
+          "pattern": "^[A-Z]{3}$",
+          "type": "string"
+        }
+      }
+    },
+    "category_ids": {
+      "uniqueItems": true,
+      "type": "array",
+      "items": {
+        "minLength": 1,
+        "maxLength": 128,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+        "description": "Opaque, stable identifier within the owning system.",
+        "type": "string"
+      }
+    },
+    "tags": {
+      "uniqueItems": true,
+      "type": "array",
+      "items": {
+        "maxLength": 64,
+        "type": "string"
+      }
+    },
+    "loyalty_eligible": {
+      "type": "boolean"
+    },
+    "metadata": {
+      "description": "Non-normative extension data. Consumers must ignore unknown keys.",
+      "type": "object",
+      "patternProperties": {
+        "^(.*)$": {}
+      }
+    }
+  }
+}

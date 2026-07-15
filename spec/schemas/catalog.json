@@ -1,0 +1,163 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://loyalty-interchange.org/schema/v1/catalog.json",
+  "title": "LIP v1 schema catalog",
+  "$defs": {
+    "AccountMetric": {
+      "$ref": "./AccountMetric.json"
+    },
+    "AccrualPostRequest": {
+      "$ref": "./AccrualPostRequest.json"
+    },
+    "Balance": {
+      "$ref": "./Balance.json"
+    },
+    "CatalogRewardDefinition": {
+      "$ref": "./CatalogRewardDefinition.json"
+    },
+    "CapabilitiesDocument": {
+      "$ref": "./CapabilitiesDocument.json"
+    },
+    "EvaluationRequest": {
+      "$ref": "./EvaluationRequest.json"
+    },
+    "EvaluationResponse": {
+      "$ref": "./EvaluationResponse.json"
+    },
+    "EarningExclusions": {
+      "$ref": "./EarningExclusions.json"
+    },
+    "EarningPolicy": {
+      "$ref": "./EarningPolicy.json"
+    },
+    "ExpiringBalance": {
+      "$ref": "./ExpiringBalance.json"
+    },
+    "FoodserviceOrder": {
+      "$ref": "./FoodserviceOrder.json"
+    },
+    "HealthDocument": {
+      "$ref": "./HealthDocument.json"
+    },
+    "IdentityReference": {
+      "$ref": "./IdentityReference.json"
+    },
+    "LedgerEntry": {
+      "$ref": "./LedgerEntry.json"
+    },
+    "LedgerListRequest": {
+      "$ref": "./LedgerListRequest.json"
+    },
+    "LedgerListResponse": {
+      "$ref": "./LedgerListResponse.json"
+    },
+    "LedgerResponse": {
+      "$ref": "./LedgerResponse.json"
+    },
+    "LoyaltyEvent": {
+      "$ref": "./LoyaltyEvent.json"
+    },
+    "Member": {
+      "$ref": "./Member.json"
+    },
+    "MemberAccountRequest": {
+      "$ref": "./MemberAccountRequest.json"
+    },
+    "MemberAccountResponse": {
+      "$ref": "./MemberAccountResponse.json"
+    },
+    "MemberEnrollRequest": {
+      "$ref": "./MemberEnrollRequest.json"
+    },
+    "MemberEnrollResponse": {
+      "$ref": "./MemberEnrollResponse.json"
+    },
+    "MemberLookupRequest": {
+      "$ref": "./MemberLookupRequest.json"
+    },
+    "MemberLookupResponse": {
+      "$ref": "./MemberLookupResponse.json"
+    },
+    "Money": {
+      "$ref": "./Money.json"
+    },
+    "OrderAdjustment": {
+      "$ref": "./OrderAdjustment.json"
+    },
+    "OrderAdjustmentRequest": {
+      "$ref": "./OrderAdjustmentRequest.json"
+    },
+    "OrderLine": {
+      "$ref": "./OrderLine.json"
+    },
+    "OrderTotals": {
+      "$ref": "./OrderTotals.json"
+    },
+    "ProblemDetails": {
+      "$ref": "./ProblemDetails.json"
+    },
+    "PointExpirationPolicy": {
+      "$ref": "./PointExpirationPolicy.json"
+    },
+    "ProgramAccountDefinition": {
+      "$ref": "./ProgramAccountDefinition.json"
+    },
+    "ProgramCatalog": {
+      "$ref": "./ProgramCatalog.json"
+    },
+    "ProgramGetRequest": {
+      "$ref": "./ProgramGetRequest.json"
+    },
+    "ProgramGetResponse": {
+      "$ref": "./ProgramGetResponse.json"
+    },
+    "ProgramMetricDefinition": {
+      "$ref": "./ProgramMetricDefinition.json"
+    },
+    "ProgramScope": {
+      "$ref": "./ProgramScope.json"
+    },
+    "RedemptionCaptureRequest": {
+      "$ref": "./RedemptionCaptureRequest.json"
+    },
+    "RedemptionReservation": {
+      "$ref": "./RedemptionReservation.json"
+    },
+    "RedemptionReservationResponse": {
+      "$ref": "./RedemptionReservationResponse.json"
+    },
+    "RedemptionReserveRequest": {
+      "$ref": "./RedemptionReserveRequest.json"
+    },
+    "RedemptionReverseRequest": {
+      "$ref": "./RedemptionReverseRequest.json"
+    },
+    "RequestContext": {
+      "$ref": "./RequestContext.json"
+    },
+    "ResponseContext": {
+      "$ref": "./ResponseContext.json"
+    },
+    "RewardCandidate": {
+      "$ref": "./RewardCandidate.json"
+    },
+    "RewardEffect": {
+      "$ref": "./RewardEffect.json"
+    },
+    "TierBenefit": {
+      "$ref": "./TierBenefit.json"
+    },
+    "TierDefinition": {
+      "$ref": "./TierDefinition.json"
+    },
+    "TierQualificationPolicy": {
+      "$ref": "./TierQualificationPolicy.json"
+    },
+    "TierProgress": {
+      "$ref": "./TierProgress.json"
+    },
+    "WellKnownDocument": {
+      "$ref": "./WellKnownDocument.json"
+    }
+  }
+}

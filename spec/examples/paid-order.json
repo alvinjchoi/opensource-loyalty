@@ -1,0 +1,56 @@
+{
+  "order_id": "order-1001",
+  "order_number": "1001",
+  "scope": {
+    "program_id": "demo-foodservice",
+    "brand_id": "demo-brand",
+    "merchant_id": "merchant-west",
+    "location_id": "location-42",
+    "franchisee_id": "franchisee-7"
+  },
+  "member_id": "member-001",
+  "channel": "drive_thru",
+  "status": "paid",
+  "business_date": "2026-07-14",
+  "placed_at": "2026-07-14T10:05:00.000Z",
+  "closed_at": "2026-07-14T10:08:00.000Z",
+  "lines": [
+    {
+      "line_id": "line-1",
+      "kind": "item",
+      "product_id": "burger-1",
+      "name": "Classic Burger",
+      "quantity": 1,
+      "unit_price": { "amount": 1000, "currency": "USD" },
+      "subtotal": { "amount": 1000, "currency": "USD" },
+      "discount": { "amount": 0, "currency": "USD" },
+      "tax": { "amount": 80, "currency": "USD" }
+    },
+    {
+      "line_id": "line-2",
+      "kind": "modifier",
+      "product_id": "extra-cheese",
+      "parent_line_id": "line-1",
+      "quantity": 1,
+      "unit_price": { "amount": 100, "currency": "USD" },
+      "subtotal": { "amount": 100, "currency": "USD" },
+      "discount": { "amount": 0, "currency": "USD" },
+      "tax": { "amount": 8, "currency": "USD" }
+    }
+  ],
+  "totals": {
+    "subtotal": { "amount": 1100, "currency": "USD" },
+    "discount": { "amount": 0, "currency": "USD" },
+    "tax": { "amount": 88, "currency": "USD" },
+    "tip": { "amount": 0, "currency": "USD" },
+    "service_charge": { "amount": 0, "currency": "USD" },
+    "total": { "amount": 1188, "currency": "USD" }
+  },
+  "tenders": [
+    {
+      "tender_id": "tender-1",
+      "type": "card",
+      "amount": { "amount": 1188, "currency": "USD" }
+    }
+  ]
+}

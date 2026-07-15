@@ -1,0 +1,137 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://loyalty-interchange.org/schema/v1/OrderTotals.json",
+  "title": "OrderTotals",
+  "additionalProperties": false,
+  "type": "object",
+  "required": [
+    "subtotal",
+    "discount",
+    "tax",
+    "tip",
+    "service_charge",
+    "total"
+  ],
+  "properties": {
+    "subtotal": {
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "amount",
+        "currency"
+      ],
+      "properties": {
+        "amount": {
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991,
+          "description": "Signed amount in the currency's minor unit.",
+          "type": "integer"
+        },
+        "currency": {
+          "pattern": "^[A-Z]{3}$",
+          "type": "string"
+        }
+      }
+    },
+    "discount": {
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "amount",
+        "currency"
+      ],
+      "properties": {
+        "amount": {
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991,
+          "description": "Signed amount in the currency's minor unit.",
+          "type": "integer"
+        },
+        "currency": {
+          "pattern": "^[A-Z]{3}$",
+          "type": "string"
+        }
+      }
+    },
+    "tax": {
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "amount",
+        "currency"
+      ],
+      "properties": {
+        "amount": {
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991,
+          "description": "Signed amount in the currency's minor unit.",
+          "type": "integer"
+        },
+        "currency": {
+          "pattern": "^[A-Z]{3}$",
+          "type": "string"
+        }
+      }
+    },
+    "tip": {
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "amount",
+        "currency"
+      ],
+      "properties": {
+        "amount": {
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991,
+          "description": "Signed amount in the currency's minor unit.",
+          "type": "integer"
+        },
+        "currency": {
+          "pattern": "^[A-Z]{3}$",
+          "type": "string"
+        }
+      }
+    },
+    "service_charge": {
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "amount",
+        "currency"
+      ],
+      "properties": {
+        "amount": {
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991,
+          "description": "Signed amount in the currency's minor unit.",
+          "type": "integer"
+        },
+        "currency": {
+          "pattern": "^[A-Z]{3}$",
+          "type": "string"
+        }
+      }
+    },
+    "total": {
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "amount",
+        "currency"
+      ],
+      "properties": {
+        "amount": {
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991,
+          "description": "Signed amount in the currency's minor unit.",
+          "type": "integer"
+        },
+        "currency": {
+          "pattern": "^[A-Z]{3}$",
+          "type": "string"
+        }
+      }
+    }
+  }
+}

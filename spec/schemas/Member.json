@@ -1,0 +1,114 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://loyalty-interchange.org/schema/v1/Member.json",
+  "title": "Member",
+  "additionalProperties": false,
+  "type": "object",
+  "required": [
+    "member_id",
+    "program_id",
+    "status",
+    "joined_at",
+    "identities"
+  ],
+  "properties": {
+    "member_id": {
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+      "description": "Opaque, stable identifier within the owning system.",
+      "type": "string"
+    },
+    "program_id": {
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+      "description": "Opaque, stable identifier within the owning system.",
+      "type": "string"
+    },
+    "status": {
+      "anyOf": [
+        {
+          "const": "active",
+          "type": "string"
+        },
+        {
+          "const": "suspended",
+          "type": "string"
+        },
+        {
+          "const": "closed",
+          "type": "string"
+        }
+      ]
+    },
+    "joined_at": {
+      "format": "date-time",
+      "type": "string"
+    },
+    "tier_id": {
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+      "description": "Opaque, stable identifier within the owning system.",
+      "type": "string"
+    },
+    "identities": {
+      "minItems": 1,
+      "type": "array",
+      "items": {
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type",
+          "value"
+        ],
+        "properties": {
+          "type": {
+            "anyOf": [
+              {
+                "const": "loyalty_id",
+                "type": "string"
+              },
+              {
+                "const": "token",
+                "type": "string"
+              },
+              {
+                "const": "email_hash",
+                "type": "string"
+              },
+              {
+                "const": "phone_hash",
+                "type": "string"
+              },
+              {
+                "const": "external",
+                "type": "string"
+              }
+            ]
+          },
+          "value": {
+            "minLength": 1,
+            "maxLength": 512,
+            "type": "string"
+          },
+          "issuer": {
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "description": "Opaque, stable identifier within the owning system.",
+            "type": "string"
+          }
+        }
+      }
+    },
+    "attributes": {
+      "description": "Non-normative extension data. Consumers must ignore unknown keys.",
+      "type": "object",
+      "patternProperties": {
+        "^(.*)$": {}
+      }
+    }
+  }
+}

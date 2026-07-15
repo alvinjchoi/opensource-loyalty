@@ -1,0 +1,147 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://loyalty-interchange.org/schema/v1/LedgerListRequest.json",
+  "title": "LedgerListRequest",
+  "additionalProperties": false,
+  "type": "object",
+  "required": [
+    "context",
+    "member_id",
+    "program_id"
+  ],
+  "properties": {
+    "context": {
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "protocol_version",
+        "profile",
+        "request_id",
+        "idempotency_key",
+        "occurred_at",
+        "source"
+      ],
+      "properties": {
+        "protocol_version": {
+          "const": "1.0",
+          "type": "string"
+        },
+        "profile": {
+          "const": "foodservice/1.0",
+          "type": "string"
+        },
+        "request_id": {
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+          "description": "Opaque, stable identifier within the owning system.",
+          "type": "string"
+        },
+        "idempotency_key": {
+          "minLength": 8,
+          "maxLength": 255,
+          "type": "string"
+        },
+        "occurred_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "source": {
+          "additionalProperties": false,
+          "type": "object",
+          "required": [
+            "system"
+          ],
+          "properties": {
+            "system": {
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+              "description": "Opaque, stable identifier within the owning system.",
+              "type": "string"
+            },
+            "instance": {
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+              "description": "Opaque, stable identifier within the owning system.",
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "member_id": {
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+      "description": "Opaque, stable identifier within the owning system.",
+      "type": "string"
+    },
+    "program_id": {
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+      "description": "Opaque, stable identifier within the owning system.",
+      "type": "string"
+    },
+    "account_id": {
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+      "description": "Opaque, stable identifier within the owning system.",
+      "type": "string"
+    },
+    "operations": {
+      "minItems": 1,
+      "uniqueItems": true,
+      "type": "array",
+      "items": {
+        "anyOf": [
+          {
+            "const": "accrual",
+            "type": "string"
+          },
+          {
+            "const": "redemption",
+            "type": "string"
+          },
+          {
+            "const": "reversal",
+            "type": "string"
+          },
+          {
+            "const": "adjustment",
+            "type": "string"
+          },
+          {
+            "const": "expiration",
+            "type": "string"
+          },
+          {
+            "const": "manual",
+            "type": "string"
+          }
+        ]
+      }
+    },
+    "occurred_from": {
+      "format": "date-time",
+      "type": "string"
+    },
+    "occurred_until": {
+      "format": "date-time",
+      "type": "string"
+    },
+    "cursor": {
+      "minLength": 1,
+      "maxLength": 512,
+      "type": "string"
+    },
+    "limit": {
+      "minimum": 1,
+      "maximum": 100,
+      "type": "integer"
+    }
+  }
+}

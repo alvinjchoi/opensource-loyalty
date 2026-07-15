@@ -1,0 +1,377 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://loyalty-interchange.org/schema/v1/RedemptionReservation.json",
+  "title": "RedemptionReservation",
+  "additionalProperties": false,
+  "type": "object",
+  "required": [
+    "reservation_id",
+    "redemption_id",
+    "member_id",
+    "reward_id",
+    "order_id",
+    "status",
+    "cost",
+    "effect",
+    "funding",
+    "created_at",
+    "expires_at"
+  ],
+  "properties": {
+    "reservation_id": {
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+      "description": "Opaque, stable identifier within the owning system.",
+      "type": "string"
+    },
+    "redemption_id": {
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+      "description": "Opaque, stable identifier within the owning system.",
+      "type": "string"
+    },
+    "member_id": {
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+      "description": "Opaque, stable identifier within the owning system.",
+      "type": "string"
+    },
+    "reward_id": {
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+      "description": "Opaque, stable identifier within the owning system.",
+      "type": "string"
+    },
+    "order_id": {
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+      "description": "Opaque, stable identifier within the owning system.",
+      "type": "string"
+    },
+    "status": {
+      "anyOf": [
+        {
+          "const": "reserved",
+          "type": "string"
+        },
+        {
+          "const": "captured",
+          "type": "string"
+        },
+        {
+          "const": "reversed",
+          "type": "string"
+        },
+        {
+          "const": "expired",
+          "type": "string"
+        }
+      ]
+    },
+    "cost": {
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "unit",
+        "amount"
+      ],
+      "properties": {
+        "unit": {
+          "anyOf": [
+            {
+              "const": "points",
+              "type": "string"
+            },
+            {
+              "const": "visits",
+              "type": "string"
+            },
+            {
+              "const": "stamps",
+              "type": "string"
+            },
+            {
+              "const": "credits",
+              "type": "string"
+            },
+            {
+              "const": "custom",
+              "type": "string"
+            }
+          ]
+        },
+        "amount": {
+          "type": "integer"
+        }
+      }
+    },
+    "effect": {
+      "anyOf": [
+        {
+          "additionalProperties": false,
+          "type": "object",
+          "required": [
+            "type",
+            "target",
+            "amount",
+            "allocations"
+          ],
+          "properties": {
+            "type": {
+              "const": "discount",
+              "type": "string"
+            },
+            "target": {
+              "anyOf": [
+                {
+                  "const": "order",
+                  "type": "string"
+                },
+                {
+                  "const": "line",
+                  "type": "string"
+                }
+              ]
+            },
+            "amount": {
+              "additionalProperties": false,
+              "type": "object",
+              "required": [
+                "amount",
+                "currency"
+              ],
+              "properties": {
+                "amount": {
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991,
+                  "description": "Signed amount in the currency's minor unit.",
+                  "type": "integer"
+                },
+                "currency": {
+                  "pattern": "^[A-Z]{3}$",
+                  "type": "string"
+                }
+              }
+            },
+            "allocations": {
+              "minItems": 1,
+              "type": "array",
+              "items": {
+                "additionalProperties": false,
+                "type": "object",
+                "required": [
+                  "amount"
+                ],
+                "properties": {
+                  "line_id": {
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+                    "description": "Opaque, stable identifier within the owning system.",
+                    "type": "string"
+                  },
+                  "amount": {
+                    "additionalProperties": false,
+                    "type": "object",
+                    "required": [
+                      "amount",
+                      "currency"
+                    ],
+                    "properties": {
+                      "amount": {
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991,
+                        "description": "Signed amount in the currency's minor unit.",
+                        "type": "integer"
+                      },
+                      "currency": {
+                        "pattern": "^[A-Z]{3}$",
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "additionalProperties": false,
+          "type": "object",
+          "required": [
+            "type",
+            "max_quantity",
+            "max_value"
+          ],
+          "properties": {
+            "type": {
+              "const": "free_item",
+              "type": "string"
+            },
+            "product_ids": {
+              "minItems": 1,
+              "uniqueItems": true,
+              "type": "array",
+              "items": {
+                "minLength": 1,
+                "maxLength": 128,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+                "description": "Opaque, stable identifier within the owning system.",
+                "type": "string"
+              }
+            },
+            "category_ids": {
+              "minItems": 1,
+              "uniqueItems": true,
+              "type": "array",
+              "items": {
+                "minLength": 1,
+                "maxLength": 128,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+                "description": "Opaque, stable identifier within the owning system.",
+                "type": "string"
+              }
+            },
+            "max_quantity": {
+              "minimum": 1,
+              "type": "integer"
+            },
+            "max_value": {
+              "additionalProperties": false,
+              "type": "object",
+              "required": [
+                "amount",
+                "currency"
+              ],
+              "properties": {
+                "amount": {
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991,
+                  "description": "Signed amount in the currency's minor unit.",
+                  "type": "integer"
+                },
+                "currency": {
+                  "pattern": "^[A-Z]{3}$",
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        {
+          "additionalProperties": false,
+          "type": "object",
+          "required": [
+            "type",
+            "effect_type",
+            "payload"
+          ],
+          "properties": {
+            "type": {
+              "const": "custom",
+              "type": "string"
+            },
+            "effect_type": {
+              "minLength": 1,
+              "maxLength": 255,
+              "type": "string"
+            },
+            "payload": {}
+          }
+        }
+      ]
+    },
+    "funding": {
+      "minItems": 1,
+      "type": "array",
+      "items": {
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "party_id",
+          "party_type",
+          "share_bps"
+        ],
+        "properties": {
+          "party_id": {
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "description": "Opaque, stable identifier within the owning system.",
+            "type": "string"
+          },
+          "party_type": {
+            "anyOf": [
+              {
+                "const": "brand",
+                "type": "string"
+              },
+              {
+                "const": "franchisee",
+                "type": "string"
+              },
+              {
+                "const": "location",
+                "type": "string"
+              },
+              {
+                "const": "merchant",
+                "type": "string"
+              },
+              {
+                "const": "partner",
+                "type": "string"
+              }
+            ]
+          },
+          "share_bps": {
+            "minimum": 1,
+            "maximum": 10000,
+            "type": "integer"
+          },
+          "amount": {
+            "additionalProperties": false,
+            "type": "object",
+            "required": [
+              "amount",
+              "currency"
+            ],
+            "properties": {
+              "amount": {
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991,
+                "description": "Signed amount in the currency's minor unit.",
+                "type": "integer"
+              },
+              "currency": {
+                "pattern": "^[A-Z]{3}$",
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "created_at": {
+      "format": "date-time",
+      "type": "string"
+    },
+    "expires_at": {
+      "format": "date-time",
+      "type": "string"
+    },
+    "captured_at": {
+      "format": "date-time",
+      "type": "string"
+    },
+    "reversed_at": {
+      "format": "date-time",
+      "type": "string"
+    }
+  }
+}

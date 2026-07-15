@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://loyalty-interchange.org/schema/v1/AccountMetric.json",
+  "title": "AccountMetric",
+  "additionalProperties": false,
+  "type": "object",
+  "required": [
+    "metric_id",
+    "unit",
+    "amount",
+    "as_of"
+  ],
+  "properties": {
+    "metric_id": {
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+      "description": "Opaque, stable identifier within the owning system.",
+      "type": "string"
+    },
+    "unit": {
+      "anyOf": [
+        {
+          "const": "points",
+          "type": "string"
+        },
+        {
+          "const": "visits",
+          "type": "string"
+        },
+        {
+          "const": "stamps",
+          "type": "string"
+        },
+        {
+          "const": "credits",
+          "type": "string"
+        },
+        {
+          "const": "custom",
+          "type": "string"
+        }
+      ]
+    },
+    "amount": {
+      "type": "integer"
+    },
+    "as_of": {
+      "format": "date-time",
+      "type": "string"
+    }
+  }
+}

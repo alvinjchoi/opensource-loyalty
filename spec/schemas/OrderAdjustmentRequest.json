@@ -1,0 +1,233 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://loyalty-interchange.org/schema/v1/OrderAdjustmentRequest.json",
+  "title": "OrderAdjustmentRequest",
+  "additionalProperties": false,
+  "type": "object",
+  "required": [
+    "context",
+    "member_id",
+    "program_id",
+    "adjustment"
+  ],
+  "properties": {
+    "context": {
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "protocol_version",
+        "profile",
+        "request_id",
+        "idempotency_key",
+        "occurred_at",
+        "source"
+      ],
+      "properties": {
+        "protocol_version": {
+          "const": "1.0",
+          "type": "string"
+        },
+        "profile": {
+          "const": "foodservice/1.0",
+          "type": "string"
+        },
+        "request_id": {
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+          "description": "Opaque, stable identifier within the owning system.",
+          "type": "string"
+        },
+        "idempotency_key": {
+          "minLength": 8,
+          "maxLength": 255,
+          "type": "string"
+        },
+        "occurred_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "source": {
+          "additionalProperties": false,
+          "type": "object",
+          "required": [
+            "system"
+          ],
+          "properties": {
+            "system": {
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+              "description": "Opaque, stable identifier within the owning system.",
+              "type": "string"
+            },
+            "instance": {
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+              "description": "Opaque, stable identifier within the owning system.",
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "member_id": {
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+      "description": "Opaque, stable identifier within the owning system.",
+      "type": "string"
+    },
+    "program_id": {
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+      "description": "Opaque, stable identifier within the owning system.",
+      "type": "string"
+    },
+    "adjustment": {
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "adjustment_id",
+        "original_order_id",
+        "type",
+        "reason",
+        "occurred_at",
+        "order_total_delta",
+        "eligible_spend_delta"
+      ],
+      "properties": {
+        "adjustment_id": {
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+          "description": "Opaque, stable identifier within the owning system.",
+          "type": "string"
+        },
+        "original_order_id": {
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+          "description": "Opaque, stable identifier within the owning system.",
+          "type": "string"
+        },
+        "type": {
+          "anyOf": [
+            {
+              "const": "partial_refund",
+              "type": "string"
+            },
+            {
+              "const": "full_refund",
+              "type": "string"
+            },
+            {
+              "const": "void",
+              "type": "string"
+            },
+            {
+              "const": "correction",
+              "type": "string"
+            }
+          ]
+        },
+        "reason": {
+          "minLength": 1,
+          "maxLength": 255,
+          "type": "string"
+        },
+        "occurred_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "order_total_delta": {
+          "additionalProperties": false,
+          "type": "object",
+          "required": [
+            "amount",
+            "currency"
+          ],
+          "properties": {
+            "amount": {
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991,
+              "description": "Signed amount in the currency's minor unit.",
+              "type": "integer"
+            },
+            "currency": {
+              "pattern": "^[A-Z]{3}$",
+              "type": "string"
+            }
+          }
+        },
+        "eligible_spend_delta": {
+          "additionalProperties": false,
+          "type": "object",
+          "required": [
+            "amount",
+            "currency"
+          ],
+          "properties": {
+            "amount": {
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991,
+              "description": "Signed amount in the currency's minor unit.",
+              "type": "integer"
+            },
+            "currency": {
+              "pattern": "^[A-Z]{3}$",
+              "type": "string"
+            }
+          }
+        },
+        "lines": {
+          "minItems": 1,
+          "type": "array",
+          "items": {
+            "additionalProperties": false,
+            "type": "object",
+            "required": [
+              "line_id",
+              "quantity_delta",
+              "subtotal_delta"
+            ],
+            "properties": {
+              "line_id": {
+                "minLength": 1,
+                "maxLength": 128,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+                "description": "Opaque, stable identifier within the owning system.",
+                "type": "string"
+              },
+              "quantity_delta": {
+                "type": "integer"
+              },
+              "subtotal_delta": {
+                "additionalProperties": false,
+                "type": "object",
+                "required": [
+                  "amount",
+                  "currency"
+                ],
+                "properties": {
+                  "amount": {
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991,
+                    "description": "Signed amount in the currency's minor unit.",
+                    "type": "integer"
+                  },
+                  "currency": {
+                    "pattern": "^[A-Z]{3}$",
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

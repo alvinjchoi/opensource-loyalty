@@ -1,0 +1,163 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://loyalty-interchange.org/schema/v1/CapabilitiesDocument.json",
+  "title": "CapabilitiesDocument",
+  "additionalProperties": false,
+  "type": "object",
+  "required": [
+    "protocol_version",
+    "profiles",
+    "operations",
+    "reward_effects",
+    "event_types",
+    "limits"
+  ],
+  "properties": {
+    "protocol_version": {
+      "const": "1.0",
+      "type": "string"
+    },
+    "profiles": {
+      "minItems": 1,
+      "uniqueItems": true,
+      "type": "array",
+      "items": {
+        "const": "foodservice/1.0",
+        "type": "string"
+      }
+    },
+    "operations": {
+      "minItems": 1,
+      "uniqueItems": true,
+      "type": "array",
+      "items": {
+        "anyOf": [
+          {
+            "const": "member.lookup",
+            "type": "string"
+          },
+          {
+            "const": "member.enroll",
+            "type": "string"
+          },
+          {
+            "const": "order.evaluate",
+            "type": "string"
+          },
+          {
+            "const": "accrual.post",
+            "type": "string"
+          },
+          {
+            "const": "redemption.reserve",
+            "type": "string"
+          },
+          {
+            "const": "redemption.capture",
+            "type": "string"
+          },
+          {
+            "const": "redemption.reverse",
+            "type": "string"
+          },
+          {
+            "const": "order.adjust",
+            "type": "string"
+          },
+          {
+            "const": "program.get",
+            "type": "string"
+          },
+          {
+            "const": "account.get",
+            "type": "string"
+          },
+          {
+            "const": "ledger.list",
+            "type": "string"
+          }
+        ]
+      }
+    },
+    "reward_effects": {
+      "minItems": 1,
+      "uniqueItems": true,
+      "type": "array",
+      "items": {
+        "anyOf": [
+          {
+            "const": "discount",
+            "type": "string"
+          },
+          {
+            "const": "free_item",
+            "type": "string"
+          },
+          {
+            "const": "custom",
+            "type": "string"
+          }
+        ]
+      }
+    },
+    "event_types": {
+      "uniqueItems": true,
+      "type": "array",
+      "items": {
+        "anyOf": [
+          {
+            "const": "org.loyalty-interchange.member.enrolled.v1",
+            "type": "string"
+          },
+          {
+            "const": "org.loyalty-interchange.balance.changed.v1",
+            "type": "string"
+          },
+          {
+            "const": "org.loyalty-interchange.order.accrued.v1",
+            "type": "string"
+          },
+          {
+            "const": "org.loyalty-interchange.order.adjusted.v1",
+            "type": "string"
+          },
+          {
+            "const": "org.loyalty-interchange.redemption.reserved.v1",
+            "type": "string"
+          },
+          {
+            "const": "org.loyalty-interchange.redemption.captured.v1",
+            "type": "string"
+          },
+          {
+            "const": "org.loyalty-interchange.redemption.reversed.v1",
+            "type": "string"
+          }
+        ]
+      }
+    },
+    "limits": {
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "max_body_bytes",
+        "max_idempotency_key_length",
+        "reservation_ttl_seconds"
+      ],
+      "properties": {
+        "max_body_bytes": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "max_idempotency_key_length": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "reservation_ttl_seconds": {
+          "minimum": 1,
+          "type": "integer"
+        }
+      }
+    }
+  }
+}

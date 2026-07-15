@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://loyalty-interchange.org/schema/v1/ProblemDetails.json",
+  "title": "ProblemDetails",
+  "additionalProperties": true,
+  "type": "object",
+  "required": [
+    "type",
+    "title",
+    "status"
+  ],
+  "properties": {
+    "type": {
+      "format": "uri-reference",
+      "type": "string"
+    },
+    "title": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "status": {
+      "minimum": 400,
+      "maximum": 599,
+      "type": "integer"
+    },
+    "detail": {
+      "type": "string"
+    },
+    "instance": {
+      "format": "uri-reference",
+      "type": "string"
+    },
+    "code": {
+      "minLength": 1,
+      "maxLength": 128,
+      "type": "string"
+    },
+    "errors": {
+      "type": "array",
+      "items": {
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "path",
+          "message"
+        ],
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

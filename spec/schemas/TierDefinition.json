@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://loyalty-interchange.org/schema/v1/TierDefinition.json",
+  "title": "TierDefinition",
+  "additionalProperties": false,
+  "type": "object",
+  "required": [
+    "tier_id",
+    "name",
+    "qualification_metric_id",
+    "minimum",
+    "benefits"
+  ],
+  "properties": {
+    "tier_id": {
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+      "description": "Opaque, stable identifier within the owning system.",
+      "type": "string"
+    },
+    "name": {
+      "minLength": 1,
+      "maxLength": 255,
+      "type": "string"
+    },
+    "qualification_metric_id": {
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+      "description": "Opaque, stable identifier within the owning system.",
+      "type": "string"
+    },
+    "minimum": {
+      "minimum": 0,
+      "type": "integer"
+    },
+    "earn_multiplier_bps": {
+      "minimum": 0,
+      "maximum": 1000000,
+      "type": "integer"
+    },
+    "benefits": {
+      "type": "array",
+      "items": {
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "benefit_id",
+          "name"
+        ],
+        "properties": {
+          "benefit_id": {
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "description": "Opaque, stable identifier within the owning system.",
+            "type": "string"
+          },
+          "name": {
+            "minLength": 1,
+            "maxLength": 255,
+            "type": "string"
+          },
+          "description": {
+            "minLength": 1,
+            "maxLength": 1000,
+            "type": "string"
+          },
+          "metadata": {
+            "description": "Non-normative extension data. Consumers must ignore unknown keys.",
+            "type": "object",
+            "patternProperties": {
+              "^(.*)$": {}
+            }
+          }
+        }
+      }
+    }
+  }
+}

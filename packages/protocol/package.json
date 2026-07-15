@@ -1,0 +1,26 @@
+{
+  "name": "@loyalty-interchange/protocol",
+  "version": "0.1.0",
+  "description": "Normative schemas and validation for Loyalty Interchange Protocol.",
+  "license": "Apache-2.0",
+  "sideEffects": false,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -b",
+    "prepack": "npm run build",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@sinclair/typebox": "^0.34.52",
+    "ajv": "^8.20.0"
+  }
+}

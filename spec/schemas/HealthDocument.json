@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://loyalty-interchange.org/schema/v1/HealthDocument.json",
+  "title": "HealthDocument",
+  "additionalProperties": false,
+  "type": "object",
+  "required": [
+    "status",
+    "protocol_version",
+    "profile"
+  ],
+  "properties": {
+    "status": {
+      "const": "ok",
+      "type": "string"
+    },
+    "protocol_version": {
+      "const": "1.0",
+      "type": "string"
+    },
+    "profile": {
+      "const": "foodservice/1.0",
+      "type": "string"
+    }
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://loyalty-interchange.org/schema/v1/PointExpirationPolicy.json",
+  "title": "PointExpirationPolicy",
+  "additionalProperties": false,
+  "type": "object",
+  "required": [
+    "type",
+    "days",
+    "warning_days"
+  ],
+  "properties": {
+    "type": {
+      "const": "after_earned",
+      "type": "string"
+    },
+    "days": {
+      "minimum": 1,
+      "maximum": 36500,
+      "type": "integer"
+    },
+    "warning_days": {
+      "uniqueItems": true,
+      "type": "array",
+      "items": {
+        "minimum": 1,
+        "maximum": 36500,
+        "type": "integer"
+      }
+    }
+  }
+}

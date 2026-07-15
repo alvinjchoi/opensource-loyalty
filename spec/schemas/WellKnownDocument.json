@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://loyalty-interchange.org/schema/v1/WellKnownDocument.json",
+  "title": "WellKnownDocument",
+  "additionalProperties": false,
+  "type": "object",
+  "required": [
+    "protocol",
+    "protocol_version",
+    "profiles",
+    "endpoints",
+    "authentication"
+  ],
+  "properties": {
+    "protocol": {
+      "const": "LIP",
+      "type": "string"
+    },
+    "protocol_version": {
+      "const": "1.0",
+      "type": "string"
+    },
+    "profiles": {
+      "minItems": 1,
+      "uniqueItems": true,
+      "type": "array",
+      "items": {
+        "const": "foodservice/1.0",
+        "type": "string"
+      }
+    },
+    "endpoints": {
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "api",
+        "capabilities",
+        "health"
+      ],
+      "properties": {
+        "api": {
+          "pattern": "^/",
+          "type": "string"
+        },
+        "capabilities": {
+          "pattern": "^/",
+          "type": "string"
+        },
+        "health": {
+          "pattern": "^/",
+          "type": "string"
+        }
+      }
+    },
+    "authentication": {
+      "minItems": 1,
+      "uniqueItems": true,
+      "type": "array",
+      "items": {
+        "const": "bearer",
+        "type": "string"
+      }
+    }
+  }
+}

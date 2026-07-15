@@ -1,0 +1,54 @@
+# Transaction lifecycle
+
+## Recommended order
+
+```text
+lookup or enroll
+      |
+      v
+evaluate order -------> show accrual and rewards
+      |
+      v
+reserve reward -------> hold points, return exact effect
+      |
+      +---- reverse ---> release hold
+      |
+      v
+capture reward --------> debit points exactly once
+      |
+      v
+post paid-order accrual -> credit points exactly once
+      |
+      v
+adjust order ----------> claw back or add accrual after refund/correction
+```
+
+Evaluation is advisory and expires. A POS MUST use the effect returned by the
+reservation, not recreate the reward from display text. A provider MAY reject a
+reservation when order facts changed after evaluation.
+
+The caller assigns a stable `redemption_id` to each intended redemption. Retrying
+that business ID MUST return the existing reservation; changing its member,
+reward, or order facts MUST return a conflict. A new attempt after expiration
+uses a new `redemption_id`.
+
+## Reservation states
+
+- `reserved` holds available balance until capture, reverse, or expiration.
+- `captured` has posted the reward cost to the ledger.
+- `reversed` is terminal; captured points were returned if necessary.
+- `expired` is terminal and did not change posted balance.
+
+Capture and reverse are individually idempotent. Capturing a reversed or expired
+reservation is invalid. Reversing an already reversed reservation succeeds
+without another ledger entry.
+
+## Accrual and adjustment
+
+Accrual is posted only for a paid order in the foodservice profile. A provider
+MUST prevent the same order from earning twice even when retry metadata changes.
+
+Refunds and voids are new adjustments. `eligible_spend_delta` is signed from the
+original order's perspective: refunds are negative and post a negative accrual
+adjustment. A provider MAY allow a negative points balance; hiding a clawback is
+not conformant.

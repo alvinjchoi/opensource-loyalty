@@ -1,0 +1,399 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://loyalty-interchange.org/schema/v1/MemberAccountResponse.json",
+  "title": "MemberAccountResponse",
+  "additionalProperties": false,
+  "type": "object",
+  "required": [
+    "context",
+    "member",
+    "balances",
+    "metrics",
+    "expiring_balances"
+  ],
+  "properties": {
+    "context": {
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "protocol_version",
+        "profile",
+        "request_id",
+        "processed_at"
+      ],
+      "properties": {
+        "protocol_version": {
+          "const": "1.0",
+          "type": "string"
+        },
+        "profile": {
+          "const": "foodservice/1.0",
+          "type": "string"
+        },
+        "request_id": {
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+          "description": "Opaque, stable identifier within the owning system.",
+          "type": "string"
+        },
+        "processed_at": {
+          "format": "date-time",
+          "type": "string"
+        }
+      }
+    },
+    "member": {
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "member_id",
+        "program_id",
+        "status",
+        "joined_at",
+        "identities"
+      ],
+      "properties": {
+        "member_id": {
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+          "description": "Opaque, stable identifier within the owning system.",
+          "type": "string"
+        },
+        "program_id": {
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+          "description": "Opaque, stable identifier within the owning system.",
+          "type": "string"
+        },
+        "status": {
+          "anyOf": [
+            {
+              "const": "active",
+              "type": "string"
+            },
+            {
+              "const": "suspended",
+              "type": "string"
+            },
+            {
+              "const": "closed",
+              "type": "string"
+            }
+          ]
+        },
+        "joined_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "tier_id": {
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+          "description": "Opaque, stable identifier within the owning system.",
+          "type": "string"
+        },
+        "identities": {
+          "minItems": 1,
+          "type": "array",
+          "items": {
+            "additionalProperties": false,
+            "type": "object",
+            "required": [
+              "type",
+              "value"
+            ],
+            "properties": {
+              "type": {
+                "anyOf": [
+                  {
+                    "const": "loyalty_id",
+                    "type": "string"
+                  },
+                  {
+                    "const": "token",
+                    "type": "string"
+                  },
+                  {
+                    "const": "email_hash",
+                    "type": "string"
+                  },
+                  {
+                    "const": "phone_hash",
+                    "type": "string"
+                  },
+                  {
+                    "const": "external",
+                    "type": "string"
+                  }
+                ]
+              },
+              "value": {
+                "minLength": 1,
+                "maxLength": 512,
+                "type": "string"
+              },
+              "issuer": {
+                "minLength": 1,
+                "maxLength": 128,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+                "description": "Opaque, stable identifier within the owning system.",
+                "type": "string"
+              }
+            }
+          }
+        },
+        "attributes": {
+          "description": "Non-normative extension data. Consumers must ignore unknown keys.",
+          "type": "object",
+          "patternProperties": {
+            "^(.*)$": {}
+          }
+        }
+      }
+    },
+    "balances": {
+      "minItems": 1,
+      "type": "array",
+      "items": {
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "account_id",
+          "member_id",
+          "program_id",
+          "unit",
+          "amount",
+          "reserved",
+          "available",
+          "as_of"
+        ],
+        "properties": {
+          "account_id": {
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "description": "Opaque, stable identifier within the owning system.",
+            "type": "string"
+          },
+          "member_id": {
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "description": "Opaque, stable identifier within the owning system.",
+            "type": "string"
+          },
+          "program_id": {
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "description": "Opaque, stable identifier within the owning system.",
+            "type": "string"
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "const": "points",
+                "type": "string"
+              },
+              {
+                "const": "visits",
+                "type": "string"
+              },
+              {
+                "const": "stamps",
+                "type": "string"
+              },
+              {
+                "const": "credits",
+                "type": "string"
+              },
+              {
+                "const": "custom",
+                "type": "string"
+              }
+            ]
+          },
+          "unit_label": {
+            "minLength": 1,
+            "maxLength": 64,
+            "type": "string"
+          },
+          "amount": {
+            "type": "integer"
+          },
+          "reserved": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "available": {
+            "type": "integer"
+          },
+          "as_of": {
+            "format": "date-time",
+            "type": "string"
+          }
+        }
+      }
+    },
+    "metrics": {
+      "type": "array",
+      "items": {
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "metric_id",
+          "unit",
+          "amount",
+          "as_of"
+        ],
+        "properties": {
+          "metric_id": {
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "description": "Opaque, stable identifier within the owning system.",
+            "type": "string"
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "const": "points",
+                "type": "string"
+              },
+              {
+                "const": "visits",
+                "type": "string"
+              },
+              {
+                "const": "stamps",
+                "type": "string"
+              },
+              {
+                "const": "credits",
+                "type": "string"
+              },
+              {
+                "const": "custom",
+                "type": "string"
+              }
+            ]
+          },
+          "amount": {
+            "type": "integer"
+          },
+          "as_of": {
+            "format": "date-time",
+            "type": "string"
+          }
+        }
+      }
+    },
+    "expiring_balances": {
+      "type": "array",
+      "items": {
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "account_id",
+          "unit",
+          "amount",
+          "expires_at"
+        ],
+        "properties": {
+          "account_id": {
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "description": "Opaque, stable identifier within the owning system.",
+            "type": "string"
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "const": "points",
+                "type": "string"
+              },
+              {
+                "const": "visits",
+                "type": "string"
+              },
+              {
+                "const": "stamps",
+                "type": "string"
+              },
+              {
+                "const": "credits",
+                "type": "string"
+              },
+              {
+                "const": "custom",
+                "type": "string"
+              }
+            ]
+          },
+          "amount": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "type": "string"
+          }
+        }
+      }
+    },
+    "tier_progress": {
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "current_tier_id",
+        "qualification_metric_id",
+        "current_amount",
+        "progress_bps",
+        "is_top_tier"
+      ],
+      "properties": {
+        "current_tier_id": {
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+          "description": "Opaque, stable identifier within the owning system.",
+          "type": "string"
+        },
+        "qualification_metric_id": {
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+          "description": "Opaque, stable identifier within the owning system.",
+          "type": "string"
+        },
+        "current_amount": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "next_tier_id": {
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+          "description": "Opaque, stable identifier within the owning system.",
+          "type": "string"
+        },
+        "remaining_to_next": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "progress_bps": {
+          "minimum": 0,
+          "maximum": 10000,
+          "type": "integer"
+        },
+        "is_top_tier": {
+          "type": "boolean"
+        }
+      }
+    }
+  }
+}

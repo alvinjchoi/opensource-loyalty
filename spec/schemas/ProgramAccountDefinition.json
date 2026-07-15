@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://loyalty-interchange.org/schema/v1/ProgramAccountDefinition.json",
+  "title": "ProgramAccountDefinition",
+  "additionalProperties": false,
+  "type": "object",
+  "required": [
+    "unit",
+    "is_primary"
+  ],
+  "properties": {
+    "unit": {
+      "anyOf": [
+        {
+          "const": "points",
+          "type": "string"
+        },
+        {
+          "const": "visits",
+          "type": "string"
+        },
+        {
+          "const": "stamps",
+          "type": "string"
+        },
+        {
+          "const": "credits",
+          "type": "string"
+        },
+        {
+          "const": "custom",
+          "type": "string"
+        }
+      ]
+    },
+    "unit_label": {
+      "minLength": 1,
+      "maxLength": 64,
+      "type": "string"
+    },
+    "is_primary": {
+      "type": "boolean"
+    }
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "context": {
+    "protocol_version": "1.0",
+    "profile": "foodservice/1.0",
+    "request_id": "req-enroll-001",
+    "idempotency_key": "enroll-device-token-001",
+    "occurred_at": "2026-07-14T10:00:00.000Z",
+    "source": { "system": "mobile-app", "instance": "ios" }
+  },
+  "program_id": "demo-foodservice",
+  "identity": {
+    "type": "token",
+    "value": "opaque-guest-token-001",
+    "issuer": "identity-service"
+  },
+  "member_id": "member-001"
+}

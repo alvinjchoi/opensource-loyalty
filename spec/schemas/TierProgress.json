@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://loyalty-interchange.org/schema/v1/TierProgress.json",
+  "title": "TierProgress",
+  "additionalProperties": false,
+  "type": "object",
+  "required": [
+    "current_tier_id",
+    "qualification_metric_id",
+    "current_amount",
+    "progress_bps",
+    "is_top_tier"
+  ],
+  "properties": {
+    "current_tier_id": {
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+      "description": "Opaque, stable identifier within the owning system.",
+      "type": "string"
+    },
+    "qualification_metric_id": {
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+      "description": "Opaque, stable identifier within the owning system.",
+      "type": "string"
+    },
+    "current_amount": {
+      "minimum": 0,
+      "type": "integer"
+    },
+    "next_tier_id": {
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+      "description": "Opaque, stable identifier within the owning system.",
+      "type": "string"
+    },
+    "remaining_to_next": {
+      "minimum": 0,
+      "type": "integer"
+    },
+    "progress_bps": {
+      "minimum": 0,
+      "maximum": 10000,
+      "type": "integer"
+    },
+    "is_top_tier": {
+      "type": "boolean"
+    }
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://loyalty-interchange.org/schema/v1/Money.json",
+  "title": "Money",
+  "additionalProperties": false,
+  "type": "object",
+  "required": [
+    "amount",
+    "currency"
+  ],
+  "properties": {
+    "amount": {
+      "minimum": -9007199254740991,
+      "maximum": 9007199254740991,
+      "description": "Signed amount in the currency's minor unit.",
+      "type": "integer"
+    },
+    "currency": {
+      "pattern": "^[A-Z]{3}$",
+      "type": "string"
+    }
+  }
+}

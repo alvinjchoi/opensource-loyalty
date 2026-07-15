@@ -1,0 +1,179 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://loyalty-interchange.org/schema/v1/RewardEffect.json",
+  "title": "RewardEffect",
+  "anyOf": [
+    {
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "type",
+        "target",
+        "amount",
+        "allocations"
+      ],
+      "properties": {
+        "type": {
+          "const": "discount",
+          "type": "string"
+        },
+        "target": {
+          "anyOf": [
+            {
+              "const": "order",
+              "type": "string"
+            },
+            {
+              "const": "line",
+              "type": "string"
+            }
+          ]
+        },
+        "amount": {
+          "additionalProperties": false,
+          "type": "object",
+          "required": [
+            "amount",
+            "currency"
+          ],
+          "properties": {
+            "amount": {
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991,
+              "description": "Signed amount in the currency's minor unit.",
+              "type": "integer"
+            },
+            "currency": {
+              "pattern": "^[A-Z]{3}$",
+              "type": "string"
+            }
+          }
+        },
+        "allocations": {
+          "minItems": 1,
+          "type": "array",
+          "items": {
+            "additionalProperties": false,
+            "type": "object",
+            "required": [
+              "amount"
+            ],
+            "properties": {
+              "line_id": {
+                "minLength": 1,
+                "maxLength": 128,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+                "description": "Opaque, stable identifier within the owning system.",
+                "type": "string"
+              },
+              "amount": {
+                "additionalProperties": false,
+                "type": "object",
+                "required": [
+                  "amount",
+                  "currency"
+                ],
+                "properties": {
+                  "amount": {
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991,
+                    "description": "Signed amount in the currency's minor unit.",
+                    "type": "integer"
+                  },
+                  "currency": {
+                    "pattern": "^[A-Z]{3}$",
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "type",
+        "max_quantity",
+        "max_value"
+      ],
+      "properties": {
+        "type": {
+          "const": "free_item",
+          "type": "string"
+        },
+        "product_ids": {
+          "minItems": 1,
+          "uniqueItems": true,
+          "type": "array",
+          "items": {
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "description": "Opaque, stable identifier within the owning system.",
+            "type": "string"
+          }
+        },
+        "category_ids": {
+          "minItems": 1,
+          "uniqueItems": true,
+          "type": "array",
+          "items": {
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "description": "Opaque, stable identifier within the owning system.",
+            "type": "string"
+          }
+        },
+        "max_quantity": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "max_value": {
+          "additionalProperties": false,
+          "type": "object",
+          "required": [
+            "amount",
+            "currency"
+          ],
+          "properties": {
+            "amount": {
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991,
+              "description": "Signed amount in the currency's minor unit.",
+              "type": "integer"
+            },
+            "currency": {
+              "pattern": "^[A-Z]{3}$",
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "type",
+        "effect_type",
+        "payload"
+      ],
+      "properties": {
+        "type": {
+          "const": "custom",
+          "type": "string"
+        },
+        "effect_type": {
+          "minLength": 1,
+          "maxLength": 255,
+          "type": "string"
+        },
+        "payload": {}
+      }
+    }
+  ]
+}

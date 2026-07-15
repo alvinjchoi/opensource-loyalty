@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://loyalty-interchange.org/schema/v1/EarningExclusions.json",
+  "title": "EarningExclusions",
+  "additionalProperties": false,
+  "type": "object",
+  "required": [
+    "product_ids",
+    "category_ids",
+    "tags",
+    "line_kinds"
+  ],
+  "properties": {
+    "product_ids": {
+      "uniqueItems": true,
+      "type": "array",
+      "items": {
+        "minLength": 1,
+        "maxLength": 128,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+        "description": "Opaque, stable identifier within the owning system.",
+        "type": "string"
+      }
+    },
+    "category_ids": {
+      "uniqueItems": true,
+      "type": "array",
+      "items": {
+        "minLength": 1,
+        "maxLength": 128,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+        "description": "Opaque, stable identifier within the owning system.",
+        "type": "string"
+      }
+    },
+    "tags": {
+      "uniqueItems": true,
+      "type": "array",
+      "items": {
+        "minLength": 1,
+        "maxLength": 64,
+        "type": "string"
+      }
+    },
+    "line_kinds": {
+      "uniqueItems": true,
+      "type": "array",
+      "items": {
+        "anyOf": [
+          {
+            "const": "item",
+            "type": "string"
+          },
+          {
+            "const": "modifier",
+            "type": "string"
+          },
+          {
+            "const": "fee",
+            "type": "string"
+          }
+        ]
+      }
+    }
+  }
+}

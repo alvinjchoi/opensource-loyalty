@@ -1,0 +1,852 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://loyalty-interchange.org/schema/v1/ProgramCatalog.json",
+  "title": "ProgramCatalog",
+  "additionalProperties": false,
+  "type": "object",
+  "required": [
+    "program_id",
+    "name",
+    "currency",
+    "earning",
+    "accounts",
+    "metrics",
+    "tiers",
+    "rewards"
+  ],
+  "properties": {
+    "program_id": {
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+      "description": "Opaque, stable identifier within the owning system.",
+      "type": "string"
+    },
+    "name": {
+      "minLength": 1,
+      "maxLength": 255,
+      "type": "string"
+    },
+    "description": {
+      "minLength": 1,
+      "maxLength": 2000,
+      "type": "string"
+    },
+    "currency": {
+      "pattern": "^[A-Z]{3}$",
+      "type": "string"
+    },
+    "earning": {
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "rate",
+        "minimum_eligible_spend",
+        "eligible_channels",
+        "rounding",
+        "exclusions"
+      ],
+      "properties": {
+        "rate": {
+          "additionalProperties": false,
+          "type": "object",
+          "required": [
+            "unit",
+            "amount",
+            "spend"
+          ],
+          "properties": {
+            "unit": {
+              "anyOf": [
+                {
+                  "const": "points",
+                  "type": "string"
+                },
+                {
+                  "const": "visits",
+                  "type": "string"
+                },
+                {
+                  "const": "stamps",
+                  "type": "string"
+                },
+                {
+                  "const": "credits",
+                  "type": "string"
+                },
+                {
+                  "const": "custom",
+                  "type": "string"
+                }
+              ]
+            },
+            "amount": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "spend": {
+              "additionalProperties": false,
+              "type": "object",
+              "required": [
+                "amount",
+                "currency"
+              ],
+              "properties": {
+                "amount": {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                "currency": {
+                  "pattern": "^[A-Z]{3}$",
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "minimum_eligible_spend": {
+          "additionalProperties": false,
+          "type": "object",
+          "required": [
+            "amount",
+            "currency"
+          ],
+          "properties": {
+            "amount": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "currency": {
+              "pattern": "^[A-Z]{3}$",
+              "type": "string"
+            }
+          }
+        },
+        "eligible_channels": {
+          "minItems": 1,
+          "uniqueItems": true,
+          "type": "array",
+          "items": {
+            "anyOf": [
+              {
+                "const": "counter",
+                "type": "string"
+              },
+              {
+                "const": "drive_thru",
+                "type": "string"
+              },
+              {
+                "const": "kiosk",
+                "type": "string"
+              },
+              {
+                "const": "web",
+                "type": "string"
+              },
+              {
+                "const": "mobile",
+                "type": "string"
+              },
+              {
+                "const": "pickup",
+                "type": "string"
+              },
+              {
+                "const": "delivery",
+                "type": "string"
+              },
+              {
+                "const": "catering",
+                "type": "string"
+              },
+              {
+                "const": "third_party",
+                "type": "string"
+              },
+              {
+                "const": "other",
+                "type": "string"
+              }
+            ]
+          }
+        },
+        "rounding": {
+          "const": "after_transaction",
+          "type": "string"
+        },
+        "exclusions": {
+          "additionalProperties": false,
+          "type": "object",
+          "required": [
+            "product_ids",
+            "category_ids",
+            "tags",
+            "line_kinds"
+          ],
+          "properties": {
+            "product_ids": {
+              "uniqueItems": true,
+              "type": "array",
+              "items": {
+                "minLength": 1,
+                "maxLength": 128,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+                "description": "Opaque, stable identifier within the owning system.",
+                "type": "string"
+              }
+            },
+            "category_ids": {
+              "uniqueItems": true,
+              "type": "array",
+              "items": {
+                "minLength": 1,
+                "maxLength": 128,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+                "description": "Opaque, stable identifier within the owning system.",
+                "type": "string"
+              }
+            },
+            "tags": {
+              "uniqueItems": true,
+              "type": "array",
+              "items": {
+                "minLength": 1,
+                "maxLength": 64,
+                "type": "string"
+              }
+            },
+            "line_kinds": {
+              "uniqueItems": true,
+              "type": "array",
+              "items": {
+                "anyOf": [
+                  {
+                    "const": "item",
+                    "type": "string"
+                  },
+                  {
+                    "const": "modifier",
+                    "type": "string"
+                  },
+                  {
+                    "const": "fee",
+                    "type": "string"
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "accounts": {
+      "minItems": 1,
+      "type": "array",
+      "items": {
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "unit",
+          "is_primary"
+        ],
+        "properties": {
+          "unit": {
+            "anyOf": [
+              {
+                "const": "points",
+                "type": "string"
+              },
+              {
+                "const": "visits",
+                "type": "string"
+              },
+              {
+                "const": "stamps",
+                "type": "string"
+              },
+              {
+                "const": "credits",
+                "type": "string"
+              },
+              {
+                "const": "custom",
+                "type": "string"
+              }
+            ]
+          },
+          "unit_label": {
+            "minLength": 1,
+            "maxLength": 64,
+            "type": "string"
+          },
+          "is_primary": {
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    "metrics": {
+      "type": "array",
+      "items": {
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "metric_id",
+          "name",
+          "unit"
+        ],
+        "properties": {
+          "metric_id": {
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "description": "Opaque, stable identifier within the owning system.",
+            "type": "string"
+          },
+          "name": {
+            "minLength": 1,
+            "maxLength": 255,
+            "type": "string"
+          },
+          "description": {
+            "minLength": 1,
+            "maxLength": 1000,
+            "type": "string"
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "const": "points",
+                "type": "string"
+              },
+              {
+                "const": "visits",
+                "type": "string"
+              },
+              {
+                "const": "stamps",
+                "type": "string"
+              },
+              {
+                "const": "credits",
+                "type": "string"
+              },
+              {
+                "const": "custom",
+                "type": "string"
+              }
+            ]
+          }
+        }
+      }
+    },
+    "tiers": {
+      "type": "array",
+      "items": {
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "tier_id",
+          "name",
+          "qualification_metric_id",
+          "minimum",
+          "benefits"
+        ],
+        "properties": {
+          "tier_id": {
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "description": "Opaque, stable identifier within the owning system.",
+            "type": "string"
+          },
+          "name": {
+            "minLength": 1,
+            "maxLength": 255,
+            "type": "string"
+          },
+          "qualification_metric_id": {
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "description": "Opaque, stable identifier within the owning system.",
+            "type": "string"
+          },
+          "minimum": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "earn_multiplier_bps": {
+            "minimum": 0,
+            "maximum": 1000000,
+            "type": "integer"
+          },
+          "benefits": {
+            "type": "array",
+            "items": {
+              "additionalProperties": false,
+              "type": "object",
+              "required": [
+                "benefit_id",
+                "name"
+              ],
+              "properties": {
+                "benefit_id": {
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+                  "description": "Opaque, stable identifier within the owning system.",
+                  "type": "string"
+                },
+                "name": {
+                  "minLength": 1,
+                  "maxLength": 255,
+                  "type": "string"
+                },
+                "description": {
+                  "minLength": 1,
+                  "maxLength": 1000,
+                  "type": "string"
+                },
+                "metadata": {
+                  "description": "Non-normative extension data. Consumers must ignore unknown keys.",
+                  "type": "object",
+                  "patternProperties": {
+                    "^(.*)$": {}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "tier_policy": {
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "metric_id",
+        "period"
+      ],
+      "properties": {
+        "metric_id": {
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+          "description": "Opaque, stable identifier within the owning system.",
+          "type": "string"
+        },
+        "period": {
+          "additionalProperties": false,
+          "type": "object",
+          "required": [
+            "type",
+            "starts_month",
+            "starts_day",
+            "time_zone"
+          ],
+          "properties": {
+            "type": {
+              "const": "annual",
+              "type": "string"
+            },
+            "starts_month": {
+              "minimum": 1,
+              "maximum": 12,
+              "type": "integer"
+            },
+            "starts_day": {
+              "minimum": 1,
+              "maximum": 31,
+              "type": "integer"
+            },
+            "time_zone": {
+              "minLength": 1,
+              "maxLength": 255,
+              "type": "string"
+            }
+          }
+        },
+        "effective_from": {
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
+          "type": "string"
+        }
+      }
+    },
+    "point_expiration": {
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "type",
+        "days",
+        "warning_days"
+      ],
+      "properties": {
+        "type": {
+          "const": "after_earned",
+          "type": "string"
+        },
+        "days": {
+          "minimum": 1,
+          "maximum": 36500,
+          "type": "integer"
+        },
+        "warning_days": {
+          "uniqueItems": true,
+          "type": "array",
+          "items": {
+            "minimum": 1,
+            "maximum": 36500,
+            "type": "integer"
+          }
+        }
+      }
+    },
+    "rewards": {
+      "type": "array",
+      "items": {
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "reward_id",
+          "name",
+          "cost",
+          "effect",
+          "funding"
+        ],
+        "properties": {
+          "reward_id": {
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "description": "Opaque, stable identifier within the owning system.",
+            "type": "string"
+          },
+          "name": {
+            "minLength": 1,
+            "maxLength": 255,
+            "type": "string"
+          },
+          "description": {
+            "minLength": 1,
+            "maxLength": 1000,
+            "type": "string"
+          },
+          "image_url": {
+            "format": "uri-reference",
+            "maxLength": 2048,
+            "type": "string"
+          },
+          "cost": {
+            "additionalProperties": false,
+            "type": "object",
+            "required": [
+              "unit",
+              "amount"
+            ],
+            "properties": {
+              "unit": {
+                "anyOf": [
+                  {
+                    "const": "points",
+                    "type": "string"
+                  },
+                  {
+                    "const": "visits",
+                    "type": "string"
+                  },
+                  {
+                    "const": "stamps",
+                    "type": "string"
+                  },
+                  {
+                    "const": "credits",
+                    "type": "string"
+                  },
+                  {
+                    "const": "custom",
+                    "type": "string"
+                  }
+                ]
+              },
+              "amount": {
+                "minimum": 0,
+                "type": "integer"
+              }
+            }
+          },
+          "effect": {
+            "anyOf": [
+              {
+                "additionalProperties": false,
+                "type": "object",
+                "required": [
+                  "type",
+                  "target",
+                  "amount",
+                  "allocations"
+                ],
+                "properties": {
+                  "type": {
+                    "const": "discount",
+                    "type": "string"
+                  },
+                  "target": {
+                    "anyOf": [
+                      {
+                        "const": "order",
+                        "type": "string"
+                      },
+                      {
+                        "const": "line",
+                        "type": "string"
+                      }
+                    ]
+                  },
+                  "amount": {
+                    "additionalProperties": false,
+                    "type": "object",
+                    "required": [
+                      "amount",
+                      "currency"
+                    ],
+                    "properties": {
+                      "amount": {
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991,
+                        "description": "Signed amount in the currency's minor unit.",
+                        "type": "integer"
+                      },
+                      "currency": {
+                        "pattern": "^[A-Z]{3}$",
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "allocations": {
+                    "minItems": 1,
+                    "type": "array",
+                    "items": {
+                      "additionalProperties": false,
+                      "type": "object",
+                      "required": [
+                        "amount"
+                      ],
+                      "properties": {
+                        "line_id": {
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+                          "description": "Opaque, stable identifier within the owning system.",
+                          "type": "string"
+                        },
+                        "amount": {
+                          "additionalProperties": false,
+                          "type": "object",
+                          "required": [
+                            "amount",
+                            "currency"
+                          ],
+                          "properties": {
+                            "amount": {
+                              "minimum": -9007199254740991,
+                              "maximum": 9007199254740991,
+                              "description": "Signed amount in the currency's minor unit.",
+                              "type": "integer"
+                            },
+                            "currency": {
+                              "pattern": "^[A-Z]{3}$",
+                              "type": "string"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "additionalProperties": false,
+                "type": "object",
+                "required": [
+                  "type",
+                  "max_quantity",
+                  "max_value"
+                ],
+                "properties": {
+                  "type": {
+                    "const": "free_item",
+                    "type": "string"
+                  },
+                  "product_ids": {
+                    "minItems": 1,
+                    "uniqueItems": true,
+                    "type": "array",
+                    "items": {
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+                      "description": "Opaque, stable identifier within the owning system.",
+                      "type": "string"
+                    }
+                  },
+                  "category_ids": {
+                    "minItems": 1,
+                    "uniqueItems": true,
+                    "type": "array",
+                    "items": {
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+                      "description": "Opaque, stable identifier within the owning system.",
+                      "type": "string"
+                    }
+                  },
+                  "max_quantity": {
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "max_value": {
+                    "additionalProperties": false,
+                    "type": "object",
+                    "required": [
+                      "amount",
+                      "currency"
+                    ],
+                    "properties": {
+                      "amount": {
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991,
+                        "description": "Signed amount in the currency's minor unit.",
+                        "type": "integer"
+                      },
+                      "currency": {
+                        "pattern": "^[A-Z]{3}$",
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "additionalProperties": false,
+                "type": "object",
+                "required": [
+                  "type",
+                  "effect_type",
+                  "payload"
+                ],
+                "properties": {
+                  "type": {
+                    "const": "custom",
+                    "type": "string"
+                  },
+                  "effect_type": {
+                    "minLength": 1,
+                    "maxLength": 255,
+                    "type": "string"
+                  },
+                  "payload": {}
+                }
+              }
+            ]
+          },
+          "funding": {
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "additionalProperties": false,
+              "type": "object",
+              "required": [
+                "party_id",
+                "party_type",
+                "share_bps"
+              ],
+              "properties": {
+                "party_id": {
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+                  "description": "Opaque, stable identifier within the owning system.",
+                  "type": "string"
+                },
+                "party_type": {
+                  "anyOf": [
+                    {
+                      "const": "brand",
+                      "type": "string"
+                    },
+                    {
+                      "const": "franchisee",
+                      "type": "string"
+                    },
+                    {
+                      "const": "location",
+                      "type": "string"
+                    },
+                    {
+                      "const": "merchant",
+                      "type": "string"
+                    },
+                    {
+                      "const": "partner",
+                      "type": "string"
+                    }
+                  ]
+                },
+                "share_bps": {
+                  "minimum": 1,
+                  "maximum": 10000,
+                  "type": "integer"
+                },
+                "amount": {
+                  "additionalProperties": false,
+                  "type": "object",
+                  "required": [
+                    "amount",
+                    "currency"
+                  ],
+                  "properties": {
+                    "amount": {
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991,
+                      "description": "Signed amount in the currency's minor unit.",
+                      "type": "integer"
+                    },
+                    "currency": {
+                      "pattern": "^[A-Z]{3}$",
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "available_from": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "available_until": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "metadata": {
+            "description": "Non-normative extension data. Consumers must ignore unknown keys.",
+            "type": "object",
+            "patternProperties": {
+              "^(.*)$": {}
+            }
+          }
+        }
+      }
+    },
+    "metadata": {
+      "description": "Non-normative extension data. Consumers must ignore unknown keys.",
+      "type": "object",
+      "patternProperties": {
+        "^(.*)$": {}
+      }
+    }
+  }
+}
