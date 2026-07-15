@@ -79,6 +79,7 @@ function addMockCommand(name: "mock" | "quickstart", description: string): void 
     .option("-d, --database <path>", "SQLite state path", process.env.LIP_DATABASE_PATH ?? ".lip/reference.db")
     .option("--reset", "clear persisted state before starting")
     .option("--no-seed", "start without synthetic members and activity")
+    .option("--program <path>", "JSON program definition replacing the built-in demo program")
     .action(async (options: {
       host: string;
       port: number;
@@ -86,6 +87,7 @@ function addMockCommand(name: "mock" | "quickstart", description: string): void 
       database: string;
       reset?: boolean;
       seed: boolean;
+      program?: string;
     }) => {
       if (options.apiKey.length < 8) throw new Error("API key must contain at least 8 characters");
       await runMockServer({
@@ -94,7 +96,8 @@ function addMockCommand(name: "mock" | "quickstart", description: string): void 
         apiKey: options.apiKey,
         databasePath: resolve(options.database),
         ...(options.reset ? { reset: true } : {}),
-        seed: options.seed
+        seed: options.seed,
+        ...(options.program ? { programPath: resolve(options.program) } : {})
       });
     });
 }

@@ -1,6 +1,10 @@
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { LoyaltyEngine, type LoyaltyEngineState } from "@loyalty-interchange/reference";
+import {
+  LoyaltyEngine,
+  type LoyaltyEngineState,
+  type ProgramDefinition
+} from "@loyalty-interchange/reference";
 import { SqliteStateStore } from "@loyalty-interchange/storage-sqlite";
 import { createDemoProgram, seedDemoData } from "./demo.js";
 
@@ -9,6 +13,12 @@ export interface DemoPlatformOptions {
   reset?: boolean;
   seed?: boolean;
   adminAssetRoot?: string;
+  /**
+   * Custom program definition. When provided it replaces the built-in demo
+   * program and demo seeding is skipped, because the synthetic members and
+   * activity are only valid against the demo program.
+   */
+  program?: ProgramDefinition;
 }
 
 export interface DemoPlatform {
@@ -28,7 +38,7 @@ function discoverAdminAssetRoot(): string | undefined {
 }
 
 export function createDemoPlatform(options: DemoPlatformOptions): DemoPlatform {
-  const program = createDemoProgram();
+  const program = options.program ?? createDemoProgram();
   const store = new SqliteStateStore<LoyaltyEngineState>({
     path: options.databasePath,
     key: program.program_id
@@ -37,7 +47,7 @@ export function createDemoPlatform(options: DemoPlatformOptions): DemoPlatform {
     if (options.reset) store.clear();
     const state = store.load();
     const engine = new LoyaltyEngine(program, state ? { state } : {});
-    if (!state && options.seed !== false) seedDemoData(engine);
+    if (!state && options.seed !== false && !options.program) seedDemoData(engine);
     store.save(engine.exportState());
     const adminAssetRoot = options.adminAssetRoot ?? discoverAdminAssetRoot();
     return {

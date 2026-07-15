@@ -127,7 +127,13 @@ npm run lip -- serve --reset
 npm run lip -- serve --reset --no-seed
 npm run lip -- serve --database .lip/another.db
 npm run lip -- serve --port 4010 --api-key local-dev-key
+npm run lip -- serve --program ./my-program.json
 ```
+
+`--program` replaces the built-in demo program with your own JSON program
+definition (same shape as `ProgramDefinition` in
+`packages/reference/src/config.ts`). Demo member seeding is skipped when a
+custom program is loaded.
 
 ### Self-Hosting Configuration ⚙️
 

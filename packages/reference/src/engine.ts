@@ -411,6 +411,15 @@ export class LoyaltyEngine {
       if (!reward) {
         throw new EngineError("reward_not_found", `Reward ${request.reward_id} was not found`, 404);
       }
+      const windowReason = this.rewardWindowReason(reward);
+      if (windowReason) {
+        throw new EngineError(
+          "reward_not_available",
+          windowReason === "not_yet_available"
+            ? `Reward ${reward.reward_id} is not available yet`
+            : `Reward ${reward.reward_id} is no longer available`
+        );
+      }
       if (this.balance(request.member_id).available < reward.points_cost) {
         throw new EngineError("insufficient_balance", "Member does not have enough available points");
       }
@@ -1142,16 +1151,34 @@ export class LoyaltyEngine {
   }
 
   private rewardCandidate(reward: RewardDefinition, memberId: string): RewardCandidate {
-    const available = this.balance(memberId).available >= reward.points_cost;
+    const reasons: string[] = [];
+    if (this.balance(memberId).available < reward.points_cost) {
+      reasons.push("insufficient_balance");
+    }
+    const windowReason = this.rewardWindowReason(reward);
+    if (windowReason) reasons.push(windowReason);
     return {
       reward_id: reward.reward_id,
       ...(reward.name ? { name: reward.name } : {}),
-      status: available ? "available" : "unavailable",
-      ...(!available ? { unavailable_reasons: ["insufficient_balance"] } : {}),
+      status: reasons.length === 0 ? "available" : "unavailable",
+      ...(reasons.length > 0 ? { unavailable_reasons: reasons } : {}),
       cost: { unit: "points", amount: reward.points_cost },
       effect: clone(reward.effect),
       funding: this.fundingAllocations(reward)
     };
+  }
+
+  private rewardWindowReason(
+    reward: RewardDefinition
+  ): "not_yet_available" | "no_longer_available" | undefined {
+    const now = this.clock.now().getTime();
+    if (reward.available_from && now < Date.parse(reward.available_from)) {
+      return "not_yet_available";
+    }
+    if (reward.available_until && now > Date.parse(reward.available_until)) {
+      return "no_longer_available";
+    }
+    return undefined;
   }
 
   private fundingAllocations(reward: RewardDefinition): RewardCandidate["funding"] {

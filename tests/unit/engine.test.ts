@@ -820,3 +820,87 @@ describe("annual restaurant tier earning rules", () => {
     });
   });
 });
+
+describe("reward availability windows", () => {
+  function makeWindowedProgram(): ReturnType<typeof makeProgram> {
+    const program = makeProgram();
+    program.rewards[0]!.available_from = "2026-08-01T00:00:00.000Z";
+    program.rewards[0]!.available_until = "2026-09-01T00:00:00.000Z";
+    return program;
+  }
+
+  function windowedEngine(clock: MutableClock): LoyaltyEngine {
+    const engine = new LoyaltyEngine(makeWindowedProgram(), { clock, ids: sequentialIds() });
+    engine.enroll(makeEnroll());
+    accrue(engine, "window-accrual-key");
+    return engine;
+  }
+
+  it("marks rewards outside their availability window as unavailable in evaluation", () => {
+    const clock = new MutableClock("2026-07-14T10:00:00.000Z");
+    const engine = windowedEngine(clock);
+    const before = engine.evaluate({
+      context: makeContext("window-evaluate-before-key"),
+      member_id: "member-001",
+      order: makeOrder({ order_id: "window-order-before" })
+    });
+    expect(before.rewards[0]).toMatchObject({
+      reward_id: "one-dollar-off",
+      status: "unavailable",
+      unavailable_reasons: ["not_yet_available"]
+    });
+
+    clock.advance(30 * 86_400);
+    const during = engine.evaluate({
+      context: makeContext("window-evaluate-during-key"),
+      member_id: "member-001",
+      order: makeOrder({ order_id: "window-order-during" })
+    });
+    expect(during.rewards[0]).toMatchObject({
+      reward_id: "one-dollar-off",
+      status: "available"
+    });
+
+    clock.advance(60 * 86_400);
+    const after = engine.evaluate({
+      context: makeContext("window-evaluate-after-key"),
+      member_id: "member-001",
+      order: makeOrder({ order_id: "window-order-after" })
+    });
+    expect(after.rewards[0]).toMatchObject({
+      status: "unavailable",
+      unavailable_reasons: ["no_longer_available"]
+    });
+  });
+
+  it("rejects reservations outside the availability window and allows them inside it", () => {
+    const clock = new MutableClock("2026-07-14T10:00:00.000Z");
+    const engine = windowedEngine(clock);
+    expect(() => engine.reserve({
+      context: makeContext("window-reserve-early-key"),
+      redemption_id: "window-redemption-early",
+      member_id: "member-001",
+      reward_id: "one-dollar-off",
+      order: makeOrder({ order_id: "window-order-reserve" })
+    })).toThrowError(/not available yet/);
+
+    clock.advance(30 * 86_400);
+    const held = engine.reserve({
+      context: makeContext("window-reserve-open-key"),
+      redemption_id: "window-redemption-open",
+      member_id: "member-001",
+      reward_id: "one-dollar-off",
+      order: makeOrder({ order_id: "window-order-reserve" })
+    });
+    expect(held.reservation.status).toBe("reserved");
+
+    clock.advance(60 * 86_400);
+    expect(() => engine.reserve({
+      context: makeContext("window-reserve-late-key"),
+      redemption_id: "window-redemption-late",
+      member_id: "member-001",
+      reward_id: "one-dollar-off",
+      order: makeOrder({ order_id: "window-order-reserve-late" })
+    })).toThrowError(/no longer available/);
+  });
+});

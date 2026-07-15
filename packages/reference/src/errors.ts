@@ -11,6 +11,7 @@ export type EngineErrorCode =
   | "member_not_found"
   | "member_not_active"
   | "not_found"
+  | "reward_not_available"
   | "reward_not_found";
 
 export class EngineError extends Error {

@@ -1,8 +1,10 @@
+import { readFile } from "node:fs/promises";
 import {
   createDemoPlatform,
   startReferenceServer,
   type RunningServer
 } from "@loyalty-interchange/server";
+import type { ProgramDefinition } from "@loyalty-interchange/reference";
 
 export interface MockOptions {
   host: string;
@@ -11,13 +13,26 @@ export interface MockOptions {
   databasePath?: string;
   reset?: boolean;
   seed?: boolean;
+  /** Path to a JSON program definition that replaces the built-in demo program. */
+  programPath?: string;
+}
+
+async function loadProgram(path: string): Promise<ProgramDefinition> {
+  const raw = await readFile(path, "utf8");
+  const parsed: unknown = JSON.parse(raw);
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    throw new Error(`Program file ${path} must contain a JSON object`);
+  }
+  return parsed as ProgramDefinition;
 }
 
 export async function startMockServer(options: MockOptions): Promise<RunningServer> {
+  const program = options.programPath ? await loadProgram(options.programPath) : undefined;
   const platform = createDemoPlatform({
     databasePath: options.databasePath ?? ":memory:",
     ...(options.reset ? { reset: true } : {}),
-    ...(options.seed === false ? { seed: false } : {})
+    ...(options.seed === false ? { seed: false } : {}),
+    ...(program ? { program } : {})
   });
   const running = await startReferenceServer(platform.engine, {
     host: options.host,
