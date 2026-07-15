@@ -1,12 +1,11 @@
 # Loyalty Interchange Protocol (LIP) 👋
 
-![GitHub stars](https://img.shields.io/github/stars/alvinjchoi/opensource-loyalty?style=social)
-![GitHub forks](https://img.shields.io/github/forks/alvinjchoi/opensource-loyalty?style=social)
-![GitHub repo size](https://img.shields.io/github/repo-size/alvinjchoi/opensource-loyalty)
-![GitHub language count](https://img.shields.io/github/languages/count/alvinjchoi/opensource-loyalty)
-![GitHub top language](https://img.shields.io/github/languages/top/alvinjchoi/opensource-loyalty)
-![GitHub last commit](https://img.shields.io/github/last-commit/alvinjchoi/opensource-loyalty?color=red)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+![TypeScript](https://img.shields.io/badge/TypeScript-6.x-3178C6?logo=typescript&logoColor=white)
+![Node.js](https://img.shields.io/badge/Node.js-20.19%2B-339933?logo=nodedotjs&logoColor=white)
+![OpenAPI](https://img.shields.io/badge/OpenAPI-3.1-6BA539?logo=openapiinitiative&logoColor=white)
+![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white)
+![Status](https://img.shields.io/badge/Status-Working_Draft_0.1-orange)
 
 **LIP is an open, vendor-neutral loyalty protocol and reference platform for developers building restaurant, QSR, coffee, convenience, and franchise ordering systems.** It ships everything needed to go from zero to a working loyalty integration: a normative protocol spec, a **deterministic reference engine**, an **HTTP API**, a **TypeScript SDK**, a local **Admin dashboard**, a SQLite sandbox, Docker runtime, runnable examples, and black-box conformance tests.
 
