@@ -70,8 +70,10 @@ records from the existing database.
 
 ## Admin boundary
 
-Open `http://127.0.0.1:3210/admin/` and sign in with the configured development
-Bearer token. The server exchanges it for an eight-hour, HttpOnly,
+Open `http://127.0.0.1:3210/admin/` and sign in with the configured Admin/API
+key printed by `npm start`, `npm run lip -- serve`, or `docker compose logs lip`.
+The same secret is used as the Bearer token for protocol API requests. The
+server exchanges it for an eight-hour, HttpOnly,
 `SameSite=Strict` session cookie. Admin data is served from
 `/admin/api/v1/snapshot`; protocol clients do not need or use this route.
 
@@ -93,6 +95,24 @@ The shared development token is suitable for a local reference environment,
 not a hosted multi-tenant deployment. Production Admin work requires scoped
 users, authorization, tenant isolation, audit logging, CSRF controls for future
 writes, secret rotation, and a production database adapter.
+
+## Operational guards
+
+The reference HTTP server enables a fixed-window, per-remote-client limit of
+120 authenticated protocol requests per minute. CLI flags and container
+environment variables can change the request count and window. Every limited
+response carries `RateLimit-Limit`, `RateLimit-Remaining`, and
+`RateLimit-Reset`; exhausted clients receive HTTP 429 and `Retry-After`.
+
+The CLI and container also emit structured JSON request records with timestamp,
+request id, method, normalized path, response status, duration, and response
+size. API keys, authorization headers, and bodies are deliberately excluded.
+Applications embedding `createReferenceServer` can provide a custom
+`requestLogger` or disable rate limiting explicitly.
+
+An authenticated `GET /metrics` endpoint exports low-cardinality request
+counters and duration sums/counts in Prometheus text format. Unknown URLs and
+Admin assets are normalized to bounded labels to avoid cardinality growth.
 
 ## Extension path
 

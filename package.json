@@ -4,6 +4,7 @@
   "private": true,
   "description": "An open interoperability protocol for loyalty, starting with foodservice.",
   "type": "module",
+  "packageManager": "npm@10.9.4",
   "workspaces": [
     "packages/*",
     "apps/*"
@@ -21,7 +22,9 @@
     "example:sdk": "tsx examples/typescript/full-lifecycle.ts",
     "generate": "tsx scripts/generate-spec.ts && tsx scripts/generate-sdk.ts",
     "lip": "tsx packages/cli/src/cli.ts",
+    "mcp": "tsx packages/mcp/src/server.ts",
     "quickstart": "npm run build:admin && tsx packages/cli/src/cli.ts quickstart",
+    "serve": "npm run build:admin && tsx packages/cli/src/cli.ts serve",
     "spec:check": "npm run generate && git diff --exit-code -- spec/schemas spec/openapi.yaml packages/sdk/src/generated/client.ts",
     "start": "npm run quickstart",
     "test": "vitest run",

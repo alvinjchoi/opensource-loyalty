@@ -9,6 +9,7 @@ import type {
   LedgerListRequest,
   LedgerListResponse,
   LedgerResponse,
+  ManualAdjustmentRequest,
   MemberAccountRequest,
   MemberAccountResponse,
   MemberEnrollRequest,
@@ -101,6 +102,15 @@ export const generatedOperations = {
     safeToRetry: true,
     requestSchema: "LedgerListRequest",
     responseSchema: "LedgerListResponse"
+  },
+  postManualAdjustment: {
+    operationId: "postManualAdjustment",
+    method: "POST",
+    path: "/lip/v1/ledger/manual-adjustments",
+    authenticated: true,
+    safeToRetry: false,
+    requestSchema: "ManualAdjustmentRequest",
+    responseSchema: "LedgerResponse"
   },
   lookupMember: {
     operationId: "lookupMember",
@@ -222,6 +232,14 @@ export class GeneratedLipClient {
   public listLedgerEntries(body: LedgerListRequest, options?: GeneratedCallOptions): Promise<LedgerListResponse> {
     return this.transport.request<LedgerListRequest, LedgerListResponse>(
       generatedOperations.listLedgerEntries,
+      body,
+      options
+    );
+  }
+
+  public postManualAdjustment(body: ManualAdjustmentRequest, options?: GeneratedCallOptions): Promise<LedgerResponse> {
+    return this.transport.request<ManualAdjustmentRequest, LedgerResponse>(
+      generatedOperations.postManualAdjustment,
       body,
       options
     );

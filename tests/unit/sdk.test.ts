@@ -256,7 +256,7 @@ describe("SDK webhook signatures", () => {
 
 describe("generated OpenAPI client", () => {
   it("preserves paths, authentication, schema names, and retry safety from OpenAPI", () => {
-    expect(Object.keys(generatedOperations)).toHaveLength(14);
+    expect(Object.keys(generatedOperations)).toHaveLength(15);
     expect(generatedOperations.discoverLoyaltyProtocol).toMatchObject({
       path: "/.well-known/lip",
       authenticated: false,
@@ -276,6 +276,12 @@ describe("generated OpenAPI client", () => {
       safeToRetry: true,
       requestSchema: "LedgerListRequest",
       responseSchema: "LedgerListResponse"
+    });
+    expect(generatedOperations.postManualAdjustment).toMatchObject({
+      path: "/lip/v1/ledger/manual-adjustments",
+      safeToRetry: false,
+      requestSchema: "ManualAdjustmentRequest",
+      responseSchema: "LedgerResponse"
     });
   });
 
@@ -451,6 +457,22 @@ describe("LipClient", () => {
         }
       });
       expect(adjusted.entry).toMatchObject({ operation: "adjustment", amount: -50 });
+
+      const manual = await client.ledger.adjust({
+        member_id: "member-001",
+        program_id: "demo-foodservice",
+        adjustment_id: "sdk-manual-1",
+        amount: 15,
+        classification: "service_recovery",
+        reason: "Guest support credit",
+        qualifies_for_tier: false
+      }, { idempotencyKey: "sdk-manual-key" });
+      expect(manual.entry).toMatchObject({
+        operation: "manual",
+        amount: 15,
+        classification: "service_recovery"
+      });
+      expect(manual.balances[0]?.amount).toBe(75);
     } finally {
       await running.close();
     }

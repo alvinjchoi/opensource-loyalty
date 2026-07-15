@@ -11,6 +11,7 @@ import {
   type LedgerResponse,
   type LedgerListRequest,
   type LedgerListResponse,
+  type ManualAdjustmentRequest,
   type MemberAccountRequest,
   type MemberAccountResponse,
   type MemberEnrollRequest,
@@ -142,6 +143,12 @@ export class LipClient {
       this.post<LedgerListRequest, LedgerListResponse>(
         input,
         (request, callOptions) => this.generated.listLedgerEntries(request, callOptions),
+        options
+      ),
+    adjust: (input: WithoutContext<ManualAdjustmentRequest>, options?: LipCallOptions) =>
+      this.post<ManualAdjustmentRequest, LedgerResponse>(
+        input,
+        (request, callOptions) => this.generated.postManualAdjustment(request, callOptions),
         options
       )
   };

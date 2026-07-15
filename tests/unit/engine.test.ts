@@ -703,6 +703,62 @@ describe("LoyaltyEngine financial lifecycle", () => {
     expect(() => engine.adjustOrder(changed)).toThrowError(/different facts/);
   });
 
+  it("posts classified manual credits and debits idempotently", () => {
+    const engine = enrolledEngine();
+    const credit = {
+      context: makeContext("manual-credit-key"),
+      member_id: "member-001",
+      program_id: "demo-foodservice",
+      adjustment_id: "manual-credit-001",
+      amount: 25,
+      classification: "service_recovery" as const,
+      reason: "Late order apology",
+      qualifies_for_tier: false
+    };
+    const credited = engine.postManualAdjustment(credit);
+    const replayed = engine.postManualAdjustment({
+      ...credit,
+      context: makeContext("manual-credit-replay-key")
+    });
+
+    expect(credited.entry).toMatchObject({
+      operation: "manual",
+      amount: 25,
+      adjustment_id: "manual-credit-001",
+      classification: "service_recovery",
+      reason: "Late order apology",
+      qualifies_for_tier: false
+    });
+    expect(credited.entry.expires_at).toBeDefined();
+    expect(replayed.entry.entry_id).toBe(credited.entry.entry_id);
+    expect(replayed.balances[0]?.amount).toBe(25);
+
+    const debited = engine.postManualAdjustment({
+      context: makeContext("manual-debit-key"),
+      member_id: "member-001",
+      program_id: "demo-foodservice",
+      adjustment_id: "manual-debit-001",
+      amount: -5,
+      classification: "correction",
+      reason: "Duplicate bonus correction",
+      qualifies_for_tier: false
+    });
+    expect(debited.entry).toMatchObject({ operation: "manual", amount: -5 });
+    expect(debited.balances[0]?.amount).toBe(20);
+
+    expect(() => engine.postManualAdjustment({
+      ...credit,
+      context: makeContext("manual-zero-key"),
+      adjustment_id: "manual-zero-001",
+      amount: 0
+    })).toThrowError(/must not be zero/);
+    expect(() => engine.postManualAdjustment({
+      ...credit,
+      context: makeContext("manual-conflict-key"),
+      amount: 30
+    })).toThrowError(/different facts/);
+  });
+
   it("rejects invalid orders, unpaid accruals, wrong currencies, and insufficient points", () => {
     const engine = enrolledEngine();
     const openOrder = makeOrder({ status: "open" });

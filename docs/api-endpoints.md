@@ -52,6 +52,7 @@ curl http://127.0.0.1:3210/lip/v1/capabilities \
 | Programs | `POST` | `/lip/v1/programs/get` | Read program, account units, tier ladder, and reward catalog. | `lip.programs.get` |
 | Accounts | `POST` | `/lip/v1/accounts/get` | Read balances, metrics, expiring lots, and tier progress. | `lip.accounts.get` |
 | Ledger | `POST` | `/lip/v1/ledger/list` | Read immutable member ledger history with cursor pagination. | `lip.ledger.list` |
+| Ledger | `POST` | `/lip/v1/ledger/manual-adjustments` | Credit or debit points with a classified operator reason. | `lip.ledger.adjust` |
 | Members | `POST` | `/lip/v1/members/lookup` | Resolve a member identity. | `lip.members.lookup` |
 | Members | `POST` | `/lip/v1/members/enroll` | Enroll or return a member. | `lip.members.enroll` |
 | Orders | `POST` | `/lip/v1/orders/evaluate` | Estimate accrual and available rewards for an order. | `lip.orders.evaluate` |

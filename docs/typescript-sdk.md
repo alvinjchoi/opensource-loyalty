@@ -36,6 +36,7 @@ lip.capabilities();
 lip.programs.get(...);
 lip.accounts.get(...);
 lip.ledger.list(...);
+lip.ledger.adjust(...);
 lip.members.lookup(...);
 lip.members.enroll(...);
 lip.orders.evaluate(...);
@@ -44,6 +45,24 @@ lip.accruals.post(...);
 lip.redemptions.reserve(...);
 lip.redemptions.capture(...);
 lip.redemptions.reverse(...);
+```
+
+Classified operator adjustments support bonus, gift, migration,
+service-recovery, and correction entries:
+
+```ts
+await lip.ledger.adjust(
+  {
+    member_id: memberId,
+    program_id: programId,
+    adjustment_id: `support:${ticketId}`,
+    amount: 100,
+    classification: "service_recovery",
+    reason: "Late order credit",
+    qualifies_for_tier: false
+  },
+  { idempotencyKey: `support:${ticketId}` }
+);
 ```
 
 Program, account, ledger, lookup, evaluation, discovery, and capabilities reads

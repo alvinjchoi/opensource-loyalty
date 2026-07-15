@@ -28,6 +28,14 @@ function positiveInteger(value: string): number {
   return parsed;
 }
 
+function positiveCount(value: string): number {
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isInteger(parsed) || parsed <= 0 || parsed > 1_000_000) {
+    throw new InvalidArgumentError("value must be an integer between 1 and 1000000");
+  }
+  return parsed;
+}
+
 const program = new Command()
   .name("lip")
   .description("Build, validate, and test Loyalty Interchange Protocol integrations")
@@ -44,6 +52,11 @@ program
       options.force ? { force: true } : {}
     );
     console.log(`Created ${target}`);
+    console.log("");
+    console.log("Agent setup (recommended for Cursor, Claude Code, Codex):");
+    console.log("  npx skills add .");
+    console.log("  Enable MCP: add mcp.json from this repo to your Cursor MCP settings");
+    console.log("  Docs: docs/using-lip-with-ai.md");
   });
 
 program
@@ -69,17 +82,20 @@ program
     process.exitCode = 1;
   });
 
-function addMockCommand(name: "mock" | "quickstart", description: string): void {
+function addMockCommand(name: "mock" | "quickstart" | "serve", description: string): void {
   program
     .command(name)
     .description(description)
     .option("--host <host>", "listen host", "127.0.0.1")
     .option("-p, --port <port>", "listen port", positiveInteger, 3210)
-    .option("-k, --api-key <key>", "Bearer token", "lip-dev-key")
+    .option("-k, --api-key <key>", "Admin/API key for dashboard sign-in and Bearer auth", "lip-dev-key")
     .option("-d, --database <path>", "SQLite state path", process.env.LIP_DATABASE_PATH ?? ".lip/reference.db")
     .option("--reset", "clear persisted state before starting")
     .option("--no-seed", "start without synthetic members and activity")
     .option("--program <path>", "JSON program definition replacing the built-in demo program")
+    .option("--rate-limit <requests>", "requests allowed per client window", positiveCount, 120)
+    .option("--rate-window-ms <milliseconds>", "rate-limit window in milliseconds", positiveCount, 60_000)
+    .option("--no-structured-logs", "disable JSON request logs")
     .action(async (options: {
       host: string;
       port: number;
@@ -88,6 +104,9 @@ function addMockCommand(name: "mock" | "quickstart", description: string): void 
       reset?: boolean;
       seed: boolean;
       program?: string;
+      rateLimit: number;
+      rateWindowMs: number;
+      structuredLogs: boolean;
     }) => {
       if (options.apiKey.length < 8) throw new Error("API key must contain at least 8 characters");
       await runMockServer({
@@ -97,6 +116,11 @@ function addMockCommand(name: "mock" | "quickstart", description: string): void 
         databasePath: resolve(options.database),
         ...(options.reset ? { reset: true } : {}),
         seed: options.seed,
+        rateLimit: {
+          maxRequests: options.rateLimit,
+          windowMs: options.rateWindowMs
+        },
+        structuredLogs: options.structuredLogs,
         ...(options.program ? { programPath: resolve(options.program) } : {})
       });
     });
@@ -104,11 +128,12 @@ function addMockCommand(name: "mock" | "quickstart", description: string): void 
 
 addMockCommand("mock", "Start the stateful LIP reference server");
 addMockCommand("quickstart", "Start the local environment and print connection details");
+addMockCommand("serve", "Start the local reference API and Admin dashboard");
 
 program
   .command("doctor [url]")
   .description("Check discovery, health, authentication, and capabilities")
-  .option("-k, --api-key <key>", "Bearer token")
+  .option("-k, --api-key <key>", "Admin/API key for Bearer auth")
   .action(async (url: string | undefined, options: ConnectionFlags) => {
     const report = await runDoctor(await connection(url, options));
     console.log(formatReport(report));
@@ -118,7 +143,7 @@ program
 program
   .command("test [url]")
   .description("Run baseline non-destructive HTTP conformance checks")
-  .option("-k, --api-key <key>", "Bearer token")
+  .option("-k, --api-key <key>", "Admin/API key for Bearer auth")
   .action(async (url: string | undefined, options: ConnectionFlags) => {
     const report = await runBaselineConformance(await connection(url, options));
     console.log(formatReport(report));

@@ -132,6 +132,9 @@ const openapi = {
     "/ledger/list": {
       post: operation("listLedgerEntries", "List member ledger entries", "Ledger", "LedgerListRequest", "LedgerListResponse", 200, true)
     },
+    "/ledger/manual-adjustments": {
+      post: operation("postManualAdjustment", "Credit or debit points with an operator classification", "Ledger", "ManualAdjustmentRequest", "LedgerResponse", 201)
+    },
     "/members/lookup": {
       post: operation("lookupMember", "Resolve a member identity", "Members", "MemberLookupRequest", "MemberLookupResponse", 200, true)
     },

@@ -10,6 +10,7 @@ import {
   type CapabilitiesDocument,
   EvaluationRequestSchema,
   LedgerListRequestSchema,
+  ManualAdjustmentRequestSchema,
   MemberEnrollRequestSchema,
   MemberLookupRequestSchema,
   OrderAdjustmentRequestSchema,
@@ -26,8 +27,10 @@ import {
   type LoyaltyEngine,
   type LoyaltyEngineState
 } from "@loyalty-interchange/reference";
+import type { WebhookAdminStatus } from "./webhooks.js";
 
 const MAX_BODY_BYTES = 1_048_576;
+const DEFAULT_LOCAL_API_KEY = "lip-dev-key";
 
 interface Route {
   schema: TSchema;
@@ -53,6 +56,12 @@ export interface ServerOptions {
   apiKey: string;
   reservationTtlSeconds?: number;
   persistState?: (state: LoyaltyEngineState) => void;
+  rateLimit?: false | {
+    maxRequests?: number;
+    windowMs?: number;
+  };
+  metrics?: boolean;
+  requestLogger?: false | ((entry: StructuredRequestLog) => void);
   admin?: {
     enabled?: boolean;
     assetRoot?: string;
@@ -61,13 +70,68 @@ export interface ServerOptions {
       location: string;
       persistent: boolean;
     };
+    webhooks?: () => WebhookAdminStatus;
   };
+}
+
+export interface StructuredRequestLog {
+  timestamp: string;
+  request_id: string;
+  method: string;
+  path: string;
+  status: number;
+  duration_ms: number;
+  response_bytes?: number;
 }
 
 export interface RunningServer {
   server: Server;
   url: string;
   close(): Promise<void>;
+}
+
+interface AdminStorageDescriptor {
+  driver: string;
+  location: string;
+  persistent: boolean;
+}
+
+interface AdminBootstrapDocument {
+  admin_api_version: "0.1";
+  generated_at: string;
+  status: true;
+  auth: {
+    mode: "api_key";
+    requires_login: true;
+    session_cookie: "lip_admin_session";
+    default_local_key: boolean;
+    credential_hint: string;
+  };
+  session: {
+    authenticated: boolean;
+  };
+  platform: {
+    protocol_version: "1.0";
+    profile: "foodservice/1.0";
+    storage: AdminStorageDescriptor;
+  };
+  onboarding: {
+    title: string;
+    description: string;
+    steps: Array<{
+      id: string;
+      title: string;
+      description: string;
+      status: "ready" | "next" | "optional";
+    }>;
+    commands: Array<{ label: string; value: string }>;
+  };
+  links: {
+    admin: string;
+    health: string;
+    capabilities: string;
+    api: string;
+  };
 }
 
 function equalSecret(left: string, right: string): boolean {
@@ -79,6 +143,78 @@ function equalSecret(left: string, right: string): boolean {
 function isAuthorized(request: IncomingMessage, apiKey: string): boolean {
   const authorization = request.headers.authorization ?? "";
   return authorization.startsWith("Bearer ") && equalSecret(authorization.slice(7), apiKey);
+}
+
+function adminStorage(options: ServerOptions): AdminStorageDescriptor {
+  return options.admin?.storage ?? {
+    driver: "memory",
+    location: "process",
+    persistent: false
+  };
+}
+
+function adminBootstrapDocument(
+  options: ServerOptions,
+  request: IncomingMessage,
+  sessions: Set<string>
+): AdminBootstrapDocument {
+  const usesDefaultLocalKey = options.apiKey === DEFAULT_LOCAL_API_KEY;
+  return {
+    admin_api_version: "0.1",
+    generated_at: new Date().toISOString(),
+    status: true,
+    auth: {
+      mode: "api_key",
+      requires_login: true,
+      session_cookie: "lip_admin_session",
+      default_local_key: usesDefaultLocalKey,
+      credential_hint: usesDefaultLocalKey
+        ? "The local development key is prefilled. Startup logs also print it as Admin/API key."
+        : "Copy the Admin/API key from the terminal that started this server. Docker users can run docker compose logs lip."
+    },
+    session: {
+      authenticated: isAdminAuthorized(request, options.apiKey, sessions)
+    },
+    platform: {
+      protocol_version: "1.0",
+      profile: "foodservice/1.0",
+      storage: adminStorage(options)
+    },
+    onboarding: {
+      title: "Local workspace setup",
+      description: "Sign in with the server API key, confirm the reference API is healthy, then configure the loyalty program model.",
+      steps: [
+        {
+          id: "signin",
+          title: "Sign in",
+          description: "Authenticate to the local Admin with the same key used for Bearer API requests.",
+          status: "next"
+        },
+        {
+          id: "configure-program",
+          title: "Choose a program model",
+          description: "Review points, visit, wallet-credit, paid-membership, and hybrid program templates.",
+          status: "ready"
+        },
+        {
+          id: "test-flow",
+          title: "Run a test order lifecycle",
+          description: "Use the TypeScript SDK example or REST endpoints to evaluate, accrue, reserve, and redeem.",
+          status: "optional"
+        }
+      ],
+      commands: [
+        { label: "Health", value: "curl http://127.0.0.1:3210/health" },
+        { label: "SDK example", value: "npm run example:sdk" }
+      ]
+    },
+    links: {
+      admin: "/admin/",
+      health: "/health",
+      capabilities: "/lip/v1/capabilities",
+      api: "/lip/v1"
+    }
+  };
 }
 
 function wellKnownDocument(): WellKnownDocument {
@@ -110,7 +246,8 @@ function capabilitiesDocument(reservationTtlSeconds: number): CapabilitiesDocume
       "order.adjust",
       "program.get",
       "account.get",
-      "ledger.list"
+      "ledger.list",
+      "ledger.manual_adjustment"
     ],
     reward_effects: ["discount", "free_item", "custom"],
     event_types: [
@@ -131,12 +268,24 @@ function capabilitiesDocument(reservationTtlSeconds: number): CapabilitiesDocume
 }
 
 function sendJson(response: ServerResponse, status: number, body: unknown, contentType = "application/json"): void {
+  const payload = JSON.stringify(body);
   response.writeHead(status, {
     "content-type": `${contentType}; charset=utf-8`,
+    "content-length": Buffer.byteLength(payload),
     "cache-control": "no-store",
     "x-content-type-options": "nosniff"
   });
-  response.end(JSON.stringify(body));
+  response.end(payload);
+}
+
+function sendMetrics(response: ServerResponse, body: string): void {
+  response.writeHead(200, {
+    "content-type": "text/plain; version=0.0.4; charset=utf-8",
+    "content-length": Buffer.byteLength(body),
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff"
+  });
+  response.end(body);
 }
 
 function cookieValue(request: IncomingMessage, name: string): string | undefined {
@@ -242,11 +391,106 @@ async function readBody(request: IncomingMessage): Promise<unknown> {
   }
 }
 
+interface RateLimitWindow {
+  count: number;
+  resetsAt: number;
+}
+
+interface RateLimitResult {
+  allowed: boolean;
+  limit: number;
+  remaining: number;
+  resetsAt: number;
+}
+
+function createRateLimiter(
+  options: Exclude<ServerOptions["rateLimit"], false>
+): (key: string) => RateLimitResult {
+  const maxRequests = options?.maxRequests ?? 120;
+  const windowMs = options?.windowMs ?? 60_000;
+  if (!Number.isInteger(maxRequests) || maxRequests < 1) {
+    throw new RangeError("rateLimit.maxRequests must be a positive integer");
+  }
+  if (!Number.isInteger(windowMs) || windowMs < 1000) {
+    throw new RangeError("rateLimit.windowMs must be an integer of at least 1000");
+  }
+  const windows = new Map<string, RateLimitWindow>();
+
+  return (key) => {
+    const now = Date.now();
+    let window = windows.get(key);
+    if (!window || window.resetsAt <= now) {
+      window = { count: 0, resetsAt: now + windowMs };
+      windows.set(key, window);
+    }
+    window.count += 1;
+    return {
+      allowed: window.count <= maxRequests,
+      limit: maxRequests,
+      remaining: Math.max(0, maxRequests - window.count),
+      resetsAt: window.resetsAt
+    };
+  };
+}
+
+function applyRateLimitHeaders(response: ServerResponse, result: RateLimitResult): void {
+  response.setHeader("ratelimit-limit", String(result.limit));
+  response.setHeader("ratelimit-remaining", String(result.remaining));
+  response.setHeader("ratelimit-reset", String(Math.ceil(result.resetsAt / 1000)));
+}
+
+interface HttpMetric {
+  method: string;
+  path: string;
+  status: number;
+  count: number;
+  durationSeconds: number;
+}
+
+class HttpMetrics {
+  private readonly values = new Map<string, HttpMetric>();
+
+  public observe(method: string, path: string, status: number, durationMs: number): void {
+    const key = `${method}\0${path}\0${status}`;
+    const metric = this.values.get(key) ?? {
+      method,
+      path,
+      status,
+      count: 0,
+      durationSeconds: 0
+    };
+    metric.count += 1;
+    metric.durationSeconds += durationMs / 1000;
+    this.values.set(key, metric);
+  }
+
+  public render(): string {
+    const lines = [
+      "# HELP lip_http_requests_total Completed HTTP requests.",
+      "# TYPE lip_http_requests_total counter",
+      ...[...this.values.values()].map((metric) =>
+        `lip_http_requests_total{method="${metric.method}",path="${metric.path}",status="${metric.status}"} ${metric.count}`
+      ),
+      "# HELP lip_http_request_duration_seconds Request duration in seconds.",
+      "# TYPE lip_http_request_duration_seconds summary",
+      ...[...this.values.values()].flatMap((metric) => {
+        const labels = `method="${metric.method}",path="${metric.path}",status="${metric.status}"`;
+        return [
+          `lip_http_request_duration_seconds_sum{${labels}} ${metric.durationSeconds}`,
+          `lip_http_request_duration_seconds_count{${labels}} ${metric.count}`
+        ];
+      })
+    ];
+    return `${lines.join("\n")}\n`;
+  }
+}
+
 function routeTable(engine: LoyaltyEngine): Map<string, Route> {
   return new Map<string, Route>([
     ["POST /lip/v1/programs/get", { schema: ProgramGetRequestSchema, status: 200, handle: (body) => engine.getProgram(body) }],
     ["POST /lip/v1/accounts/get", { schema: MemberAccountRequestSchema, status: 200, handle: (body) => engine.getAccount(body) }],
     ["POST /lip/v1/ledger/list", { schema: LedgerListRequestSchema, status: 200, handle: (body) => engine.listLedger(body) }],
+    ["POST /lip/v1/ledger/manual-adjustments", { schema: ManualAdjustmentRequestSchema, status: 201, handle: (body) => engine.postManualAdjustment(body) }],
     ["POST /lip/v1/members/lookup", { schema: MemberLookupRequestSchema, status: 200, handle: (body) => engine.lookup(body) }],
     ["POST /lip/v1/members/enroll", { schema: MemberEnrollRequestSchema, status: 201, handle: (body) => engine.enroll(body) }],
     ["POST /lip/v1/orders/evaluate", { schema: EvaluationRequestSchema, status: 200, handle: (body) => engine.evaluate(body) }],
@@ -265,12 +509,15 @@ export function createReferenceServer(engine: LoyaltyEngine, options: ServerOpti
   const routes = routeTable(engine);
   const adminSessions = new Set<string>();
   const adminEnabled = options.admin?.enabled ?? true;
+  const rateLimiter = options.rateLimit === false ? undefined : createRateLimiter(options.rateLimit);
+  const metrics = options.metrics === false ? undefined : new HttpMetrics();
 
   const allowedMethods = new Map<string, string[]>([
     ["/health", ["GET"]],
     ["/favicon.ico", ["GET"]],
     ["/.well-known/lip", ["GET"]],
-    ["/lip/v1/capabilities", ["GET"]]
+    ["/lip/v1/capabilities", ["GET"]],
+    ...(metrics ? [["/metrics", ["GET"]] as [string, string[]]] : [])
   ]);
   for (const key of routes.keys()) {
     const separator = key.indexOf(" ");
@@ -288,16 +535,82 @@ export function createReferenceServer(engine: LoyaltyEngine, options: ServerOpti
   }
 
   return createServer((request, response) => {
-    void (async () => {
-      const method = request.method ?? "GET";
-      const path = new URL(request.url ?? "/", "http://localhost").pathname;
+    const startedAt = performance.now();
+    const method = request.method ?? "GET";
+    const path = new URL(request.url ?? "/", "http://localhost").pathname;
+    const suppliedRequestId = request.headers["x-request-id"];
+    const requestId = typeof suppliedRequestId === "string" &&
+      /^[A-Za-z0-9._:-]{1,128}$/.test(suppliedRequestId)
+      ? suppliedRequestId
+      : randomUUID();
+    response.setHeader("x-request-id", requestId);
+    response.once("finish", () => {
+      const durationMs = performance.now() - startedAt;
+      const normalizedPath = allowedMethods.has(path)
+        ? path
+        : path.startsWith("/admin/")
+          ? "/admin/*"
+          : "unmatched";
+      metrics?.observe(method, normalizedPath, response.statusCode, durationMs);
+      if (!options.requestLogger) return;
+      const contentLength = response.getHeader("content-length");
+      const entry: StructuredRequestLog = {
+        timestamp: new Date().toISOString(),
+        request_id: requestId,
+        method,
+        path,
+        status: response.statusCode,
+        duration_ms: Math.round(durationMs * 100) / 100,
+        ...(typeof contentLength === "number" ? { response_bytes: contentLength } : {}),
+        ...(typeof contentLength === "string" && /^\d+$/.test(contentLength)
+          ? { response_bytes: Number(contentLength) }
+          : {})
+      };
+      try {
+        options.requestLogger(entry);
+      } catch {
+        // Request logging must never change the HTTP response.
+      }
+    });
 
+    const enforceRateLimit = (): boolean => {
+      if (!rateLimiter) return true;
+      const result = rateLimiter(request.socket.remoteAddress ?? "unknown");
+      applyRateLimitHeaders(response, result);
+      if (result.allowed) return true;
+      response.setHeader("retry-after", String(Math.max(1, Math.ceil((result.resetsAt - Date.now()) / 1000))));
+      sendJson(
+        response,
+        429,
+        problem(429, "Too Many Requests", "rate_limit_exceeded"),
+        "application/problem+json"
+      );
+      return false;
+    };
+
+    void (async () => {
       if (method === "GET" && path === "/health") {
         sendJson(response, 200, {
           status: "ok",
           protocol_version: "1.0",
           profile: "foodservice/1.0"
         });
+        return;
+      }
+
+      if (metrics && method === "GET" && path === "/metrics") {
+        if (!isAuthorized(request, options.apiKey)) {
+          response.setHeader("www-authenticate", "Bearer");
+          sendJson(response, 401, problem(401, "Unauthorized", "unauthorized"), "application/problem+json");
+          return;
+        }
+        sendMetrics(response, metrics.render());
+        return;
+      }
+
+      if (method === "GET" && path === "/favicon.ico") {
+        response.writeHead(204, { "cache-control": "public, max-age=86400" });
+        response.end();
         return;
       }
 
@@ -312,6 +625,7 @@ export function createReferenceServer(engine: LoyaltyEngine, options: ServerOpti
           sendJson(response, 401, problem(401, "Unauthorized", "unauthorized"), "application/problem+json");
           return;
         }
+        if (!enforceRateLimit()) return;
         sendJson(response, 200, capabilitiesDocument(options.reservationTtlSeconds ?? 120));
         return;
       }
@@ -319,6 +633,11 @@ export function createReferenceServer(engine: LoyaltyEngine, options: ServerOpti
       if (adminEnabled && method === "GET" && path === "/admin") {
         response.writeHead(302, { location: "/admin/", "cache-control": "no-store" });
         response.end();
+        return;
+      }
+
+      if (adminEnabled && method === "GET" && path === "/admin/api/v1/bootstrap") {
+        sendJson(response, 200, adminBootstrapDocument(options, request, adminSessions));
         return;
       }
 
@@ -364,11 +683,12 @@ export function createReferenceServer(engine: LoyaltyEngine, options: ServerOpti
           platform: {
             protocol_version: "1.0",
             profile: "foodservice/1.0",
-            storage: options.admin?.storage ?? {
-              driver: "memory",
-              location: "process",
-              persistent: false
-            }
+            storage: adminStorage(options)
+          },
+          webhooks: options.admin?.webhooks?.() ?? {
+            enabled: false,
+            pending: [],
+            recent: []
           },
           ...snapshot
         });
@@ -402,6 +722,7 @@ export function createReferenceServer(engine: LoyaltyEngine, options: ServerOpti
         sendJson(response, 401, problem(401, "Unauthorized", "unauthorized"), "application/problem+json");
         return;
       }
+      if (!enforceRateLimit()) return;
 
       const body = await readBody(request);
       const validation = validate(route.schema, body);

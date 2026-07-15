@@ -1,12 +1,31 @@
-FROM node:22-alpine
+FROM node:22-alpine AS build
 
 WORKDIR /app
 
-COPY . .
-RUN npm ci && npm run build
+COPY package.json package-lock.json tsconfig.json tsconfig.base.json ./
+COPY apps ./apps
+COPY packages ./packages
+COPY scripts ./scripts
+COPY tests ./tests
+COPY examples ./examples
+COPY spec ./spec
+RUN npm ci \
+  && npm run build \
+  && npm prune --omit=dev --workspaces --include-workspace-root
 
+FROM node:22-alpine AS runtime
+
+WORKDIR /app
 ENV HOST=0.0.0.0
 ENV PORT=3210
+ENV LIP_DATABASE_PATH=/data/reference.db
+
+COPY package.json package-lock.json ./
+COPY --from=build /app/node_modules ./node_modules
+COPY --from=build /app/packages ./packages
+RUN mkdir -p /data && chown -R node:node /app /data
+
+USER node
 
 EXPOSE 3210
 

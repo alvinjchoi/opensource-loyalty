@@ -126,6 +126,60 @@ export interface ProgramConfiguration {
   next_actions: string[];
 }
 
+export interface AdminBootstrap {
+  admin_api_version: string;
+  generated_at: string;
+  status: boolean;
+  auth: {
+    mode: "api_key";
+    requires_login: boolean;
+    session_cookie: string;
+    default_local_key: boolean;
+    credential_hint: string;
+  };
+  session: {
+    authenticated: boolean;
+  };
+  platform: {
+    protocol_version: string;
+    profile: string;
+    storage: { driver: string; location: string; persistent: boolean };
+  };
+  onboarding: {
+    title: string;
+    description: string;
+    steps: Array<{
+      id: string;
+      title: string;
+      description: string;
+      status: "ready" | "next" | "optional";
+    }>;
+    commands: Array<{ label: string; value: string }>;
+  };
+  links: {
+    admin: string;
+    health: string;
+    capabilities: string;
+    api: string;
+  };
+}
+
+export interface AdminWebhookDelivery {
+  event_id: string;
+  event_type: string;
+  url: string;
+  attempts: number;
+  status?: "delivered" | "failed";
+  completed_at?: string;
+  last_error?: string;
+}
+
+export interface AdminPendingWebhookDelivery extends AdminWebhookDelivery {
+  delivery_id: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface AdminSnapshot {
   admin_api_version: string;
   generated_at: string;
@@ -136,6 +190,11 @@ export interface AdminSnapshot {
   };
   program: ProgramCatalog;
   program_configuration: ProgramConfiguration;
+  webhooks: {
+    enabled: boolean;
+    pending: AdminPendingWebhookDelivery[];
+    recent: AdminWebhookDelivery[];
+  };
   summary: {
     active_members: number;
     points_outstanding: number;

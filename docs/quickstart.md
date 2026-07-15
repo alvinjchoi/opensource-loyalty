@@ -9,19 +9,24 @@ and conformance details.
 
 ## 1. Install and start
 
+Use npm for source installs. This repo uses npm workspaces and
+`package-lock.json`; pnpm is not the supported package manager unless the repo
+is intentionally migrated later.
+
 ```sh
 npm install
 npm start
 ```
 
-Keep that terminal open. The default server is `http://127.0.0.1:3210` and the
-development Bearer token is `lip-dev-key`. Quickstart creates
+Keep that terminal open. It prints the Admin URL and `Admin/API key`. The
+default server is `http://127.0.0.1:3210`, and the default development key is
+`lip-dev-key`. Quickstart creates
 `.lip/reference.db`, seeds six synthetic members, and preserves all subsequent
 activity across restarts.
 
-Open `http://127.0.0.1:3210/admin/` and use `lip-dev-key` to inspect account
-balances, tiers, expiring points, ledger history, program configuration, and
-storage status.
+Open `http://127.0.0.1:3210/admin/` and sign in with the printed Admin/API key
+to inspect account balances, tiers, expiring points, ledger history, program
+configuration, and storage status.
 
 Docker is an equivalent start path:
 
@@ -30,6 +35,8 @@ docker compose up --build
 ```
 
 The Compose service stores its SQLite database in the named `lip-data` volume.
+Use `docker compose logs lip` to see the Admin/API key after the container is
+running.
 
 ## 2. Check the environment
 

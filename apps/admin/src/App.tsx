@@ -34,6 +34,7 @@ import {
 } from "./components/ui/index.js";
 import { formatDate, formatNumber, memberName, percentage } from "./format.js";
 import type {
+  AdminBootstrap,
   AdminMember,
   AdminSnapshot,
   LedgerEntry,
@@ -92,10 +93,17 @@ function memberSubtitle(member: AdminMember["member"]): string {
   return member.member_id.replace(/^demo-member-/, "customer-");
 }
 
-function Login({ onAuthenticated }: { onAuthenticated: () => Promise<void> }) {
-  const [apiKey, setApiKey] = useState("lip-dev-key");
+function Login({ bootstrap, onAuthenticated }: {
+  bootstrap: AdminBootstrap | undefined;
+  onAuthenticated: () => Promise<void>;
+}) {
+  const [apiKey, setApiKey] = useState("");
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (bootstrap?.auth.default_local_key && apiKey.length === 0) setApiKey("lip-dev-key");
+  }, [apiKey.length, bootstrap?.auth.default_local_key]);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -117,14 +125,35 @@ function Login({ onAuthenticated }: { onAuthenticated: () => Promise<void> }) {
     }
   }
 
+  const storage = bootstrap?.platform.storage;
+  const keySource = bootstrap?.auth.default_local_key
+    ? "Default local key: lip-dev-key"
+    : "Copy the key from the server startup logs.";
+
   return (
     <main className="login-page">
-      <section className="login-panel" aria-labelledby="login-title">
-        <div className="brand-mark"><CircleGauge size={24} aria-hidden="true" /></div>
-        <p className="product-label">Loyalty dashboard</p>
-        <h1 id="login-title">Sign in to your workspace</h1>
+      <section className="auth-card" aria-labelledby="login-title">
+        <div className="auth-logo"><CircleGauge size={26} aria-hidden="true" /></div>
+        <h1 id="login-title">
+          {bootstrap?.auth.default_local_key ? "Get started with Loyalty Admin" : "Sign in to Loyalty Admin"}
+        </h1>
+        <p className="auth-note">
+          Local reference server. Sign in with the same key used for Bearer API requests.
+        </p>
+
         <form onSubmit={submit}>
-          <label htmlFor="api-key">API key</label>
+          <label className="visually-hidden" htmlFor="admin-username">Username</label>
+          <input
+            className="visually-hidden"
+            id="admin-username"
+            name="username"
+            type="text"
+            autoComplete="username"
+            value="local-admin"
+            readOnly
+            tabIndex={-1}
+          />
+          <label htmlFor="api-key">Admin/API key</label>
           <input
             id="api-key"
             name="api-key"
@@ -133,6 +162,10 @@ function Login({ onAuthenticated }: { onAuthenticated: () => Promise<void> }) {
             value={apiKey}
             onChange={(event) => setApiKey(event.target.value)}
           />
+          <p className="input-hint">
+            {bootstrap?.auth.credential_hint ?? "Use the key configured for this local reference server."}
+          </p>
+          <p className="key-source"><code>{keySource}</code></p>
           {error ? <p className="form-error" role="alert">{error}</p> : null}
           <CommandButton
             disabled={submitting}
@@ -142,7 +175,10 @@ function Login({ onAuthenticated }: { onAuthenticated: () => Promise<void> }) {
             {submitting ? "Signing in" : "Sign in"}
           </CommandButton>
         </form>
-        <p className="login-meta">Local workspace · Admin API 0.1</p>
+
+        <p className="login-meta">
+          {bootstrap ? "Server online" : "Checking server"} · Admin API {bootstrap?.admin_api_version ?? "0.1"} · {storage?.driver ?? "local"}
+        </p>
       </section>
     </main>
   );
@@ -472,6 +508,26 @@ function Program({ snapshot }: { snapshot: AdminSnapshot }) {
 }
 
 function Developer({ snapshot }: { snapshot: AdminSnapshot }) {
+  const webhookRows = [
+    ...snapshot.webhooks.pending.map((delivery) => ({
+      key: delivery.delivery_id,
+      eventType: delivery.event_type,
+      url: delivery.url,
+      attempts: delivery.attempts,
+      status: "Pending",
+      timestamp: delivery.updated_at,
+      error: delivery.last_error
+    })),
+    ...snapshot.webhooks.recent.map((delivery, index) => ({
+      key: `${delivery.event_id}-${delivery.url}-${index}`,
+      eventType: delivery.event_type,
+      url: delivery.url,
+      attempts: delivery.attempts,
+      status: delivery.status === "delivered" ? "Delivered" : "Failed",
+      timestamp: delivery.completed_at ?? snapshot.generated_at,
+      error: delivery.last_error
+    }))
+  ];
   const rows = [
     ["Protocol", snapshot.platform.protocol_version],
     ["Profile", snapshot.platform.profile],
@@ -480,6 +536,8 @@ function Developer({ snapshot }: { snapshot: AdminSnapshot }) {
     ["Discovery", `${window.location.origin}/.well-known/lip`],
     ["Storage driver", snapshot.platform.storage.driver],
     ["Storage location", snapshot.platform.storage.location],
+    ["Webhook delivery", snapshot.webhooks.enabled ? "Enabled" : "Disabled"],
+    ["Webhook outbox", `${snapshot.webhooks.pending.length} pending`],
     ["Snapshot generated", formatDate(snapshot.generated_at, true)]
   ];
   return (
@@ -496,12 +554,41 @@ function Developer({ snapshot }: { snapshot: AdminSnapshot }) {
         <div><ShieldCheck size={18} /><span>Admin session</span><strong>HttpOnly cookie</strong></div>
         <div><CircleGauge size={18} /><span>Loyalty API</span><strong>11 operations</strong></div>
       </Section>
+      <Section>
+        <div className="section-heading">
+          <div><p className="eyebrow">Webhooks</p><h3>Delivery activity</h3></div>
+          <span className="record-count">{formatNumber(snapshot.webhooks.pending.length)} pending</span>
+        </div>
+        {!snapshot.webhooks.enabled ? (
+          <EmptyState>Webhook delivery is disabled. Set LIP_WEBHOOK_URL and LIP_WEBHOOK_SECRET.</EmptyState>
+        ) : webhookRows.length === 0 ? (
+          <EmptyState>No webhook deliveries have been recorded in this process.</EmptyState>
+        ) : (
+          <div className="table-scroll">
+            <table className="ledger-table">
+              <thead><tr><th>Status</th><th>Event</th><th>Receiver</th><th>Attempts</th><th>Updated</th></tr></thead>
+              <tbody>
+                {webhookRows.map((delivery) => (
+                  <tr key={delivery.key}>
+                    <td><span className="primary-cell">{delivery.status}</span>{delivery.error ? <small>{delivery.error}</small> : null}</td>
+                    <td><code>{delivery.eventType}</code></td>
+                    <td><code>{delivery.url}</code></td>
+                    <td className="numeric">{formatNumber(delivery.attempts)}</td>
+                    <td>{formatDate(delivery.timestamp, true)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Section>
     </>
   );
 }
 
 export function App() {
   const [snapshot, setSnapshot] = useState<AdminSnapshot>();
+  const [bootstrap, setBootstrap] = useState<AdminBootstrap>();
   const [authenticated, setAuthenticated] = useState<boolean>();
   const [view, setView] = useState<View>("overview");
   const [refreshing, setRefreshing] = useState(false);
@@ -527,7 +614,29 @@ export function App() {
     }
   }, []);
 
-  useEffect(() => { void refresh(); }, [refresh]);
+  useEffect(() => {
+    let cancelled = false;
+    async function loadBootstrap() {
+      try {
+        const response = await fetch("/admin/api/v1/bootstrap", { credentials: "same-origin" });
+        if (!response.ok) throw new Error(`Admin bootstrap returned HTTP ${response.status}`);
+        const data = await response.json() as AdminBootstrap;
+        if (cancelled) return;
+        setBootstrap(data);
+        if (data.session.authenticated) {
+          await refresh();
+          return;
+        }
+        setAuthenticated(false);
+      } catch {
+        if (!cancelled) await refresh();
+      }
+    }
+    void loadBootstrap();
+    return () => {
+      cancelled = true;
+    };
+  }, [refresh]);
 
   async function logout() {
     await fetch("/admin/api/v1/logout", { method: "POST", credentials: "same-origin" });
@@ -536,7 +645,7 @@ export function App() {
   }
 
   if (authenticated === undefined && !error) return <main className="loading-page"><Spinner className="loading-mark" /><span>Loading Admin</span></main>;
-  if (authenticated === false) return <Login onAuthenticated={refresh} />;
+  if (authenticated === false) return <Login bootstrap={bootstrap} onAuthenticated={refresh} />;
   if (!snapshot) return <main className="loading-page"><p>{error || "Admin data unavailable"}</p><CommandButton icon={<RefreshCw size={16} />} onClick={() => void refresh()}>Retry</CommandButton></main>;
 
   return (

@@ -116,6 +116,14 @@ export const LedgerOperationSchema = Type.Union([
   Type.Literal("manual")
 ]);
 
+export const ManualAdjustmentClassificationSchema = Type.Union([
+  Type.Literal("bonus"),
+  Type.Literal("gift"),
+  Type.Literal("migration"),
+  Type.Literal("service_recovery"),
+  Type.Literal("correction")
+]);
+
 export const LedgerEntrySchema = Type.Object(
   {
     entry_id: IdSchema,
@@ -130,7 +138,10 @@ export const LedgerEntrySchema = Type.Object(
     related_entry_id: Type.Optional(IdSchema),
     order_id: Type.Optional(IdSchema),
     adjustment_id: Type.Optional(IdSchema),
-    reservation_id: Type.Optional(IdSchema)
+    reservation_id: Type.Optional(IdSchema),
+    classification: Type.Optional(ManualAdjustmentClassificationSchema),
+    reason: Type.Optional(Type.String({ minLength: 1, maxLength: 255 })),
+    qualifies_for_tier: Type.Optional(Type.Boolean())
   },
   { additionalProperties: false }
 );
@@ -251,6 +262,24 @@ export const OrderAdjustmentRequestSchema = Type.Object(
   { additionalProperties: false }
 );
 
+export const ManualAdjustmentRequestSchema = Type.Object(
+  {
+    context: RequestContextSchema,
+    member_id: IdSchema,
+    program_id: IdSchema,
+    adjustment_id: IdSchema,
+    amount: Type.Union([
+      Type.Integer({ maximum: -1 }),
+      Type.Integer({ minimum: 1 })
+    ]),
+    classification: ManualAdjustmentClassificationSchema,
+    reason: Type.String({ minLength: 1, maxLength: 255 }),
+    qualifies_for_tier: Type.Boolean(),
+    expires_at: Type.Optional(DateTimeSchema)
+  },
+  { additionalProperties: false }
+);
+
 export const ProblemDetailsSchema = Type.Object(
   {
     type: Type.String({ format: "uri-reference" }),
@@ -280,6 +309,7 @@ export type EvaluationRequest = Static<typeof EvaluationRequestSchema>;
 export type EvaluationResponse = Static<typeof EvaluationResponseSchema>;
 export type LedgerEntry = Static<typeof LedgerEntrySchema>;
 export type LedgerOperation = Static<typeof LedgerOperationSchema>;
+export type ManualAdjustmentClassification = Static<typeof ManualAdjustmentClassificationSchema>;
 export type AccrualPostRequest = Static<typeof AccrualPostRequestSchema>;
 export type LedgerResponse = Static<typeof LedgerResponseSchema>;
 export type LedgerListRequest = Static<typeof LedgerListRequestSchema>;
@@ -290,4 +320,5 @@ export type RedemptionCaptureRequest = Static<typeof RedemptionCaptureRequestSch
 export type RedemptionReverseRequest = Static<typeof RedemptionReverseRequestSchema>;
 export type RedemptionReservationResponse = Static<typeof RedemptionReservationResponseSchema>;
 export type OrderAdjustmentRequest = Static<typeof OrderAdjustmentRequestSchema>;
+export type ManualAdjustmentRequest = Static<typeof ManualAdjustmentRequestSchema>;
 export type ProblemDetails = Static<typeof ProblemDetailsSchema>;

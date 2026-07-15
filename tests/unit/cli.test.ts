@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   defaultConfig,
   formatReport,
+  formatServerReady,
   initializeConfig,
   readConfig,
   runBaselineConformance,
@@ -114,5 +115,26 @@ describe("lip diagnostics", () => {
     });
     expect(unreachable.ok).toBe(false);
     expect(unreachable.checks.every((check) => !check.ok)).toBe(true);
+  });
+});
+
+describe("lip terminal presentation", () => {
+  it("formats a clear local server startup screen", () => {
+    const output = formatServerReady({
+      adminUrl: "http://127.0.0.1:3210/admin/",
+      apiBaseUrl: "http://127.0.0.1:3210",
+      apiKey: "cli-test-key",
+      databasePath: ".lip/reference.db",
+      discoveryUrl: "http://127.0.0.1:3210/.well-known/lip",
+      doctorCommand: "lip doctor",
+      testCommand: "lip test"
+    }, { color: false });
+
+    expect(output).toContain("Loyalty Interchange local sandbox");
+    expect(output).toContain("[ready] Reference API and Admin dashboard are running.");
+    expect(output).toContain("Admin      http://127.0.0.1:3210/admin/");
+    expect(output).toContain("Key        cli-test-key");
+    expect(output).toContain("Run diagnostics: lip doctor");
+    expect(output).toContain("Authorization: Bearer cli-test-key");
   });
 });

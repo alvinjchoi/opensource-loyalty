@@ -52,3 +52,19 @@ Refunds and voids are new adjustments. `eligible_spend_delta` is signed from the
 original order's perspective: refunds are negative and post a negative accrual
 adjustment. A provider MAY allow a negative points balance; hiding a clawback is
 not conformant.
+
+## Manual adjustment
+
+An operator MAY post a classified manual points credit or debit independently
+of an order. The request MUST include a stable `adjustment_id`, nonzero signed
+`amount`, classification, human-readable reason, and an explicit
+`qualifies_for_tier` decision.
+
+Supported classifications are `bonus`, `gift`, `migration`,
+`service_recovery`, and `correction`. Positive credits MAY carry an explicit
+future `expires_at`; otherwise the program's normal point-expiration policy
+applies. Debits MUST NOT include `expires_at`.
+
+Repeating an `adjustment_id` with identical facts returns the original ledger
+entry. Reusing it with different facts is a conflict. A provider MUST NOT count
+a manual entry toward qualification unless `qualifies_for_tier` is true.

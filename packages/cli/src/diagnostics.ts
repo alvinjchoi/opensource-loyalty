@@ -166,9 +166,14 @@ export async function runBaselineConformance(options: ConnectionOptions): Promis
 }
 
 export function formatReport(report: DiagnosticReport): string {
-  const lines = report.checks.map((check) =>
+  const lines = [
+    report.ok ? "LIP diagnostics [pass]" : "LIP diagnostics [fail]",
+    `Target: ${report.baseUrl}`,
+    ""
+  ];
+  lines.push(...report.checks.map((check) =>
     `${check.ok ? "[pass]" : "[fail]"} ${check.name}: ${check.detail}`
-  );
-  lines.push(report.ok ? `PASS ${report.baseUrl}` : `FAIL ${report.baseUrl}`);
+  ));
+  lines.push("", report.ok ? `PASS ${report.baseUrl}` : `FAIL ${report.baseUrl}`);
   return lines.join("\n");
 }

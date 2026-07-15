@@ -9,7 +9,7 @@
 
 **LIP is an open, vendor-neutral loyalty protocol and reference platform for developers building restaurant, QSR, coffee, convenience, and franchise ordering systems.** It ships everything needed to go from zero to a working loyalty integration: a normative protocol spec, a **deterministic reference engine**, an **HTTP API**, a **TypeScript SDK**, a local **Admin dashboard**, a SQLite sandbox, Docker runtime, runnable examples, and black-box conformance tests.
 
-For more information, be sure to check out the **[LIP Documentation](docs/README.md)**.
+For more information, be sure to check out the **[LIP Documentation](docs/README.md)**. Building with an AI coding agent? Start with **[Getting started with AI](#getting-started-with-ai-)**.
 
 ## Key Features of LIP ⭐
 
@@ -35,9 +35,36 @@ For more information, be sure to check out the **[LIP Documentation](docs/README
 
 - 🔧 **Batteries-Included CLI**: Validation, diagnostics (`doctor`), local serving, schema listing, and baseline conformance checks.
 
+- 🤖 **AI-Ready**: Installable agent Skills, an official MCP server, [`llms.txt`](llms.txt), and curated prompts so Cursor, Claude Code, Codex, and similar tools implement LIP correctly.
+
 Want the full picture? Check out the [developer docs](docs/README.md) for a comprehensive overview.
 
 ## How to Install 🚀
+
+### Getting started with AI 🤖
+
+LIP is set up for AI coding agents the same way platforms like Clerk are: Skills for specialized knowledge, an MCP server for accurate lookups, and a compact index for agent context.
+
+```bash
+# After cloning and installing (see below)
+npx skills add .
+```
+
+That installs seven Skills (`lip`, `lip-cli`, `lip-sdk`, `lip-checkout`, `lip-webhooks`, `lip-bff`, `lip-conformance`) into your agent environment.
+
+Then enable the MCP server. Cursor can use the repo root [`mcp.json`](mcp.json) (Settings → MCP), or run it directly:
+
+```bash
+npm run mcp
+```
+
+| Resource | What it is |
+| --- | --- |
+| [Using LIP with AI](docs/using-lip-with-ai.md) | Full AI getting-started guide |
+| [AI prompts](docs/ai-prompts.md) | Copy/paste prompts for checkout, webhooks, refunds, and more |
+| [`llms.txt`](llms.txt) | Compact repo index — point your agent here first |
+| [`skills/`](skills/README.md) | Installable agent Skills |
+| [`packages/mcp/`](packages/mcp/) | Official MCP server (spec lookups, validation, SDK snippets) |
 
 ### Quick Start with Docker 🐳
 
@@ -109,6 +136,7 @@ The local server exposes:
 - Admin dashboard: `http://127.0.0.1:3210/admin/`
 - Protocol API: `http://127.0.0.1:3210/lip/v1`
 - Health: `http://127.0.0.1:3210/health`
+- Prometheus metrics: `http://127.0.0.1:3210/metrics` (Bearer auth required)
 - Discovery: `http://127.0.0.1:3210/.well-known/lip`
 
 ### Running the API Separately
@@ -127,6 +155,8 @@ npm run lip -- serve --reset --no-seed
 npm run lip -- serve --database .lip/another.db
 npm run lip -- serve --port 4010 --api-key local-dev-key
 npm run lip -- serve --program ./my-program.json
+npm run lip -- serve --rate-limit 300 --rate-window-ms 60000
+npm run lip -- serve --no-structured-logs
 ```
 
 `--program` replaces the built-in demo program with your own JSON program
@@ -142,8 +172,18 @@ The Compose service runs the reference server and Admin dashboard on port `3210`
 LIP_API_KEY="replace-with-a-long-local-key"
 LIP_PORT=3210
 LIP_SEED_DEMO=true
+LIP_RATE_LIMIT_REQUESTS=120
+LIP_RATE_LIMIT_WINDOW_MS=60000
+LIP_STRUCTURED_LOGS=true
 docker compose up --build
 ```
+
+Authenticated protocol requests are limited per remote client. Responses
+include `RateLimit-*` headers and return RFC 9457 problem details with HTTP 429
+when exhausted. The CLI and container emit one JSON `http_request` record per
+response without logging API keys or request bodies. The authenticated
+`/metrics` endpoint exports request counts and duration summaries in Prometheus
+text format.
 
 > [!WARNING]
 > The container is a single-node reference runtime, not a hosted multi-tenant production deployment. For production, build on the protocol and storage adapter boundary: SQLite sandbox → storage adapter contract → Postgres production adapter → tenant-aware Admin API → scoped users, roles, and audit log.

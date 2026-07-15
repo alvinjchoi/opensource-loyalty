@@ -11,6 +11,7 @@ import type {
   LedgerListRequest,
   LedgerListResponse,
   LedgerResponse,
+  ManualAdjustmentRequest,
   Member,
   MemberAccountRequest,
   MemberAccountResponse,
@@ -576,6 +577,65 @@ export class LoyaltyEngine {
     });
   }
 
+  public postManualAdjustment(request: ManualAdjustmentRequest): LedgerResponse {
+    this.assertProgramId(request.program_id);
+    return this.once("ledger.manual", request.context, request, () => {
+      this.activeMember(request.member_id);
+      this.expirePointLots(request.member_id);
+      if (request.amount === 0) {
+        throw new EngineError("invalid_state", "Manual adjustment amount must not be zero");
+      }
+      if (request.amount < 0 && request.expires_at) {
+        throw new EngineError("invalid_state", "Manual debits cannot specify expires_at");
+      }
+      if (request.expires_at && Date.parse(request.expires_at) <= this.clock.now().getTime()) {
+        throw new EngineError("expired", "Manual adjustment expiration must be in the future");
+      }
+
+      const businessFingerprint = fingerprint({
+        member_id: request.member_id,
+        program_id: request.program_id,
+        adjustment_id: request.adjustment_id,
+        amount: request.amount,
+        classification: request.classification,
+        reason: request.reason,
+        qualifies_for_tier: request.qualifies_for_tier,
+        expires_at: request.expires_at
+      });
+      const existingAdjustment = this.adjustments.get(request.adjustment_id);
+      if (existingAdjustment) {
+        if (existingAdjustment.fingerprint !== businessFingerprint) {
+          throw new EngineError("conflict", "Adjustment id was already used with different facts");
+        }
+        const existing = this.ledger.get(existingAdjustment.entryId);
+        if (!existing) {
+          throw new EngineError("not_found", "Adjustment references a missing ledger entry", 500);
+        }
+        return this.ledgerResponse(request.context, existing);
+      }
+
+      if (request.amount < 0) this.consumePointLots(request.member_id, -request.amount);
+      const expiresAt = request.amount > 0
+        ? request.expires_at ?? (this.program.point_expiration ? this.pointExpirationIso() : undefined)
+        : undefined;
+      const entry = this.addLedger({
+        member_id: request.member_id,
+        operation: "manual",
+        amount: request.amount,
+        adjustment_id: request.adjustment_id,
+        classification: request.classification,
+        reason: request.reason,
+        qualifies_for_tier: request.qualifies_for_tier,
+        ...(expiresAt ? { expires_at: expiresAt, create_point_lot: true } : {})
+      });
+      this.adjustments.set(request.adjustment_id, {
+        entryId: entry.entry_id,
+        fingerprint: businessFingerprint
+      });
+      return this.ledgerResponse(request.context, entry);
+    });
+  }
+
   public getLedger(): LedgerEntry[] {
     this.expirePointLots();
     return [...this.ledger.values()].map(clone);
@@ -960,7 +1020,8 @@ export class LoyaltyEngine {
               entry.member_id === memberId &&
               ["accrual", "adjustment", "manual"].includes(entry.operation) &&
               (metric.source !== "qualification_earned" ||
-                this.isInCurrentQualificationPeriod(entry.occurred_at))
+                (this.isInCurrentQualificationPeriod(entry.occurred_at) &&
+                  (entry.operation !== "manual" || entry.qualifies_for_tier === true)))
             )
             .reduce((sum, entry) => sum + entry.amount, 0),
       as_of: asOf
@@ -1231,6 +1292,9 @@ export class LoyaltyEngine {
     order_id?: string;
     adjustment_id?: string;
     reservation_id?: string;
+    classification?: LedgerEntry["classification"];
+    reason?: string;
+    qualifies_for_tier?: boolean;
     create_point_lot?: boolean;
   }): LedgerEntry {
     const entry: LedgerEntry = {
@@ -1246,7 +1310,12 @@ export class LoyaltyEngine {
       ...(input.related_entry_id ? { related_entry_id: input.related_entry_id } : {}),
       ...(input.order_id ? { order_id: input.order_id } : {}),
       ...(input.adjustment_id ? { adjustment_id: input.adjustment_id } : {}),
-      ...(input.reservation_id ? { reservation_id: input.reservation_id } : {})
+      ...(input.reservation_id ? { reservation_id: input.reservation_id } : {}),
+      ...(input.classification ? { classification: input.classification } : {}),
+      ...(input.reason ? { reason: input.reason } : {}),
+      ...(input.qualifies_for_tier !== undefined
+        ? { qualifies_for_tier: input.qualifies_for_tier }
+        : {})
     };
     this.ledger.set(entry.entry_id, entry);
     this.points.set(input.member_id, (this.points.get(input.member_id) ?? 0) + input.amount);

@@ -5,6 +5,7 @@ import {
   type RunningServer
 } from "@loyalty-interchange/server";
 import type { ProgramDefinition } from "@loyalty-interchange/reference";
+import { formatServerReady } from "./presentation.js";
 
 export interface MockOptions {
   host: string;
@@ -13,6 +14,11 @@ export interface MockOptions {
   databasePath?: string;
   reset?: boolean;
   seed?: boolean;
+  rateLimit?: {
+    maxRequests: number;
+    windowMs: number;
+  };
+  structuredLogs?: boolean;
   /** Path to a JSON program definition that replaces the built-in demo program. */
   programPath?: string;
 }
@@ -39,10 +45,15 @@ export async function startMockServer(options: MockOptions): Promise<RunningServ
     port: options.port,
     apiKey: options.apiKey,
     reservationTtlSeconds: 120,
+    ...(options.rateLimit ? { rateLimit: options.rateLimit } : {}),
+    ...(options.structuredLogs ? {
+      requestLogger: (entry) => console.log(JSON.stringify({ event: "http_request", ...entry }))
+    } : {}),
     persistState: (state) => platform.store.save(state),
     admin: {
       ...(platform.adminAssetRoot ? { assetRoot: platform.adminAssetRoot } : {}),
-      storage: platform.store.status
+      storage: platform.store.status,
+      ...(platform.webhooks ? { webhooks: () => platform.webhooks!.adminStatus() } : {})
     }
   });
   return {
@@ -54,6 +65,11 @@ export async function startMockServer(options: MockOptions): Promise<RunningServ
   };
 }
 
+function shellToken(value: string): string {
+  if (/^[A-Za-z0-9_./:=@+-]+$/.test(value)) return value;
+  return `'${value.replace(/'/g, "'\\''")}'`;
+}
+
 export async function runMockServer(
   options: MockOptions,
   output: (message: string) => void = console.log
@@ -61,16 +77,18 @@ export async function runMockServer(
   const running = await startMockServer(options);
   const displayHost = options.host === "0.0.0.0" ? "127.0.0.1" : options.host;
   const port = new URL(running.url).port;
-  output(`LIP mock server: http://${displayHost}:${port}`);
-  output(`Bearer token: ${options.apiKey}`);
-  output(`Discovery: http://${displayHost}:${port}/.well-known/lip`);
-  output(`Admin: http://${displayHost}:${port}/admin/`);
-  output(`State: ${options.databasePath ?? ":memory:"}`);
-  output("");
-  output("Next:");
-  output(`  curl http://${displayHost}:${port}/health`);
-  output("  npm run lip -- doctor");
-  output("  npm run example:sdk");
+  const apiBaseUrl = `http://${displayHost}:${port}`;
+  const commandPrefix = process.env.npm_lifecycle_event ? "npm run lip --" : "lip";
+  const connectionArgs = `${shellToken(apiBaseUrl)} --api-key ${shellToken(options.apiKey)}`;
+  output(formatServerReady({
+    adminUrl: `${apiBaseUrl}/admin/`,
+    apiBaseUrl,
+    apiKey: options.apiKey,
+    databasePath: options.databasePath ?? ":memory:",
+    discoveryUrl: `${apiBaseUrl}/.well-known/lip`,
+    doctorCommand: `${commandPrefix} doctor ${connectionArgs}`,
+    testCommand: `${commandPrefix} test ${connectionArgs}`
+  }));
 
   await new Promise<void>((resolve) => {
     const close = (): void => {

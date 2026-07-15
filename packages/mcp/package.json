@@ -1,0 +1,35 @@
+{
+  "name": "@loyalty-interchange/mcp",
+  "version": "0.1.0",
+  "description": "Model Context Protocol server for Loyalty Interchange Protocol docs and validation.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/server.d.ts",
+      "import": "./dist/server.js"
+    },
+    "./server": {
+      "types": "./dist/server.d.ts",
+      "import": "./dist/server.js"
+    },
+    "./lib": {
+      "types": "./dist/lib.d.ts",
+      "import": "./dist/lib.js"
+    }
+  },
+  "bin": {
+    "lip-mcp": "./dist/server.js"
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -b",
+    "prepack": "npm run build"
+  },
+  "dependencies": {
+    "@loyalty-interchange/protocol": "0.1.0",
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "yaml": "^2.9.0",
+    "zod": "^3.25.76"
+  }
+}

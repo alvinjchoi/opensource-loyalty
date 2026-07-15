@@ -10,12 +10,32 @@ Use `spec/` for the normative protocol contract.
 
 ## Quick start
 
+Fastest path with Docker:
+
 ```sh
+git clone https://github.com/alvinjchoi/opensource-loyalty.git
+cd opensource-loyalty
+docker compose up --build
+```
+
+Developer path from source. Use npm; this repo uses npm workspaces and
+`package-lock.json`.
+
+```sh
+git clone https://github.com/alvinjchoi/opensource-loyalty.git
+cd opensource-loyalty
 npm install
 npm start
 ```
 
-Open `http://127.0.0.1:3210/admin/` and sign in with `lip-dev-key`.
+The startup log prints the Admin URL and Admin/API key:
+
+```text
+Admin: http://127.0.0.1:3210/admin/
+Admin/API key: lip-dev-key
+```
+
+Open the Admin URL and sign in with that key.
 
 The local server exposes:
 
@@ -24,12 +44,39 @@ The local server exposes:
 - Discovery: `http://127.0.0.1:3210/.well-known/lip`
 - Admin dashboard: `http://127.0.0.1:3210/admin/`
 
-Then verify the environment:
+Then verify the environment. Source users can run:
 
 ```sh
-npm run lip -- doctor
-npm run lip -- test
+npm run lip -- doctor http://127.0.0.1:3210 --api-key lip-dev-key
+npm run lip -- test http://127.0.0.1:3210 --api-key lip-dev-key
 ```
+
+Docker-only users can run:
+
+```sh
+curl http://127.0.0.1:3210/health
+curl http://127.0.0.1:3210/lip/v1/capabilities \
+  -H 'Authorization: Bearer lip-dev-key'
+```
+
+## Using LIP with AI
+
+Guides for building with Cursor, Claude Code, Codex, and other coding agents:
+
+- [Using LIP with AI](using-lip-with-ai.md): CLI, spec/OpenAPI context, SDK,
+  webhooks, BFF integration pattern, MCP notes, and agent pitfalls.
+- [AI prompts](ai-prompts.md): copy/paste prompts for enroll, checkout preview,
+  webhooks, refunds, validation, and e2e tests.
+- [`llms.txt`](../llms.txt): compact repo index — point agents here first.
+
+## Agent setup
+
+```bash
+npx skills add .
+npm run lip -- init    # prints skills + MCP hints
+```
+
+Enable MCP: [`mcp.json`](mcp.json) · Skills: [`skills/README.md`](skills/README.md)
 
 ## Getting started
 

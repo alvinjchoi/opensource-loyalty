@@ -137,6 +137,28 @@ paths:
         default:
           $ref: "#/components/responses/Problem"
       x-lip-safe-to-retry: true
+  /ledger/manual-adjustments:
+    post:
+      operationId: postManualAdjustment
+      summary: Credit or debit points with an operator classification
+      tags:
+        - Ledger
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ManualAdjustmentRequest"
+      responses:
+        "201":
+          description: Credit or debit points with an operator classification
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LedgerResponse"
+        default:
+          $ref: "#/components/responses/Problem"
+      x-lip-safe-to-retry: false
   /members/lookup:
     post:
       operationId: lookupMember
@@ -1185,6 +1207,8 @@ components:
               - const: account.get
                 type: string
               - const: ledger.list
+                type: string
+              - const: ledger.manual_adjustment
                 type: string
         reward_effects:
           minItems: 1
@@ -2827,6 +2851,24 @@ components:
           pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
           description: Opaque, stable identifier within the owning system.
           type: string
+        classification:
+          anyOf:
+            - const: bonus
+              type: string
+            - const: gift
+              type: string
+            - const: migration
+              type: string
+            - const: service_recovery
+              type: string
+            - const: correction
+              type: string
+        reason:
+          minLength: 1
+          maxLength: 255
+          type: string
+        qualifies_for_tier:
+          type: boolean
     LedgerListRequest:
       title: LedgerListRequest
       additionalProperties: false
@@ -3063,6 +3105,24 @@ components:
                 pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
                 description: Opaque, stable identifier within the owning system.
                 type: string
+              classification:
+                anyOf:
+                  - const: bonus
+                    type: string
+                  - const: gift
+                    type: string
+                  - const: migration
+                    type: string
+                  - const: service_recovery
+                    type: string
+                  - const: correction
+                    type: string
+              reason:
+                minLength: 1
+                maxLength: 255
+                type: string
+              qualifies_for_tier:
+                type: boolean
         next_cursor:
           minLength: 1
           maxLength: 512
@@ -3195,6 +3255,24 @@ components:
               pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
               description: Opaque, stable identifier within the owning system.
               type: string
+            classification:
+              anyOf:
+                - const: bonus
+                  type: string
+                - const: gift
+                  type: string
+                - const: migration
+                  type: string
+                - const: service_recovery
+                  type: string
+                - const: correction
+                  type: string
+            reason:
+              minLength: 1
+              maxLength: 255
+              type: string
+            qualifies_for_tier:
+              type: boolean
         balances:
           type: array
           items:
@@ -3492,6 +3570,24 @@ components:
                       pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
                       description: Opaque, stable identifier within the owning system.
                       type: string
+                    classification:
+                      anyOf:
+                        - const: bonus
+                          type: string
+                        - const: gift
+                          type: string
+                        - const: migration
+                          type: string
+                        - const: service_recovery
+                          type: string
+                        - const: correction
+                          type: string
+                    reason:
+                      minLength: 1
+                      maxLength: 255
+                      type: string
+                    qualifies_for_tier:
+                      type: boolean
             - additionalProperties: false
               type: object
               required:
@@ -4720,6 +4816,113 @@ components:
               as_of:
                 format: date-time
                 type: string
+    ManualAdjustmentRequest:
+      title: ManualAdjustmentRequest
+      additionalProperties: false
+      type: object
+      required:
+        - context
+        - member_id
+        - program_id
+        - adjustment_id
+        - amount
+        - classification
+        - reason
+        - qualifies_for_tier
+      properties:
+        context:
+          additionalProperties: false
+          type: object
+          required:
+            - protocol_version
+            - profile
+            - request_id
+            - idempotency_key
+            - occurred_at
+            - source
+          properties:
+            protocol_version:
+              const: "1.0"
+              type: string
+            profile:
+              const: foodservice/1.0
+              type: string
+            request_id:
+              minLength: 1
+              maxLength: 128
+              pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
+              description: Opaque, stable identifier within the owning system.
+              type: string
+            idempotency_key:
+              minLength: 8
+              maxLength: 255
+              type: string
+            occurred_at:
+              format: date-time
+              type: string
+            source:
+              additionalProperties: false
+              type: object
+              required:
+                - system
+              properties:
+                system:
+                  minLength: 1
+                  maxLength: 128
+                  pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
+                  description: Opaque, stable identifier within the owning system.
+                  type: string
+                instance:
+                  minLength: 1
+                  maxLength: 128
+                  pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
+                  description: Opaque, stable identifier within the owning system.
+                  type: string
+        member_id:
+          minLength: 1
+          maxLength: 128
+          pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
+          description: Opaque, stable identifier within the owning system.
+          type: string
+        program_id:
+          minLength: 1
+          maxLength: 128
+          pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
+          description: Opaque, stable identifier within the owning system.
+          type: string
+        adjustment_id:
+          minLength: 1
+          maxLength: 128
+          pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
+          description: Opaque, stable identifier within the owning system.
+          type: string
+        amount:
+          anyOf:
+            - maximum: -1
+              type: integer
+            - minimum: 1
+              type: integer
+        classification:
+          anyOf:
+            - const: bonus
+              type: string
+            - const: gift
+              type: string
+            - const: migration
+              type: string
+            - const: service_recovery
+              type: string
+            - const: correction
+              type: string
+        reason:
+          minLength: 1
+          maxLength: 255
+          type: string
+        qualifies_for_tier:
+          type: boolean
+        expires_at:
+          format: date-time
+          type: string
     Money:
       title: Money
       additionalProperties: false

@@ -78,6 +78,9 @@
     "MemberLookupResponse": {
       "$ref": "./MemberLookupResponse.json"
     },
+    "ManualAdjustmentRequest": {
+      "$ref": "./ManualAdjustmentRequest.json"
+    },
     "Money": {
       "$ref": "./Money.json"
     },

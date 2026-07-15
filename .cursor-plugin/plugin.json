@@ -1,0 +1,6 @@
+{
+  "name": "lip-skills",
+  "version": "0.1.0",
+  "description": "Loyalty Interchange Protocol agent skills and MCP server",
+  "skills": "./skills"
+}

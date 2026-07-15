@@ -133,6 +133,38 @@
       "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
       "description": "Opaque, stable identifier within the owning system.",
       "type": "string"
+    },
+    "classification": {
+      "anyOf": [
+        {
+          "const": "bonus",
+          "type": "string"
+        },
+        {
+          "const": "gift",
+          "type": "string"
+        },
+        {
+          "const": "migration",
+          "type": "string"
+        },
+        {
+          "const": "service_recovery",
+          "type": "string"
+        },
+        {
+          "const": "correction",
+          "type": "string"
+        }
+      ]
+    },
+    "reason": {
+      "minLength": 1,
+      "maxLength": 255,
+      "type": "string"
+    },
+    "qualifies_for_tier": {
+      "type": "boolean"
     }
   }
 }

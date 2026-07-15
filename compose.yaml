@@ -7,6 +7,9 @@ services:
       LIP_API_KEY: ${LIP_API_KEY:-lip-dev-key}
       LIP_DATABASE_PATH: /data/reference.db
       LIP_SEED_DEMO: ${LIP_SEED_DEMO:-true}
+      LIP_RATE_LIMIT_REQUESTS: ${LIP_RATE_LIMIT_REQUESTS:-120}
+      LIP_RATE_LIMIT_WINDOW_MS: ${LIP_RATE_LIMIT_WINDOW_MS:-60000}
+      LIP_STRUCTURED_LOGS: ${LIP_STRUCTURED_LOGS:-true}
     ports:
       - "${LIP_PORT:-3210}:3210"
     volumes:

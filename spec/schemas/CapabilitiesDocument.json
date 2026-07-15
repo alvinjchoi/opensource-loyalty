@@ -75,6 +75,10 @@
           {
             "const": "ledger.list",
             "type": "string"
+          },
+          {
+            "const": "ledger.manual_adjustment",
+            "type": "string"
           }
         ]
       }

@@ -4,27 +4,46 @@ This is the shortest path from a clean clone to a working loyalty request.
 
 ## 1. Start the sandbox
 
+If you just want to try the project, use Docker:
+
 ```sh
+git clone https://github.com/alvinjchoi/opensource-loyalty.git
+cd opensource-loyalty
+docker compose up --build
+```
+
+If you want to develop against the source code, use Node.js 20.19 or newer and
+npm. The repo uses npm workspaces with `package-lock.json`; pnpm is not the
+supported install path unless the project is intentionally migrated later.
+
+```sh
+git clone https://github.com/alvinjchoi/opensource-loyalty.git
+cd opensource-loyalty
 npm install
 npm start
 ```
 
-Keep that terminal open. The local sandbox runs at:
+Use `npm ci` instead of `npm install` when you want a clean install that follows
+the lockfile exactly.
+
+Keep that terminal open. It prints the Admin URL and Admin/API key:
+
+```text
+Admin: http://127.0.0.1:3210/admin/
+Admin/API key: lip-dev-key
+```
+
+The same key is used for dashboard sign-in and Bearer API requests. If you
+started with Docker and need to see the key again, run:
+
+```sh
+docker compose logs lip
+```
+
+The local sandbox API runs at:
 
 ```text
 http://127.0.0.1:3210
-```
-
-Use this development API key:
-
-```text
-lip-dev-key
-```
-
-Open the dashboard:
-
-```text
-http://127.0.0.1:3210/admin/
 ```
 
 ## 2. Check that it works
@@ -32,22 +51,14 @@ http://127.0.0.1:3210/admin/
 In a second terminal:
 
 ```sh
-curl http://127.0.0.1:3210/health
+npm run lip -- doctor http://127.0.0.1:3210 --api-key lip-dev-key
+npm run lip -- test http://127.0.0.1:3210 --api-key lip-dev-key
 ```
 
-Expected response:
-
-```json
-{
-  "status": "ok",
-  "protocol_version": "1.0",
-  "profile": "foodservice/1.0"
-}
-```
-
-Then check authenticated capabilities:
+If you are using Docker without local Node dependencies installed, use curl:
 
 ```sh
+curl http://127.0.0.1:3210/health
 curl http://127.0.0.1:3210/lip/v1/capabilities \
   -H 'Authorization: Bearer lip-dev-key'
 ```

@@ -21,8 +21,8 @@ npm install
 - [x] Add a minimal [Getting started](docs/getting-started.md) guide.
 - [x] Link README and docs index to the minimal guide before deeper docs.
 - [x] Print concrete next steps after `lip quickstart` starts.
-- [ ] Add a generated `llms.txt` and compact endpoint index for agent-assisted
-  onboarding.
+- [x] Add [`llms.txt`](llms.txt), [Using LIP with AI](docs/using-lip-with-ai.md),
+  and [AI prompts](docs/ai-prompts.md) for agent-assisted onboarding.
 - [ ] Add copy/paste SDK snippets for enroll, evaluate, accrue, and redeem.
 - [ ] Add a first-run checklist to the Admin API page.
 
@@ -179,7 +179,7 @@ multi-tier restaurant programs without relying on vendor-specific campaigns.
 - [x] FIFO lot consumption and exact-lot restoration on redemption reversal
 - [x] Source-linked expiration ledger entries for only the unspent remainder
 - [ ] Expiration warning event and delivery profile
-- [ ] Classified bonus, gift, migration, and manual qualification entries
+- [x] Classified bonus, gift, migration, service-recovery, and correction entries
 - [ ] Tier-achievement reward issuance
 - [ ] Reward non-stacking policy and daily redemption caps
 
@@ -244,7 +244,8 @@ Goal: providers can operate LIP safely at production scale.
 
 - [ ] AsyncAPI contract for all lifecycle events
 - [ ] OAuth 2.0 client-credentials profile and operation scopes
-- [ ] Webhook signing, replay protection, retry, ordering, and dead-letter rules
+- [x] Reference webhook signing, bounded retry, and SQLite outbox restart recovery
+- [ ] Normative replay protection, ordering, dead-letter, and operator replay rules
 - [ ] Capability and version negotiation policy
 - [ ] Rate-limit and retention declarations
 - [ ] Trace correlation and observability guidance
