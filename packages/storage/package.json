@@ -1,0 +1,21 @@
+{
+  "name": "@loyalty-interchange/storage",
+  "version": "0.1.0",
+  "description": "Persistence contracts for Loyalty Interchange reference platforms.",
+  "license": "Apache-2.0",
+  "sideEffects": false,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -b",
+    "prepack": "npm run build"
+  }
+}

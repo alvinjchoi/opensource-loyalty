@@ -1,0 +1,28 @@
+{
+  "name": "@loyalty-interchange/storage-sqlite",
+  "version": "0.1.0",
+  "description": "SQLite state store for the Loyalty Interchange reference platform.",
+  "license": "Apache-2.0",
+  "sideEffects": false,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -b",
+    "prepack": "npm run build"
+  },
+  "dependencies": {
+    "@loyalty-interchange/storage": "0.1.0",
+    "better-sqlite3": "^12.11.1"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13"
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "name": "@loyalty-interchange/server",
+  "version": "0.1.0",
+  "description": "HTTP reference binding for Loyalty Interchange Protocol.",
+  "license": "Apache-2.0",
+  "sideEffects": false,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist"],
+  "bin": {
+    "lip-reference-server": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "prepack": "npm run build"
+  },
+  "dependencies": {
+    "@loyalty-interchange/protocol": "0.1.0",
+    "@loyalty-interchange/reference": "0.1.0",
+    "@loyalty-interchange/storage-sqlite": "0.1.0",
+    "@sinclair/typebox": "^0.34.52"
+  }
+}
