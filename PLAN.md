@@ -43,16 +43,17 @@ portable LIP contract focused on interoperability.
   snapshot outside `/lip/v1`.
 - [x] Drive the dashboard Configure view from Admin API state instead of
   hard-coded frontend cards.
-- [ ] Add a persisted Admin draft model with create/update/discard operations.
-- [ ] Add program draft validation that returns field-level errors and blocking
+- [x] Add a persisted Admin draft model with create/update/discard operations.
+- [x] Add program draft validation that returns field-level errors and blocking
   publish requirements.
-- [ ] Add publish and rollback operations that rebuild the reference engine
+- [x] Add publish and rollback operations that rebuild the reference engine
   from a versioned program definition.
 
 ### Phase 2: platform APIs OpenLoyalty already has
 
-- [ ] Reward CRUD, reward categories, issued reward wallet, cancel/reissue, and
-  external coupon artifacts.
+- [ ] Reward CRUD, reward categories, and reusable campaign authoring.
+- [x] Issued reward wallet with code/QR artifacts, claim through redemption,
+  cancellation, expiration, reversal restoration, and restart persistence.
 - [ ] Manual point adjustments, bonus/gift/migration classifications, transfer
   rules, and expiration job controls.
 - [ ] Wallet credit account units, liability summaries, and credit adjustment
@@ -196,7 +197,8 @@ turning implementation-specific operations into normative LIP requirements.
 - [x] Storage contract separated from the reference engine
 - [x] SQLite adapter with atomic replacement and WAL mode
 - [x] Seeded QSR member, tier, accrual, redemption, and adjustment activity
-- [x] Authenticated, read-only Admin API outside the `/lip/v1` namespace
+- [x] Authenticated Admin API outside `/lip/v1`, including CSRF-protected
+  program draft, publish, and rollback writes
 - [x] Responsive Admin views for health, members, ledger, program, and developer status
 - [x] One-command startup with durable state, reset, and seed controls
 - [x] Docker volume persistence and package-level storage verification

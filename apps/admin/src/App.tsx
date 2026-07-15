@@ -88,6 +88,31 @@ function statusTone(status: ProgramModelStatus): "success" | "info" | "muted" {
   return "muted";
 }
 
+function adminCsrfToken(): string {
+  const cookie = document.cookie
+    .split(";")
+    .map((value) => value.trim())
+    .find((value) => value.startsWith("lip_admin_csrf="));
+  return cookie ? decodeURIComponent(cookie.slice("lip_admin_csrf=".length)) : "";
+}
+
+async function adminWrite(path: string, method: "PUT" | "POST" | "DELETE", body: unknown): Promise<unknown> {
+  const response = await fetch(path, {
+    method,
+    credentials: "same-origin",
+    headers: {
+      "content-type": "application/json",
+      "x-lip-csrf": adminCsrfToken()
+    },
+    body: JSON.stringify(body)
+  });
+  if (!response.ok) {
+    const problem = await response.json().catch(() => undefined) as { detail?: string; title?: string } | undefined;
+    throw new Error(problem?.detail ?? problem?.title ?? `Admin API returned HTTP ${response.status}`);
+  }
+  return response.json();
+}
+
 function memberSubtitle(member: AdminMember["member"]): string {
   if (typeof member.attributes?.email === "string") return member.attributes.email;
   return member.member_id.replace(/^demo-member-/, "customer-");
@@ -177,7 +202,7 @@ function Login({ bootstrap, onAuthenticated }: {
         </form>
 
         <p className="login-meta">
-          {bootstrap ? "Server online" : "Checking server"} · Admin API {bootstrap?.admin_api_version ?? "0.1"} · {storage?.driver ?? "local"}
+          {bootstrap ? "Server online" : "Checking server"} · Admin API {bootstrap?.admin_api_version ?? "0.2"} · {storage?.driver ?? "local"}
         </p>
       </section>
     </main>
@@ -390,13 +415,88 @@ function Ledger({ snapshot }: { snapshot: AdminSnapshot }) {
   );
 }
 
-function Program({ snapshot }: { snapshot: AdminSnapshot }) {
+function Program({ snapshot, onChanged }: {
+  snapshot: AdminSnapshot;
+  onChanged: () => Promise<void>;
+}) {
   const { program } = snapshot;
   const { program_configuration: configuration } = snapshot;
+  const management = snapshot.program_management;
   const [selectedModel, setSelectedModel] = useState<ProgramModelId>(configuration.current_model_id);
+  const [programJson, setProgramJson] = useState(() =>
+    JSON.stringify(management?.draft?.program ?? management?.active_program ?? {}, null, 2)
+  );
+  const [dirty, setDirty] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [writeError, setWriteError] = useState("");
+  const [writeNotice, setWriteNotice] = useState("");
   useEffect(() => {
     setSelectedModel(configuration.current_model_id);
   }, [configuration.current_model_id]);
+  useEffect(() => {
+    setProgramJson(JSON.stringify(
+      management?.draft?.program ?? management?.active_program ?? {},
+      null,
+      2
+    ));
+    setDirty(false);
+  }, [management?.active_revision, management?.draft?.version]);
+
+  async function runWrite(action: () => Promise<void>, success: string) {
+    setBusy(true);
+    setWriteError("");
+    setWriteNotice("");
+    try {
+      await action();
+      setWriteNotice(success);
+      await onChanged();
+    } catch (cause) {
+      setWriteError(cause instanceof Error ? cause.message : "Program update failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function saveDraft() {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(programJson) as unknown;
+    } catch {
+      setWriteError("Draft must be valid JSON before it can be saved.");
+      return;
+    }
+    await runWrite(async () => {
+      await adminWrite("/admin/api/v1/program/draft", "PUT", { program: parsed });
+    }, "Draft saved and validated.");
+  }
+
+  async function validateDraft() {
+    await runWrite(async () => {
+      await adminWrite("/admin/api/v1/program/draft/validate", "POST", {});
+    }, "Draft validation refreshed.");
+  }
+
+  async function discardDraft() {
+    await runWrite(async () => {
+      await adminWrite("/admin/api/v1/program/draft", "DELETE", {});
+    }, "Draft discarded.");
+  }
+
+  async function publishDraft() {
+    if (!management?.draft) return;
+    await runWrite(async () => {
+      await adminWrite("/admin/api/v1/program/publish", "POST", {
+        expected_draft_version: management.draft!.version
+      });
+    }, "Program published live.");
+  }
+
+  async function rollback(revision: number) {
+    if (!window.confirm(`Rollback the live program to revision ${revision}?`)) return;
+    await runWrite(async () => {
+      await adminWrite("/admin/api/v1/program/rollback", "POST", { revision });
+    }, `Program rolled back from revision ${revision}.`);
+  }
   const model = configuration.templates.find((candidate) => candidate.model_id === selectedModel) ??
     configuration.templates.find((candidate) => candidate.model_id === configuration.current_model_id) ??
     configuration.templates[0]!;
@@ -416,6 +516,82 @@ function Program({ snapshot }: { snapshot: AdminSnapshot }) {
         </div>
         <span className="record-count">Current program · {displayProgramName(program)}</span>
       </div>
+      {management ? (
+        <Section
+          heading={`Published revision ${management.active_revision}`}
+          description="Edit a versioned JSON draft. Publishing updates earning, tier, expiration, and reward policy live without changing member balances or ledger history."
+        >
+          <div className="program-editor">
+            <textarea
+              aria-label="Program definition JSON"
+              onChange={(event) => {
+                setProgramJson(event.target.value);
+                setDirty(true);
+              }}
+              spellCheck={false}
+              value={programJson}
+            />
+            <div className="program-editor-actions">
+              <CommandButton disabled={busy || !dirty} onClick={() => void saveDraft()}>
+                Save draft
+              </CommandButton>
+              <CommandButton
+                disabled={busy || !management.draft || dirty}
+                onClick={() => void validateDraft()}
+                variant="text"
+              >
+                Validate
+              </CommandButton>
+              <CommandButton
+                disabled={busy || !management.draft}
+                onClick={() => void discardDraft()}
+                variant="text"
+              >
+                Discard
+              </CommandButton>
+              <CommandButton
+                disabled={busy || !management.draft?.validation.ok || dirty}
+                onClick={() => void publishDraft()}
+              >
+                Publish live
+              </CommandButton>
+              <span className="record-count">
+                {management.draft
+                  ? `Draft v${management.draft.version} · ${management.draft.validation.ok ? "valid" : "invalid"}`
+                  : "No unpublished draft"}
+              </span>
+            </div>
+            {management.draft && !management.draft.validation.ok ? (
+              <div className="program-validation" role="alert">
+                {management.draft.validation.issues.map((issue) => (
+                  <div key={`${issue.path}-${issue.message}`}><code>{issue.path}</code> {issue.message}</div>
+                ))}
+              </div>
+            ) : null}
+            {writeError ? <div className="error-banner" role="alert">{writeError}</div> : null}
+            {writeNotice ? <div className="program-notice" role="status">{writeNotice}</div> : null}
+          </div>
+          {management.history.length > 0 ? (
+            <div className="program-history">
+              <h4>Published history</h4>
+              {management.history.map((revision) => (
+                <div key={revision.revision}>
+                  <span>
+                    Revision {revision.revision} · {String(revision.program.name ?? revision.program.program_id)} · {formatDate(revision.published_at, true)}
+                  </span>
+                  <CommandButton
+                    disabled={busy}
+                    onClick={() => void rollback(revision.revision)}
+                    variant="text"
+                  >
+                    Roll back
+                  </CommandButton>
+                </div>
+              ))}
+            </div>
+          ) : null}
+        </Section>
+      ) : null}
       <section className="config-layout">
         <div className="model-picker">
           <div className="model-picker-heading">
@@ -552,7 +728,7 @@ function Developer({ snapshot }: { snapshot: AdminSnapshot }) {
       <Section className="capability-grid">
         <div><Database size={18} /><span>Persistence</span><strong>{snapshot.platform.storage.persistent ? "SQLite WAL" : "Memory"}</strong></div>
         <div><ShieldCheck size={18} /><span>Admin session</span><strong>HttpOnly cookie</strong></div>
-        <div><CircleGauge size={18} /><span>Loyalty API</span><strong>11 operations</strong></div>
+        <div><CircleGauge size={18} /><span>Loyalty API</span><strong>15 operations</strong></div>
       </Section>
       <Section>
         <div className="section-heading">
@@ -674,7 +850,7 @@ export function App() {
           {view === "overview" ? <Overview snapshot={snapshot} onViewMembers={() => setView("members")} /> : null}
           {view === "members" ? <Members members={snapshot.members} /> : null}
           {view === "ledger" ? <Ledger snapshot={snapshot} /> : null}
-          {view === "program" ? <Program snapshot={snapshot} /> : null}
+          {view === "program" ? <Program snapshot={snapshot} onChanged={refresh} /> : null}
           {view === "developer" ? <Developer snapshot={snapshot} /> : null}
         </main>
       </div>

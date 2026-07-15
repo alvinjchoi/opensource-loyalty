@@ -414,6 +414,30 @@ td code { display: block; margin-top: 3px; max-width: 260px; overflow: hidden; t
 .expiring-list div { display: flex; font-size: 10px; justify-content: space-between; padding: 6px 0; }
 .expiring-list p { color: var(--muted); font-size: 10px; margin: 0; }
 
+.program-editor { padding: 16px; }
+.program-editor textarea {
+  background: #fafafa;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.55;
+  min-height: 360px;
+  padding: 14px;
+  resize: vertical;
+  width: 100%;
+}
+.program-editor textarea:focus { border-color: #a3a3a3; outline: 2px solid #e5e5e5; }
+.program-editor-actions { align-items: center; display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.program-editor-actions .record-count { margin-left: auto; }
+.program-validation { background: #fff7ed; border-radius: 8px; color: #9a3412; font-size: 11px; margin-top: 12px; padding: 10px 12px; }
+.program-validation div + div { margin-top: 5px; }
+.program-notice { background: var(--green-soft); border-radius: 8px; color: var(--green); font-size: 11px; margin-top: 12px; padding: 10px 12px; }
+.program-history { border-top: 1px solid var(--border); padding: 14px 16px 16px; }
+.program-history h4 { font-size: 11px; margin: 0 0 7px; }
+.program-history > div { align-items: center; display: flex; font-size: 10px; justify-content: space-between; min-height: 34px; }
+
 .policy-band { margin-bottom: 16px; padding: 0 17px; }
 .policy-band-heading { border-bottom: 1px solid var(--border); margin: 0 -17px; padding: 15px 17px; }
 .policy-band dl { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin: 0; }

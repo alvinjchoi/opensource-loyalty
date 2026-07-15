@@ -159,6 +159,72 @@ paths:
         default:
           $ref: "#/components/responses/Problem"
       x-lip-safe-to-retry: false
+  /issued-rewards/list:
+    post:
+      operationId: listIssuedRewards
+      summary: List a member's issued reward wallet
+      tags:
+        - Issued Rewards
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IssuedRewardListRequest"
+      responses:
+        "200":
+          description: List a member's issued reward wallet
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IssuedRewardListResponse"
+        default:
+          $ref: "#/components/responses/Problem"
+      x-lip-safe-to-retry: true
+  /issued-rewards/issue:
+    post:
+      operationId: issueReward
+      summary: Issue a member-specific reward or coupon artifact
+      tags:
+        - Issued Rewards
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IssuedRewardIssueRequest"
+      responses:
+        "201":
+          description: Issue a member-specific reward or coupon artifact
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IssuedRewardResponse"
+        default:
+          $ref: "#/components/responses/Problem"
+      x-lip-safe-to-retry: false
+  /issued-rewards/cancel:
+    post:
+      operationId: cancelIssuedReward
+      summary: Cancel an unclaimed issued reward
+      tags:
+        - Issued Rewards
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IssuedRewardCancelRequest"
+      responses:
+        "200":
+          description: Cancel an unclaimed issued reward
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IssuedRewardResponse"
+        default:
+          $ref: "#/components/responses/Problem"
+      x-lip-safe-to-retry: false
   /members/lookup:
     post:
       operationId: lookupMember
@@ -1209,6 +1275,12 @@ components:
               - const: ledger.list
                 type: string
               - const: ledger.manual_adjustment
+                type: string
+              - const: issued_reward.list
+                type: string
+              - const: issued_reward.issue
+                type: string
+              - const: issued_reward.cancel
                 type: string
         reward_effects:
           minItems: 1
@@ -2707,6 +2779,560 @@ components:
           type: object
           patternProperties:
             ^(.*)$: {}
+    IssuedReward:
+      title: IssuedReward
+      additionalProperties: false
+      type: object
+      required:
+        - issued_reward_id
+        - member_id
+        - program_id
+        - reward_id
+        - status
+        - issued_at
+      properties:
+        issued_reward_id:
+          minLength: 1
+          maxLength: 128
+          pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
+          description: Opaque, stable identifier within the owning system.
+          type: string
+        member_id:
+          minLength: 1
+          maxLength: 128
+          pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
+          description: Opaque, stable identifier within the owning system.
+          type: string
+        program_id:
+          minLength: 1
+          maxLength: 128
+          pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
+          description: Opaque, stable identifier within the owning system.
+          type: string
+        reward_id:
+          minLength: 1
+          maxLength: 128
+          pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
+          description: Opaque, stable identifier within the owning system.
+          type: string
+        status:
+          anyOf:
+            - const: issued
+              type: string
+            - const: redeemed
+              type: string
+            - const: cancelled
+              type: string
+            - const: expired
+              type: string
+        issued_at:
+          format: date-time
+          type: string
+        expires_at:
+          format: date-time
+          type: string
+        redeemed_at:
+          format: date-time
+          type: string
+        cancelled_at:
+          format: date-time
+          type: string
+        cancellation_reason:
+          minLength: 1
+          maxLength: 255
+          type: string
+        artifact:
+          additionalProperties: false
+          type: object
+          required:
+            - type
+            - value
+          properties:
+            type:
+              anyOf:
+                - const: code
+                  type: string
+                - const: qr_code
+                  type: string
+            value:
+              minLength: 1
+              maxLength: 512
+              type: string
+    IssuedRewardCancelRequest:
+      title: IssuedRewardCancelRequest
+      additionalProperties: false
+      type: object
+      required:
+        - context
+        - issued_reward_id
+        - reason
+      properties:
+        context:
+          additionalProperties: false
+          type: object
+          required:
+            - protocol_version
+            - profile
+            - request_id
+            - idempotency_key
+            - occurred_at
+            - source
+          properties:
+            protocol_version:
+              const: "1.0"
+              type: string
+            profile:
+              const: foodservice/1.0
+              type: string
+            request_id:
+              minLength: 1
+              maxLength: 128
+              pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
+              description: Opaque, stable identifier within the owning system.
+              type: string
+            idempotency_key:
+              minLength: 8
+              maxLength: 255
+              type: string
+            occurred_at:
+              format: date-time
+              type: string
+            source:
+              additionalProperties: false
+              type: object
+              required:
+                - system
+              properties:
+                system:
+                  minLength: 1
+                  maxLength: 128
+                  pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
+                  description: Opaque, stable identifier within the owning system.
+                  type: string
+                instance:
+                  minLength: 1
+                  maxLength: 128
+                  pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
+                  description: Opaque, stable identifier within the owning system.
+                  type: string
+        issued_reward_id:
+          minLength: 1
+          maxLength: 128
+          pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
+          description: Opaque, stable identifier within the owning system.
+          type: string
+        reason:
+          minLength: 1
+          maxLength: 255
+          type: string
+    IssuedRewardIssueRequest:
+      title: IssuedRewardIssueRequest
+      additionalProperties: false
+      type: object
+      required:
+        - context
+        - issued_reward_id
+        - member_id
+        - program_id
+        - reward_id
+      properties:
+        context:
+          additionalProperties: false
+          type: object
+          required:
+            - protocol_version
+            - profile
+            - request_id
+            - idempotency_key
+            - occurred_at
+            - source
+          properties:
+            protocol_version:
+              const: "1.0"
+              type: string
+            profile:
+              const: foodservice/1.0
+              type: string
+            request_id:
+              minLength: 1
+              maxLength: 128
+              pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
+              description: Opaque, stable identifier within the owning system.
+              type: string
+            idempotency_key:
+              minLength: 8
+              maxLength: 255
+              type: string
+            occurred_at:
+              format: date-time
+              type: string
+            source:
+              additionalProperties: false
+              type: object
+              required:
+                - system
+              properties:
+                system:
+                  minLength: 1
+                  maxLength: 128
+                  pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
+                  description: Opaque, stable identifier within the owning system.
+                  type: string
+                instance:
+                  minLength: 1
+                  maxLength: 128
+                  pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
+                  description: Opaque, stable identifier within the owning system.
+                  type: string
+        issued_reward_id:
+          minLength: 1
+          maxLength: 128
+          pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
+          description: Opaque, stable identifier within the owning system.
+          type: string
+        member_id:
+          minLength: 1
+          maxLength: 128
+          pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
+          description: Opaque, stable identifier within the owning system.
+          type: string
+        program_id:
+          minLength: 1
+          maxLength: 128
+          pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
+          description: Opaque, stable identifier within the owning system.
+          type: string
+        reward_id:
+          minLength: 1
+          maxLength: 128
+          pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
+          description: Opaque, stable identifier within the owning system.
+          type: string
+        expires_at:
+          format: date-time
+          type: string
+        artifact:
+          additionalProperties: false
+          type: object
+          required:
+            - type
+            - value
+          properties:
+            type:
+              anyOf:
+                - const: code
+                  type: string
+                - const: qr_code
+                  type: string
+            value:
+              minLength: 1
+              maxLength: 512
+              type: string
+    IssuedRewardListRequest:
+      title: IssuedRewardListRequest
+      additionalProperties: false
+      type: object
+      required:
+        - context
+        - member_id
+        - program_id
+      properties:
+        context:
+          additionalProperties: false
+          type: object
+          required:
+            - protocol_version
+            - profile
+            - request_id
+            - idempotency_key
+            - occurred_at
+            - source
+          properties:
+            protocol_version:
+              const: "1.0"
+              type: string
+            profile:
+              const: foodservice/1.0
+              type: string
+            request_id:
+              minLength: 1
+              maxLength: 128
+              pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
+              description: Opaque, stable identifier within the owning system.
+              type: string
+            idempotency_key:
+              minLength: 8
+              maxLength: 255
+              type: string
+            occurred_at:
+              format: date-time
+              type: string
+            source:
+              additionalProperties: false
+              type: object
+              required:
+                - system
+              properties:
+                system:
+                  minLength: 1
+                  maxLength: 128
+                  pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
+                  description: Opaque, stable identifier within the owning system.
+                  type: string
+                instance:
+                  minLength: 1
+                  maxLength: 128
+                  pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
+                  description: Opaque, stable identifier within the owning system.
+                  type: string
+        member_id:
+          minLength: 1
+          maxLength: 128
+          pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
+          description: Opaque, stable identifier within the owning system.
+          type: string
+        program_id:
+          minLength: 1
+          maxLength: 128
+          pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
+          description: Opaque, stable identifier within the owning system.
+          type: string
+        statuses:
+          minItems: 1
+          uniqueItems: true
+          type: array
+          items:
+            anyOf:
+              - const: issued
+                type: string
+              - const: redeemed
+                type: string
+              - const: cancelled
+                type: string
+              - const: expired
+                type: string
+    IssuedRewardListResponse:
+      title: IssuedRewardListResponse
+      additionalProperties: false
+      type: object
+      required:
+        - context
+        - issued_rewards
+      properties:
+        context:
+          additionalProperties: false
+          type: object
+          required:
+            - protocol_version
+            - profile
+            - request_id
+            - processed_at
+          properties:
+            protocol_version:
+              const: "1.0"
+              type: string
+            profile:
+              const: foodservice/1.0
+              type: string
+            request_id:
+              minLength: 1
+              maxLength: 128
+              pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
+              description: Opaque, stable identifier within the owning system.
+              type: string
+            processed_at:
+              format: date-time
+              type: string
+        issued_rewards:
+          type: array
+          items:
+            additionalProperties: false
+            type: object
+            required:
+              - issued_reward_id
+              - member_id
+              - program_id
+              - reward_id
+              - status
+              - issued_at
+            properties:
+              issued_reward_id:
+                minLength: 1
+                maxLength: 128
+                pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
+                description: Opaque, stable identifier within the owning system.
+                type: string
+              member_id:
+                minLength: 1
+                maxLength: 128
+                pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
+                description: Opaque, stable identifier within the owning system.
+                type: string
+              program_id:
+                minLength: 1
+                maxLength: 128
+                pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
+                description: Opaque, stable identifier within the owning system.
+                type: string
+              reward_id:
+                minLength: 1
+                maxLength: 128
+                pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
+                description: Opaque, stable identifier within the owning system.
+                type: string
+              status:
+                anyOf:
+                  - const: issued
+                    type: string
+                  - const: redeemed
+                    type: string
+                  - const: cancelled
+                    type: string
+                  - const: expired
+                    type: string
+              issued_at:
+                format: date-time
+                type: string
+              expires_at:
+                format: date-time
+                type: string
+              redeemed_at:
+                format: date-time
+                type: string
+              cancelled_at:
+                format: date-time
+                type: string
+              cancellation_reason:
+                minLength: 1
+                maxLength: 255
+                type: string
+              artifact:
+                additionalProperties: false
+                type: object
+                required:
+                  - type
+                  - value
+                properties:
+                  type:
+                    anyOf:
+                      - const: code
+                        type: string
+                      - const: qr_code
+                        type: string
+                  value:
+                    minLength: 1
+                    maxLength: 512
+                    type: string
+    IssuedRewardResponse:
+      title: IssuedRewardResponse
+      additionalProperties: false
+      type: object
+      required:
+        - context
+        - issued_reward
+      properties:
+        context:
+          additionalProperties: false
+          type: object
+          required:
+            - protocol_version
+            - profile
+            - request_id
+            - processed_at
+          properties:
+            protocol_version:
+              const: "1.0"
+              type: string
+            profile:
+              const: foodservice/1.0
+              type: string
+            request_id:
+              minLength: 1
+              maxLength: 128
+              pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
+              description: Opaque, stable identifier within the owning system.
+              type: string
+            processed_at:
+              format: date-time
+              type: string
+        issued_reward:
+          additionalProperties: false
+          type: object
+          required:
+            - issued_reward_id
+            - member_id
+            - program_id
+            - reward_id
+            - status
+            - issued_at
+          properties:
+            issued_reward_id:
+              minLength: 1
+              maxLength: 128
+              pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
+              description: Opaque, stable identifier within the owning system.
+              type: string
+            member_id:
+              minLength: 1
+              maxLength: 128
+              pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
+              description: Opaque, stable identifier within the owning system.
+              type: string
+            program_id:
+              minLength: 1
+              maxLength: 128
+              pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
+              description: Opaque, stable identifier within the owning system.
+              type: string
+            reward_id:
+              minLength: 1
+              maxLength: 128
+              pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
+              description: Opaque, stable identifier within the owning system.
+              type: string
+            status:
+              anyOf:
+                - const: issued
+                  type: string
+                - const: redeemed
+                  type: string
+                - const: cancelled
+                  type: string
+                - const: expired
+                  type: string
+            issued_at:
+              format: date-time
+              type: string
+            expires_at:
+              format: date-time
+              type: string
+            redeemed_at:
+              format: date-time
+              type: string
+            cancelled_at:
+              format: date-time
+              type: string
+            cancellation_reason:
+              minLength: 1
+              maxLength: 255
+              type: string
+            artifact:
+              additionalProperties: false
+              type: object
+              required:
+                - type
+                - value
+              properties:
+                type:
+                  anyOf:
+                    - const: code
+                      type: string
+                    - const: qr_code
+                      type: string
+                value:
+                  minLength: 1
+                  maxLength: 512
+                  type: string
     HealthDocument:
       title: HealthDocument
       additionalProperties: false
@@ -3628,6 +4254,12 @@ components:
                       description: Opaque, stable identifier within the owning system.
                       type: string
                     reward_id:
+                      minLength: 1
+                      maxLength: 128
+                      pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
+                      description: Opaque, stable identifier within the owning system.
+                      type: string
+                    issued_reward_id:
                       minLength: 1
                       maxLength: 128
                       pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
@@ -7015,6 +7647,12 @@ components:
           pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
           description: Opaque, stable identifier within the owning system.
           type: string
+        issued_reward_id:
+          minLength: 1
+          maxLength: 128
+          pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
+          description: Opaque, stable identifier within the owning system.
+          type: string
         order_id:
           minLength: 1
           maxLength: 128
@@ -7307,6 +7945,12 @@ components:
               description: Opaque, stable identifier within the owning system.
               type: string
             reward_id:
+              minLength: 1
+              maxLength: 128
+              pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
+              description: Opaque, stable identifier within the owning system.
+              type: string
+            issued_reward_id:
               minLength: 1
               maxLength: 128
               pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
@@ -7667,6 +8311,12 @@ components:
           description: Opaque, stable identifier within the owning system.
           type: string
         reward_id:
+          minLength: 1
+          maxLength: 128
+          pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
+          description: Opaque, stable identifier within the owning system.
+          type: string
+        issued_reward_id:
           minLength: 1
           maxLength: 128
           pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$

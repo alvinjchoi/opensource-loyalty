@@ -256,7 +256,7 @@ describe("SDK webhook signatures", () => {
 
 describe("generated OpenAPI client", () => {
   it("preserves paths, authentication, schema names, and retry safety from OpenAPI", () => {
-    expect(Object.keys(generatedOperations)).toHaveLength(15);
+    expect(Object.keys(generatedOperations)).toHaveLength(18);
     expect(generatedOperations.discoverLoyaltyProtocol).toMatchObject({
       path: "/.well-known/lip",
       authenticated: false,
@@ -282,6 +282,11 @@ describe("generated OpenAPI client", () => {
       safeToRetry: false,
       requestSchema: "ManualAdjustmentRequest",
       responseSchema: "LedgerResponse"
+    });
+    expect(generatedOperations.issueReward).toMatchObject({
+      path: "/lip/v1/issued-rewards/issue",
+      safeToRetry: false,
+      requestSchema: "IssuedRewardIssueRequest"
     });
   });
 
@@ -378,6 +383,28 @@ describe("LipClient", () => {
 
       const program = await client.programs.get({ program_id: "demo-foodservice" });
       expect(program.program.tiers).toHaveLength(3);
+
+      const issued = await client.issuedRewards.issue({
+        issued_reward_id: "sdk-issued-1",
+        member_id: "member-001",
+        program_id: "demo-foodservice",
+        reward_id: "one-dollar-off",
+        artifact: { type: "code", value: "SDK-COUPON-001" }
+      }, { idempotencyKey: "sdk-issued-key" });
+      expect(issued.issued_reward.status).toBe("issued");
+      const wallet = await client.issuedRewards.list({
+        member_id: "member-001",
+        program_id: "demo-foodservice",
+        statuses: ["issued"]
+      });
+      expect(wallet.issued_rewards).toEqual([
+        expect.objectContaining({ issued_reward_id: "sdk-issued-1" })
+      ]);
+      const cancelledIssued = await client.issuedRewards.cancel({
+        issued_reward_id: "sdk-issued-1",
+        reason: "Test cleanup"
+      }, { idempotencyKey: "sdk-issued-cancel-key" });
+      expect(cancelledIssued.issued_reward.status).toBe("cancelled");
 
       const initialAccount = await client.accounts.get({
         member_id: "member-001",

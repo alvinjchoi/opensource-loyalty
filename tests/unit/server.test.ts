@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import { LoyaltyEngine } from "@loyalty-interchange/reference";
 import {
   createReferenceServer,
+  createDemoPlatform,
   startReferenceServer,
   type StructuredRequestLog
 } from "@loyalty-interchange/server";
@@ -183,7 +184,7 @@ describe("reference HTTP server", () => {
       const bootstrapBody = await bootstrap.text();
       expect(bootstrapBody).not.toContain("admin-test-key");
       expect(JSON.parse(bootstrapBody)).toMatchObject({
-        admin_api_version: "0.1",
+        admin_api_version: "0.2",
         auth: {
           mode: "api_key",
           requires_login: true,
@@ -275,7 +276,7 @@ describe("reference HTTP server", () => {
       });
       expect(snapshot.status).toBe(200);
       expect(await snapshot.json()).toMatchObject({
-        admin_api_version: "0.1",
+        admin_api_version: "0.2",
         platform: { storage: { driver: "sqlite", persistent: true } },
         webhooks: {
           enabled: true,
@@ -299,6 +300,103 @@ describe("reference HTTP server", () => {
       expect(persisted).toHaveLength(3);
     } finally {
       await running.close();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("protects live program draft, publish, and rollback writes with CSRF", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "lip-program-admin-"));
+    const databasePath = join(directory, "reference.db");
+    const platform = createDemoPlatform({
+      databasePath,
+      reset: true,
+      seed: false,
+      program: makeProgram()
+    });
+    const running = await startReferenceServer(platform.engine, {
+      apiKey: "program-admin-key",
+      persistState: (state) => platform.store.save(state),
+      admin: {
+        programs: platform.programs,
+        storage: platform.store.status
+      }
+    });
+    try {
+      const login = await fetch(`${running.url}/admin/api/v1/session`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ api_key: "program-admin-key" })
+      });
+      expect(login.status).toBe(204);
+      const setCookies = login.headers.getSetCookie();
+      const cookie = setCookies.map((value) => value.split(";", 1)[0]).join("; ");
+      const csrf = decodeURIComponent(
+        setCookies
+          .find((value) => value.startsWith("lip_admin_csrf="))!
+          .split(";", 1)[0]!
+          .slice("lip_admin_csrf=".length)
+      );
+      const changed = {
+        ...makeProgram(),
+        name: "Admin-published program",
+        earn_rate: { points: 4, spend_minor_units: 100 }
+      };
+
+      const rejected = await fetch(`${running.url}/admin/api/v1/program/draft`, {
+        method: "PUT",
+        headers: { cookie, "content-type": "application/json" },
+        body: JSON.stringify({ program: changed })
+      });
+      expect(rejected.status).toBe(403);
+      expect(await rejected.json()).toMatchObject({ code: "csrf_failed" });
+
+      const draft = await fetch(`${running.url}/admin/api/v1/program/draft`, {
+        method: "PUT",
+        headers: {
+          cookie,
+          "content-type": "application/json",
+          "x-lip-csrf": csrf
+        },
+        body: JSON.stringify({ program: changed })
+      });
+      expect(draft.status).toBe(200);
+      const draftBody = await draft.json() as {
+        draft: { version: number; validation: { ok: boolean } };
+      };
+      expect(draftBody.draft.validation.ok).toBe(true);
+
+      const published = await fetch(`${running.url}/admin/api/v1/program/publish`, {
+        method: "POST",
+        headers: {
+          cookie,
+          "content-type": "application/json",
+          "x-lip-csrf": csrf
+        },
+        body: JSON.stringify({ expected_draft_version: draftBody.draft.version })
+      });
+      expect(published.status).toBe(200);
+      expect(await published.json()).toMatchObject({
+        active_revision: 2,
+        active_program: { name: "Admin-published program" }
+      });
+      expect(platform.engine.inspectAdmin().program.earning.rate.amount).toBe(4);
+
+      const rolledBack = await fetch(`${running.url}/admin/api/v1/program/rollback`, {
+        method: "POST",
+        headers: {
+          cookie,
+          "content-type": "application/json",
+          "x-lip-csrf": csrf
+        },
+        body: JSON.stringify({ revision: 1 })
+      });
+      expect(rolledBack.status).toBe(200);
+      expect(platform.engine.inspectAdmin().program.earning.rate.amount).toBe(
+        makeProgram().earn_rate.points
+      );
+    } finally {
+      await running.close();
+      platform.close();
       rmSync(directory, { recursive: true, force: true });
     }
   });

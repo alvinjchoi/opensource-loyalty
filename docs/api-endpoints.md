@@ -53,6 +53,9 @@ curl http://127.0.0.1:3210/lip/v1/capabilities \
 | Accounts | `POST` | `/lip/v1/accounts/get` | Read balances, metrics, expiring lots, and tier progress. | `lip.accounts.get` |
 | Ledger | `POST` | `/lip/v1/ledger/list` | Read immutable member ledger history with cursor pagination. | `lip.ledger.list` |
 | Ledger | `POST` | `/lip/v1/ledger/manual-adjustments` | Credit or debit points with a classified operator reason. | `lip.ledger.adjust` |
+| Issued rewards | `POST` | `/lip/v1/issued-rewards/list` | Read a member's coupon and issued-reward wallet. | `lip.issuedRewards.list` |
+| Issued rewards | `POST` | `/lip/v1/issued-rewards/issue` | Issue a catalog reward with an optional code or QR artifact. | `lip.issuedRewards.issue` |
+| Issued rewards | `POST` | `/lip/v1/issued-rewards/cancel` | Cancel an unclaimed issued reward. | `lip.issuedRewards.cancel` |
 | Members | `POST` | `/lip/v1/members/lookup` | Resolve a member identity. | `lip.members.lookup` |
 | Members | `POST` | `/lip/v1/members/enroll` | Enroll or return a member. | `lip.members.enroll` |
 | Orders | `POST` | `/lip/v1/orders/evaluate` | Estimate accrual and available rewards for an order. | `lip.orders.evaluate` |

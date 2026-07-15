@@ -6,6 +6,11 @@ import type {
   EvaluationRequest,
   EvaluationResponse,
   HealthDocument,
+  IssuedRewardCancelRequest,
+  IssuedRewardIssueRequest,
+  IssuedRewardListRequest,
+  IssuedRewardListResponse,
+  IssuedRewardResponse,
   LedgerListRequest,
   LedgerListResponse,
   LedgerResponse,
@@ -111,6 +116,33 @@ export const generatedOperations = {
     safeToRetry: false,
     requestSchema: "ManualAdjustmentRequest",
     responseSchema: "LedgerResponse"
+  },
+  listIssuedRewards: {
+    operationId: "listIssuedRewards",
+    method: "POST",
+    path: "/lip/v1/issued-rewards/list",
+    authenticated: true,
+    safeToRetry: true,
+    requestSchema: "IssuedRewardListRequest",
+    responseSchema: "IssuedRewardListResponse"
+  },
+  issueReward: {
+    operationId: "issueReward",
+    method: "POST",
+    path: "/lip/v1/issued-rewards/issue",
+    authenticated: true,
+    safeToRetry: false,
+    requestSchema: "IssuedRewardIssueRequest",
+    responseSchema: "IssuedRewardResponse"
+  },
+  cancelIssuedReward: {
+    operationId: "cancelIssuedReward",
+    method: "POST",
+    path: "/lip/v1/issued-rewards/cancel",
+    authenticated: true,
+    safeToRetry: false,
+    requestSchema: "IssuedRewardCancelRequest",
+    responseSchema: "IssuedRewardResponse"
   },
   lookupMember: {
     operationId: "lookupMember",
@@ -240,6 +272,30 @@ export class GeneratedLipClient {
   public postManualAdjustment(body: ManualAdjustmentRequest, options?: GeneratedCallOptions): Promise<LedgerResponse> {
     return this.transport.request<ManualAdjustmentRequest, LedgerResponse>(
       generatedOperations.postManualAdjustment,
+      body,
+      options
+    );
+  }
+
+  public listIssuedRewards(body: IssuedRewardListRequest, options?: GeneratedCallOptions): Promise<IssuedRewardListResponse> {
+    return this.transport.request<IssuedRewardListRequest, IssuedRewardListResponse>(
+      generatedOperations.listIssuedRewards,
+      body,
+      options
+    );
+  }
+
+  public issueReward(body: IssuedRewardIssueRequest, options?: GeneratedCallOptions): Promise<IssuedRewardResponse> {
+    return this.transport.request<IssuedRewardIssueRequest, IssuedRewardResponse>(
+      generatedOperations.issueReward,
+      body,
+      options
+    );
+  }
+
+  public cancelIssuedReward(body: IssuedRewardCancelRequest, options?: GeneratedCallOptions): Promise<IssuedRewardResponse> {
+    return this.transport.request<IssuedRewardCancelRequest, IssuedRewardResponse>(
+      generatedOperations.cancelIssuedReward,
       body,
       options
     );

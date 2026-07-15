@@ -8,6 +8,11 @@ import {
   type CapabilitiesDocument,
   type EvaluationRequest,
   type EvaluationResponse,
+  type IssuedRewardCancelRequest,
+  type IssuedRewardIssueRequest,
+  type IssuedRewardListRequest,
+  type IssuedRewardListResponse,
+  type IssuedRewardResponse,
   type LedgerResponse,
   type LedgerListRequest,
   type LedgerListResponse,
@@ -149,6 +154,27 @@ export class LipClient {
       this.post<ManualAdjustmentRequest, LedgerResponse>(
         input,
         (request, callOptions) => this.generated.postManualAdjustment(request, callOptions),
+        options
+      )
+  };
+
+  public readonly issuedRewards = {
+    list: (input: WithoutContext<IssuedRewardListRequest>, options?: LipCallOptions) =>
+      this.post<IssuedRewardListRequest, IssuedRewardListResponse>(
+        input,
+        (request, callOptions) => this.generated.listIssuedRewards(request, callOptions),
+        options
+      ),
+    issue: (input: WithoutContext<IssuedRewardIssueRequest>, options?: LipCallOptions) =>
+      this.post<IssuedRewardIssueRequest, IssuedRewardResponse>(
+        input,
+        (request, callOptions) => this.generated.issueReward(request, callOptions),
+        options
+      ),
+    cancel: (input: WithoutContext<IssuedRewardCancelRequest>, options?: LipCallOptions) =>
+      this.post<IssuedRewardCancelRequest, IssuedRewardResponse>(
+        input,
+        (request, callOptions) => this.generated.cancelIssuedReward(request, callOptions),
         options
       )
   };

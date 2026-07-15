@@ -104,7 +104,8 @@ describe("LoyaltyEngine members and evaluation", () => {
       program: { program_id: "demo-foodservice" },
       program_configuration: {
         current_model_id: "points",
-        publish_supported: false,
+        editable: true,
+        publish_supported: true,
         templates: expect.arrayContaining([
           expect.objectContaining({
             model_id: "points",
@@ -667,6 +668,62 @@ describe("LoyaltyEngine financial lifecycle", () => {
       order: makeOrder({ order_id: "order-next" })
     });
     expect(evaluation.balances[0]).toMatchObject({ amount: 110, reserved: 0, available: 110 });
+  });
+
+  it("manages issued coupon rewards through reserve, capture, reversal, and cancellation", () => {
+    const engine = enrolledEngine();
+    const issued = engine.issueReward({
+      context: makeContext("issue-wallet-reward"),
+      issued_reward_id: "issued-001",
+      member_id: "member-001",
+      program_id: "demo-foodservice",
+      reward_id: "one-dollar-off",
+      artifact: { type: "qr_code", value: "SAKURA-REWARD-001" }
+    });
+    expect(issued.issued_reward).toMatchObject({
+      status: "issued",
+      artifact: { type: "qr_code", value: "SAKURA-REWARD-001" }
+    });
+
+    const held = engine.reserve({
+      context: makeContext("reserve-wallet-reward"),
+      redemption_id: "wallet-redemption-001",
+      issued_reward_id: "issued-001",
+      member_id: "member-001",
+      reward_id: "one-dollar-off",
+      order: makeOrder({ order_id: "wallet-order-001" })
+    });
+    expect(held.reservation.cost.amount).toBe(0);
+    const captured = engine.capture({
+      context: makeContext("capture-wallet-reward"),
+      reservation_id: held.reservation.reservation_id,
+      order_id: "wallet-order-001"
+    });
+    expect(captured.balances[0]?.amount).toBe(0);
+    expect(engine.listIssuedRewards({
+      context: makeContext("list-redeemed-wallet"),
+      member_id: "member-001",
+      program_id: "demo-foodservice",
+      statuses: ["redeemed"]
+    }).issued_rewards).toEqual([
+      expect.objectContaining({ issued_reward_id: "issued-001", status: "redeemed" })
+    ]);
+
+    engine.reverse({
+      context: makeContext("reverse-wallet-reward"),
+      reservation_id: held.reservation.reservation_id,
+      reason: "Order refunded"
+    });
+    const cancelled = engine.cancelIssuedReward({
+      context: makeContext("cancel-wallet-reward"),
+      issued_reward_id: "issued-001",
+      reason: "Campaign ended"
+    });
+    expect(cancelled.issued_reward).toMatchObject({
+      status: "cancelled",
+      cancellation_reason: "Campaign ended"
+    });
+    expect(engine.getLedger()).toHaveLength(0);
   });
 
   it("posts signed refund adjustments once", () => {

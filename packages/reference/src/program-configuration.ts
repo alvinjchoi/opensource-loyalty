@@ -47,7 +47,7 @@ const templateSeeds: ProgramModelTemplateSeed[] = [
     best_for: "QSR, casual dining, coffee chains",
     cadence: "Every transaction",
     engine_support: "implemented",
-    admin_write_support: "planned",
+    admin_write_support: "implemented",
     supported_features: [
       "Spend-based points",
       "Annual tiers",
@@ -55,8 +55,8 @@ const templateSeeds: ProgramModelTemplateSeed[] = [
       "Reward reserve, capture, and reversal",
       "Refund-safe adjustments"
     ],
-    blockers: ["Program edits are not persisted through an Admin write API yet."],
-    next_steps: ["Add draft, validate, publish, and rollback endpoints for points programs."]
+    blockers: [],
+    next_steps: ["Use the Admin draft, validation, publish, and rollback workflow."]
   },
   {
     model_id: "visits",
@@ -142,8 +142,8 @@ export function programConfigurationFor(program: ProgramDefinition): ReferencePr
   const currentModelId = inferProgramModel(program);
   return {
     current_model_id: currentModelId,
-    editable: false,
-    publish_supported: false,
+    editable: currentModelId === "points",
+    publish_supported: currentModelId === "points",
     templates: templateSeeds.map((template) => ({
       ...template,
       status: template.model_id === currentModelId
@@ -153,10 +153,10 @@ export function programConfigurationFor(program: ProgramDefinition): ReferencePr
           : "planned"
     })),
     next_actions: [
-      "Persist program configuration drafts outside /lip/v1.",
-      "Validate program drafts before publish.",
-      "Rebuild the reference engine from a published program version.",
-      "Record Admin user, role, and audit-log metadata for every write."
+      "Edit and validate the points program draft in Admin.",
+      "Publish compatible changes without restarting the reference server.",
+      "Rollback to one of the 20 retained published revisions.",
+      "Replace the shared local Admin identity with scoped production users and roles."
     ]
   };
 }

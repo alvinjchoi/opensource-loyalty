@@ -135,6 +135,15 @@ const openapi = {
     "/ledger/manual-adjustments": {
       post: operation("postManualAdjustment", "Credit or debit points with an operator classification", "Ledger", "ManualAdjustmentRequest", "LedgerResponse", 201)
     },
+    "/issued-rewards/list": {
+      post: operation("listIssuedRewards", "List a member's issued reward wallet", "Issued Rewards", "IssuedRewardListRequest", "IssuedRewardListResponse", 200, true)
+    },
+    "/issued-rewards/issue": {
+      post: operation("issueReward", "Issue a member-specific reward or coupon artifact", "Issued Rewards", "IssuedRewardIssueRequest", "IssuedRewardResponse", 201)
+    },
+    "/issued-rewards/cancel": {
+      post: operation("cancelIssuedReward", "Cancel an unclaimed issued reward", "Issued Rewards", "IssuedRewardCancelRequest", "IssuedRewardResponse", 200)
+    },
     "/members/lookup": {
       post: operation("lookupMember", "Resolve a member identity", "Members", "MemberLookupRequest", "MemberLookupResponse", 200, true)
     },

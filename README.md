@@ -27,7 +27,7 @@ For more information, be sure to check out the **[LIP Documentation](docs/README
 
 - 🧰 **TypeScript SDK**: Idiomatic domain client with request ids, timestamps, idempotency keys, exact-money helpers, a foodservice order builder, and a generated low-level OpenAPI client.
 
-- 🖥️ **Local Admin Dashboard**: Authenticated dashboard at `http://127.0.0.1:3210/admin/` for inspecting members, balances, tiers, rewards, ledger entries, program configuration, and storage status.
+- 🖥️ **Local Admin Dashboard**: Authenticated dashboard at `http://127.0.0.1:3210/admin/` for inspecting members and ledger activity, plus versioned program drafts, validation, live publish, and rollback.
 
 - 🗄️ **Durable Sandbox Storage**: SQLite-backed state by default, with a storage adapter boundary ready for production databases such as Postgres.
 
@@ -159,9 +159,10 @@ npm run lip -- serve --rate-limit 300 --rate-window-ms 60000
 npm run lip -- serve --no-structured-logs
 ```
 
-`--program` replaces the built-in demo program with your own JSON program
-definition (same shape as `ProgramDefinition` in
-`packages/reference/src/config.ts`). Demo member seeding is skipped when a
+`--program` bootstraps an empty database with your own JSON program definition
+(same shape as `ProgramDefinition` in `packages/reference/src/config.ts`).
+Afterward, use the Admin Configure view to edit, validate, publish, or roll back
+persisted revisions without restarting. Demo member seeding is skipped when a
 custom program is loaded.
 
 ### Self-Hosting Configuration ⚙️

@@ -3,12 +3,15 @@ import { fileURLToPath } from "node:url";
 import type { LoyaltyEventType } from "@loyalty-interchange/protocol";
 import {
   LoyaltyEngine,
+  programDefinitionFingerprint,
+  retargetProgramState,
   type LoyaltyEngineState,
   type ProgramDefinition
 } from "@loyalty-interchange/reference";
 import { SqliteStateStore } from "@loyalty-interchange/storage-sqlite";
 import { createDemoProgram, seedDemoData } from "./demo.js";
 import { EventedLoyaltyEngine } from "./evented-engine.js";
+import { ProgramManagementService } from "./program-management.js";
 import { SqliteWebhookOutbox } from "./webhook-outbox.js";
 import { WebhookDispatcher, type WebhookSubscription } from "./webhooks.js";
 
@@ -36,6 +39,7 @@ export interface DemoPlatform {
   store: SqliteStateStore<LoyaltyEngineState>;
   adminAssetRoot?: string;
   webhooks?: WebhookDispatcher;
+  programs: ProgramManagementService;
   close(): void;
 }
 
@@ -65,7 +69,13 @@ function discoverAdminAssetRoot(): string | undefined {
 }
 
 export function createDemoPlatform(options: DemoPlatformOptions): DemoPlatform {
-  const program = options.program ?? createDemoProgram();
+  const configuredProgram = options.program ?? createDemoProgram();
+  const programs = new ProgramManagementService({
+    path: options.databasePath,
+    initialProgram: configuredProgram,
+    ...(options.reset ? { reset: true } : {})
+  });
+  const program = programs.activeProgram();
   const store = new SqliteStateStore<LoyaltyEngineState>({
     path: options.databasePath,
     key: program.program_id
@@ -73,7 +83,14 @@ export function createDemoPlatform(options: DemoPlatformOptions): DemoPlatform {
   let webhookOutbox: SqliteWebhookOutbox | undefined;
   try {
     if (options.reset) store.clear();
-    const state = store.load();
+    let state = store.load();
+    if (state && state.program_fingerprint !== programDefinitionFingerprint(program)) {
+      const previousProgram = programs.programForFingerprint(state.program_fingerprint);
+      if (previousProgram) {
+        state = retargetProgramState(state, previousProgram, program);
+        store.save(state);
+      }
+    }
     const subscriptions = options.webhooks ?? webhookSubscriptionsFromEnv();
     webhookOutbox =
       subscriptions.length > 0
@@ -103,6 +120,16 @@ export function createDemoPlatform(options: DemoPlatformOptions): DemoPlatform {
       : new LoyaltyEngine(program, state ? { state } : {});
     if (!state && options.seed !== false && !options.program) seedDemoData(engine);
     armed = true;
+    programs.bindPublisher((nextProgram) => {
+      const previousProgram = engine.getProgramDefinition();
+      try {
+        engine.reconfigureProgram(nextProgram);
+        store.save(engine.exportState());
+      } catch (error) {
+        engine.reconfigureProgram(previousProgram);
+        throw error;
+      }
+    });
     dispatcher?.resumePending();
     store.save(engine.exportState());
     const adminAssetRoot = options.adminAssetRoot ?? discoverAdminAssetRoot();
@@ -111,8 +138,10 @@ export function createDemoPlatform(options: DemoPlatformOptions): DemoPlatform {
       store,
       ...(adminAssetRoot ? { adminAssetRoot } : {}),
       ...(dispatcher ? { webhooks: dispatcher } : {}),
+      programs,
       close: () => {
         store.close();
+        programs.close();
         if (!webhookOutbox) return;
         const outboxToClose = webhookOutbox;
         if (!dispatcher || dispatcher.inFlightDeliveries() === 0) {
@@ -124,6 +153,7 @@ export function createDemoPlatform(options: DemoPlatformOptions): DemoPlatform {
     };
   } catch (error) {
     webhookOutbox?.close();
+    programs.close();
     store.close();
     throw error;
   }

@@ -7,6 +7,12 @@ import type {
   EvaluationResponse,
   ExpiringBalance,
   IdentityReference,
+  IssuedReward,
+  IssuedRewardCancelRequest,
+  IssuedRewardIssueRequest,
+  IssuedRewardListRequest,
+  IssuedRewardListResponse,
+  IssuedRewardResponse,
   LedgerEntry,
   LedgerListRequest,
   LedgerListResponse,
@@ -99,6 +105,7 @@ export interface LoyaltyEngineState {
   accruals_by_order: Array<[string, AccrualRecord]>;
   adjustments: Array<[string, MutationRecord]>;
   reservations_by_redemption: Array<[string, ReservationRecord]>;
+  issued_rewards?: Array<[string, IssuedReward]>;
 }
 
 export interface ReferenceAdminMember {
@@ -125,6 +132,7 @@ export interface ReferenceAdminSnapshot {
   members: ReferenceAdminMember[];
   ledger: LedgerEntry[];
   reservations: RedemptionReservation[];
+  issued_rewards: IssuedReward[];
 }
 
 const systemClock: Clock = { now: () => new Date() };
@@ -180,8 +188,46 @@ function clone<T>(value: T): T {
   return structuredClone(value);
 }
 
+export function programDefinitionFingerprint(program: ProgramDefinition): string {
+  return fingerprint(program);
+}
+
+export function assertCompatibleProgramUpdate(
+  current: ProgramDefinition,
+  next: ProgramDefinition
+): void {
+  if (next.program_id !== current.program_id) {
+    throw new EngineError("invalid_program", "A published program id cannot be changed", 409);
+  }
+  if (next.currency !== current.currency) {
+    throw new EngineError("invalid_program", "A published program currency cannot be changed", 409);
+  }
+}
+
+export function retargetProgramState(
+  state: LoyaltyEngineState,
+  current: ProgramDefinition,
+  next: ProgramDefinition
+): LoyaltyEngineState {
+  assertCompatibleProgramUpdate(current, next);
+  if (
+    state.program_id !== current.program_id ||
+    state.program_fingerprint !== programDefinitionFingerprint(current)
+  ) {
+    throw new EngineError(
+      "invalid_state",
+      "Stored engine state does not match the previous published program",
+      500
+    );
+  }
+  return {
+    ...clone(state),
+    program_fingerprint: programDefinitionFingerprint(next)
+  };
+}
+
 export class LoyaltyEngine {
-  private readonly program: ProgramDefinition;
+  private program: ProgramDefinition;
   private readonly clock: Clock;
   private readonly ids: IdGenerator;
   private readonly members = new Map<string, Member>();
@@ -195,6 +241,7 @@ export class LoyaltyEngine {
   private readonly accrualsByOrder = new Map<string, AccrualRecord>();
   private readonly adjustments = new Map<string, MutationRecord>();
   private readonly reservationsByRedemption = new Map<string, ReservationRecord>();
+  private readonly issuedRewards = new Map<string, IssuedReward>();
 
   public constructor(
     program: ProgramDefinition,
@@ -213,6 +260,17 @@ export class LoyaltyEngine {
       );
     }
     if (options.state) this.hydrate(options.state);
+  }
+
+  public getProgramDefinition(): ProgramDefinition {
+    return clone(this.program);
+  }
+
+  public reconfigureProgram(program: ProgramDefinition): void {
+    // Constructing a temporary engine runs the complete program validator.
+    new LoyaltyEngine(program, { clock: this.clock, ids: this.ids });
+    assertCompatibleProgramUpdate(this.program, program);
+    this.program = clone(program);
   }
 
   public lookup(request: MemberLookupRequest): MemberLookupResponse {
@@ -389,6 +447,88 @@ export class LoyaltyEngine {
     });
   }
 
+  public issueReward(request: IssuedRewardIssueRequest): IssuedRewardResponse {
+    this.assertProgramId(request.program_id);
+    return this.once("issued_reward.issue", request.context, request, () => {
+      this.activeMember(request.member_id);
+      if (!this.program.rewards.some((reward) => reward.reward_id === request.reward_id)) {
+        throw new EngineError("not_found", `Reward ${request.reward_id} was not found`, 404);
+      }
+      if (request.expires_at && Date.parse(request.expires_at) <= this.clock.now().getTime()) {
+        throw new EngineError("expired", "Issued reward expiration must be in the future");
+      }
+      const existing = this.issuedRewards.get(request.issued_reward_id);
+      if (existing) {
+        const sameFacts = existing.member_id === request.member_id &&
+          existing.program_id === request.program_id &&
+          existing.reward_id === request.reward_id &&
+          existing.expires_at === request.expires_at &&
+          fingerprint(existing.artifact) === fingerprint(request.artifact);
+        if (!sameFacts) {
+          throw new EngineError("conflict", "Issued reward id was already used with different facts");
+        }
+        return { context: this.responseContext(request.context), issued_reward: clone(existing) };
+      }
+      if (request.artifact && [...this.issuedRewards.values()].some((reward) =>
+        reward.artifact?.type === request.artifact!.type &&
+        reward.artifact.value === request.artifact!.value
+      )) {
+        throw new EngineError("conflict", "Issued reward artifact value must be unique");
+      }
+      const issuedReward: IssuedReward = {
+        issued_reward_id: request.issued_reward_id,
+        member_id: request.member_id,
+        program_id: request.program_id,
+        reward_id: request.reward_id,
+        status: "issued",
+        issued_at: this.isoNow(),
+        ...(request.expires_at ? { expires_at: request.expires_at } : {}),
+        ...(request.artifact ? { artifact: clone(request.artifact) } : {})
+      };
+      this.issuedRewards.set(issuedReward.issued_reward_id, issuedReward);
+      return { context: this.responseContext(request.context), issued_reward: clone(issuedReward) };
+    });
+  }
+
+  public listIssuedRewards(request: IssuedRewardListRequest): IssuedRewardListResponse {
+    this.assertProgramId(request.program_id);
+    return this.once("issued_reward.list", request.context, request, () => {
+      this.activeMember(request.member_id);
+      this.expireIssuedRewards(request.member_id);
+      const issuedRewards = [...this.issuedRewards.values()]
+        .filter((reward) =>
+          reward.member_id === request.member_id &&
+          (!request.statuses || request.statuses.includes(reward.status))
+        )
+        .sort((left, right) => right.issued_at.localeCompare(left.issued_at))
+        .map(clone);
+      return { context: this.responseContext(request.context), issued_rewards: issuedRewards };
+    });
+  }
+
+  public cancelIssuedReward(request: IssuedRewardCancelRequest): IssuedRewardResponse {
+    return this.once("issued_reward.cancel", request.context, request, () => {
+      const reward = this.issuedRewards.get(request.issued_reward_id);
+      if (!reward) throw new EngineError("not_found", "Issued reward was not found", 404);
+      this.expireIssuedReward(reward);
+      if (reward.status === "cancelled") {
+        return { context: this.responseContext(request.context), issued_reward: clone(reward) };
+      }
+      if (reward.status !== "issued") {
+        throw new EngineError("invalid_state", `Cannot cancel an issued reward in ${reward.status} state`);
+      }
+      const held = [...this.reservations.values()].some((reservation) =>
+        reservation.issued_reward_id === reward.issued_reward_id &&
+        reservation.status === "reserved"
+      );
+      if (held) throw new EngineError("invalid_state", "Cannot cancel an issued reward with an active reservation");
+      reward.status = "cancelled";
+      reward.cancelled_at = this.isoNow();
+      reward.cancellation_reason = request.reason;
+      return { context: this.responseContext(request.context), issued_reward: clone(reward) };
+    });
+  }
+
   public reserve(request: RedemptionReserveRequest): RedemptionReservationResponse {
     return this.once("redemption.reserve", request.context, request, () => {
       const member = this.activeMember(request.member_id);
@@ -396,6 +536,7 @@ export class LoyaltyEngine {
       const businessFingerprint = fingerprint({
         member_id: request.member_id,
         reward_id: request.reward_id,
+        issued_reward_id: request.issued_reward_id,
         order: request.order
       });
       const existingReservation = this.reservationsByRedemption.get(request.redemption_id);
@@ -421,7 +562,31 @@ export class LoyaltyEngine {
             : `Reward ${reward.reward_id} is no longer available`
         );
       }
-      if (this.balance(request.member_id).available < reward.points_cost) {
+      const issuedReward = request.issued_reward_id
+        ? this.issuedRewards.get(request.issued_reward_id)
+        : undefined;
+      if (request.issued_reward_id && !issuedReward) {
+        throw new EngineError("not_found", "Issued reward was not found", 404);
+      }
+      if (issuedReward) {
+        this.expireIssuedReward(issuedReward);
+        if (
+          issuedReward.member_id !== request.member_id ||
+          issuedReward.reward_id !== request.reward_id
+        ) {
+          throw new EngineError("conflict", "Issued reward does not match this member and reward");
+        }
+        if (issuedReward.status !== "issued") {
+          throw new EngineError("invalid_state", `Issued reward is ${issuedReward.status}`);
+        }
+        if ([...this.reservations.values()].some((reservation) =>
+          reservation.issued_reward_id === issuedReward.issued_reward_id &&
+          reservation.status === "reserved"
+        )) {
+          throw new EngineError("conflict", "Issued reward already has an active reservation");
+        }
+      }
+      if (!issuedReward && this.balance(request.member_id).available < reward.points_cost) {
         throw new EngineError("insufficient_balance", "Member does not have enough available points");
       }
 
@@ -431,9 +596,10 @@ export class LoyaltyEngine {
         redemption_id: request.redemption_id,
         member_id: request.member_id,
         reward_id: reward.reward_id,
+        ...(issuedReward ? { issued_reward_id: issuedReward.issued_reward_id } : {}),
         order_id: request.order.order_id,
         status: "reserved",
-        cost: { unit: "points", amount: reward.points_cost },
+        cost: { unit: "points", amount: issuedReward ? 0 : reward.points_cost },
         effect: clone(reward.effect),
         funding: this.fundingAllocations(reward),
         created_at: now,
@@ -469,20 +635,30 @@ export class LoyaltyEngine {
       if (balance.amount < reservation.cost.amount) {
         throw new EngineError("insufficient_balance", "Member no longer has enough points");
       }
-      this.consumePointLots(
-        reservation.member_id,
-        reservation.cost.amount,
-        reservation.reservation_id
-      );
-      this.addLedger({
-        member_id: reservation.member_id,
-        operation: "redemption",
-        amount: -reservation.cost.amount,
-        order_id: reservation.order_id,
-        reservation_id: reservation.reservation_id
-      });
+      if (reservation.cost.amount > 0) {
+        this.consumePointLots(
+          reservation.member_id,
+          reservation.cost.amount,
+          reservation.reservation_id
+        );
+        this.addLedger({
+          member_id: reservation.member_id,
+          operation: "redemption",
+          amount: -reservation.cost.amount,
+          order_id: reservation.order_id,
+          reservation_id: reservation.reservation_id
+        });
+      }
       reservation.status = "captured";
       reservation.captured_at = this.isoNow();
+      if (reservation.issued_reward_id) {
+        const issuedReward = this.issuedRewards.get(reservation.issued_reward_id);
+        if (!issuedReward || issuedReward.status !== "issued") {
+          throw new EngineError("invalid_state", "Issued reward is no longer claimable");
+        }
+        issuedReward.status = "redeemed";
+        issuedReward.redeemed_at = reservation.captured_at;
+      }
       return this.reservationResponse(request.context, reservation);
     });
   }
@@ -498,15 +674,24 @@ export class LoyaltyEngine {
         throw new EngineError("expired", "Reservation has expired");
       }
       if (reservation.status === "captured") {
-        this.restorePointLots(reservation.reservation_id);
-        this.addLedger({
-          member_id: reservation.member_id,
-          operation: "reversal",
-          amount: reservation.cost.amount,
-          order_id: reservation.order_id,
-          reservation_id: reservation.reservation_id
-        });
-        this.expirePointLots(reservation.member_id);
+        if (reservation.cost.amount > 0) {
+          this.restorePointLots(reservation.reservation_id);
+          this.addLedger({
+            member_id: reservation.member_id,
+            operation: "reversal",
+            amount: reservation.cost.amount,
+            order_id: reservation.order_id,
+            reservation_id: reservation.reservation_id
+          });
+          this.expirePointLots(reservation.member_id);
+        }
+        if (reservation.issued_reward_id) {
+          const issuedReward = this.issuedRewards.get(reservation.issued_reward_id);
+          if (issuedReward?.status === "redeemed") {
+            issuedReward.status = "issued";
+            delete issuedReward.redeemed_at;
+          }
+        }
       }
       reservation.status = "reversed";
       reservation.reversed_at = this.isoNow();
@@ -657,7 +842,8 @@ export class LoyaltyEngine {
       idempotency: [...this.idempotency.entries()],
       accruals_by_order: [...this.accrualsByOrder.entries()],
       adjustments: [...this.adjustments.entries()],
-      reservations_by_redemption: [...this.reservationsByRedemption.entries()]
+      reservations_by_redemption: [...this.reservationsByRedemption.entries()],
+      issued_rewards: [...this.issuedRewards.entries()]
     });
   }
 
@@ -715,7 +901,8 @@ export class LoyaltyEngine {
       },
       members,
       ledger,
-      reservations: [...this.reservations.values()].map(clone)
+      reservations: [...this.reservations.values()].map(clone),
+      issued_rewards: [...this.issuedRewards.values()].map(clone)
     };
   }
 
@@ -752,6 +939,7 @@ export class LoyaltyEngine {
       state.reservations_by_redemption,
       "redemption reservations"
     );
+    this.restoreMap(this.issuedRewards, state.issued_rewards ?? [], "issued rewards");
 
     for (const [memberId, member] of this.members) {
       if (member.member_id !== memberId || !this.points.has(memberId)) {
@@ -1433,6 +1621,26 @@ export class LoyaltyEngine {
   private expireAllReservations(): void {
     for (const reservation of this.reservations.values()) {
       this.expireReservation(reservation);
+    }
+  }
+
+  private expireIssuedRewards(memberId?: string): void {
+    for (const reward of this.issuedRewards.values()) {
+      if (!memberId || reward.member_id === memberId) this.expireIssuedReward(reward);
+    }
+  }
+
+  private expireIssuedReward(reward: IssuedReward): void {
+    if (
+      reward.status === "issued" &&
+      reward.expires_at &&
+      Date.parse(reward.expires_at) <= this.clock.now().getTime()
+    ) {
+      const held = [...this.reservations.values()].some((reservation) =>
+        reservation.issued_reward_id === reward.issued_reward_id &&
+        reservation.status === "reserved"
+      );
+      if (!held) reward.status = "expired";
     }
   }
 

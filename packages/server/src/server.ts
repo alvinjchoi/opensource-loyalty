@@ -9,6 +9,9 @@ import {
   MemberAccountRequestSchema,
   type CapabilitiesDocument,
   EvaluationRequestSchema,
+  IssuedRewardCancelRequestSchema,
+  IssuedRewardIssueRequestSchema,
+  IssuedRewardListRequestSchema,
   LedgerListRequestSchema,
   ManualAdjustmentRequestSchema,
   MemberEnrollRequestSchema,
@@ -28,6 +31,7 @@ import {
   type LoyaltyEngineState
 } from "@loyalty-interchange/reference";
 import type { WebhookAdminStatus } from "./webhooks.js";
+import type { ProgramManagementService } from "./program-management.js";
 
 const MAX_BODY_BYTES = 1_048_576;
 const DEFAULT_LOCAL_API_KEY = "lip-dev-key";
@@ -71,6 +75,7 @@ export interface ServerOptions {
       persistent: boolean;
     };
     webhooks?: () => WebhookAdminStatus;
+    programs?: ProgramManagementService;
   };
 }
 
@@ -97,7 +102,7 @@ interface AdminStorageDescriptor {
 }
 
 interface AdminBootstrapDocument {
-  admin_api_version: "0.1";
+  admin_api_version: "0.2";
   generated_at: string;
   status: true;
   auth: {
@@ -156,11 +161,11 @@ function adminStorage(options: ServerOptions): AdminStorageDescriptor {
 function adminBootstrapDocument(
   options: ServerOptions,
   request: IncomingMessage,
-  sessions: Set<string>
+  sessions: ReadonlyMap<string, string>
 ): AdminBootstrapDocument {
   const usesDefaultLocalKey = options.apiKey === DEFAULT_LOCAL_API_KEY;
   return {
-    admin_api_version: "0.1",
+    admin_api_version: "0.2",
     generated_at: new Date().toISOString(),
     status: true,
     auth: {
@@ -247,7 +252,10 @@ function capabilitiesDocument(reservationTtlSeconds: number): CapabilitiesDocume
       "program.get",
       "account.get",
       "ledger.list",
-      "ledger.manual_adjustment"
+      "ledger.manual_adjustment",
+      "issued_reward.list",
+      "issued_reward.issue",
+      "issued_reward.cancel"
     ],
     reward_effects: ["discount", "free_item", "custom"],
     event_types: [
@@ -300,9 +308,27 @@ function cookieValue(request: IncomingMessage, name: string): string | undefined
 function isAdminAuthorized(
   request: IncomingMessage,
   apiKey: string,
-  sessions: Set<string>
+  sessions: ReadonlyMap<string, string>
 ): boolean {
   return isAuthorized(request, apiKey) || sessions.has(cookieValue(request, "lip_admin_session") ?? "");
+}
+
+function isAdminWriteAuthorized(
+  request: IncomingMessage,
+  apiKey: string,
+  sessions: ReadonlyMap<string, string>
+): boolean {
+  if (isAuthorized(request, apiKey)) return true;
+  const session = cookieValue(request, "lip_admin_session");
+  const csrfCookie = cookieValue(request, "lip_admin_csrf");
+  const csrfHeader = request.headers["x-lip-csrf"];
+  if (!session || !csrfCookie || typeof csrfHeader !== "string") return false;
+  const expected = sessions.get(session);
+  return Boolean(expected && equalSecret(expected, csrfCookie) && equalSecret(expected, csrfHeader));
+}
+
+function adminActor(request: IncomingMessage, apiKey: string): string {
+  return isAuthorized(request, apiKey) ? "api-key-admin" : "local-admin";
 }
 
 const contentTypes: Record<string, string> = {
@@ -491,6 +517,9 @@ function routeTable(engine: LoyaltyEngine): Map<string, Route> {
     ["POST /lip/v1/accounts/get", { schema: MemberAccountRequestSchema, status: 200, handle: (body) => engine.getAccount(body) }],
     ["POST /lip/v1/ledger/list", { schema: LedgerListRequestSchema, status: 200, handle: (body) => engine.listLedger(body) }],
     ["POST /lip/v1/ledger/manual-adjustments", { schema: ManualAdjustmentRequestSchema, status: 201, handle: (body) => engine.postManualAdjustment(body) }],
+    ["POST /lip/v1/issued-rewards/list", { schema: IssuedRewardListRequestSchema, status: 200, handle: (body) => engine.listIssuedRewards(body) }],
+    ["POST /lip/v1/issued-rewards/issue", { schema: IssuedRewardIssueRequestSchema, status: 201, handle: (body) => engine.issueReward(body) }],
+    ["POST /lip/v1/issued-rewards/cancel", { schema: IssuedRewardCancelRequestSchema, status: 200, handle: (body) => engine.cancelIssuedReward(body) }],
     ["POST /lip/v1/members/lookup", { schema: MemberLookupRequestSchema, status: 200, handle: (body) => engine.lookup(body) }],
     ["POST /lip/v1/members/enroll", { schema: MemberEnrollRequestSchema, status: 201, handle: (body) => engine.enroll(body) }],
     ["POST /lip/v1/orders/evaluate", { schema: EvaluationRequestSchema, status: 200, handle: (body) => engine.evaluate(body) }],
@@ -507,7 +536,7 @@ export function createReferenceServer(engine: LoyaltyEngine, options: ServerOpti
     throw new Error("Reference server API key must contain at least 8 characters");
   }
   const routes = routeTable(engine);
-  const adminSessions = new Set<string>();
+  const adminSessions = new Map<string, string>();
   const adminEnabled = options.admin?.enabled ?? true;
   const rateLimiter = options.rateLimit === false ? undefined : createRateLimiter(options.rateLimit);
   const metrics = options.metrics === false ? undefined : new HttpMetrics();
@@ -532,6 +561,12 @@ export function createReferenceServer(engine: LoyaltyEngine, options: ServerOpti
     allowedMethods.set("/admin/api/v1/session", ["POST"]);
     allowedMethods.set("/admin/api/v1/logout", ["POST"]);
     allowedMethods.set("/admin/api/v1/snapshot", ["GET"]);
+    if (options.admin?.programs) {
+      allowedMethods.set("/admin/api/v1/program/draft", ["PUT", "DELETE"]);
+      allowedMethods.set("/admin/api/v1/program/draft/validate", ["POST"]);
+      allowedMethods.set("/admin/api/v1/program/publish", ["POST"]);
+      allowedMethods.set("/admin/api/v1/program/rollback", ["POST"]);
+    }
   }
 
   return createServer((request, response) => {
@@ -651,9 +686,14 @@ export function createReferenceServer(engine: LoyaltyEngine, options: ServerOpti
           return;
         }
         const session = randomUUID();
-        adminSessions.add(session);
+        const csrf = randomUUID();
+        adminSessions.set(session, csrf);
         response.writeHead(204, {
-          "set-cookie": `lip_admin_session=${encodeURIComponent(session)}; Path=/admin; HttpOnly; SameSite=Strict; Max-Age=28800`,
+          "set-cookie": [
+            `lip_admin_session=${encodeURIComponent(session)}; Path=/admin; HttpOnly; SameSite=Strict; Max-Age=28800`,
+            `lip_admin_csrf=${encodeURIComponent(csrf)}; Path=/admin; SameSite=Strict; Max-Age=28800`
+          ],
+          "x-lip-csrf-token": csrf,
           "cache-control": "no-store"
         });
         response.end();
@@ -664,7 +704,10 @@ export function createReferenceServer(engine: LoyaltyEngine, options: ServerOpti
         const session = cookieValue(request, "lip_admin_session");
         if (session) adminSessions.delete(session);
         response.writeHead(204, {
-          "set-cookie": "lip_admin_session=; Path=/admin; HttpOnly; SameSite=Strict; Max-Age=0",
+          "set-cookie": [
+            "lip_admin_session=; Path=/admin; HttpOnly; SameSite=Strict; Max-Age=0",
+            "lip_admin_csrf=; Path=/admin; SameSite=Strict; Max-Age=0"
+          ],
           "cache-control": "no-store"
         });
         response.end();
@@ -679,7 +722,7 @@ export function createReferenceServer(engine: LoyaltyEngine, options: ServerOpti
         const snapshot = engine.inspectAdmin();
         options.persistState?.(engine.exportState());
         sendJson(response, 200, {
-          admin_api_version: "0.1",
+          admin_api_version: "0.2",
           platform: {
             protocol_version: "1.0",
             profile: "foodservice/1.0",
@@ -690,9 +733,78 @@ export function createReferenceServer(engine: LoyaltyEngine, options: ServerOpti
             pending: [],
             recent: []
           },
+          ...(options.admin?.programs
+            ? { program_management: options.admin.programs.snapshot() }
+            : {}),
           ...snapshot
         });
         return;
+      }
+
+      const programManagement = options.admin?.programs;
+      if (
+        adminEnabled &&
+        programManagement &&
+        path.startsWith("/admin/api/v1/program/") &&
+        ["PUT", "POST", "DELETE"].includes(method)
+      ) {
+        if (!isAdminAuthorized(request, options.apiKey, adminSessions)) {
+          sendJson(response, 401, problem(401, "Unauthorized", "unauthorized"), "application/problem+json");
+          return;
+        }
+        if (!isAdminWriteAuthorized(request, options.apiKey, adminSessions)) {
+          sendJson(
+            response,
+            403,
+            problem(403, "Forbidden", "csrf_failed", "Admin writes require a valid CSRF token"),
+            "application/problem+json"
+          );
+          return;
+        }
+        const body = await readBody(request);
+        const values = body && typeof body === "object" && !Array.isArray(body)
+          ? body as Record<string, unknown>
+          : {};
+        const actor = adminActor(request, options.apiKey);
+
+        if (method === "PUT" && path === "/admin/api/v1/program/draft") {
+          sendJson(response, 200, programManagement.saveDraft(values["program"], actor));
+          return;
+        }
+        if (method === "DELETE" && path === "/admin/api/v1/program/draft") {
+          sendJson(response, 200, programManagement.discardDraft(actor));
+          return;
+        }
+        if (method === "POST" && path === "/admin/api/v1/program/draft/validate") {
+          sendJson(response, 200, programManagement.validateDraft());
+          return;
+        }
+        if (method === "POST" && path === "/admin/api/v1/program/publish") {
+          const expectedVersion = values["expected_draft_version"];
+          if (!Number.isInteger(expectedVersion) || (expectedVersion as number) < 1) {
+            throw new TransportError(
+              422,
+              "validation_failed",
+              "Request validation failed",
+              "expected_draft_version must be a positive integer"
+            );
+          }
+          sendJson(response, 200, programManagement.publish(expectedVersion as number, actor));
+          return;
+        }
+        if (method === "POST" && path === "/admin/api/v1/program/rollback") {
+          const revision = values["revision"];
+          if (!Number.isInteger(revision) || (revision as number) < 1) {
+            throw new TransportError(
+              422,
+              "validation_failed",
+              "Request validation failed",
+              "revision must be a positive integer"
+            );
+          }
+          sendJson(response, 200, programManagement.rollback(revision as number, actor));
+          return;
+        }
       }
 
       if (adminEnabled && method === "GET" && path.startsWith("/admin/")) {

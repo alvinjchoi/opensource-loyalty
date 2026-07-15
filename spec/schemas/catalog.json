@@ -36,6 +36,24 @@
     "FoodserviceOrder": {
       "$ref": "./FoodserviceOrder.json"
     },
+    "IssuedReward": {
+      "$ref": "./IssuedReward.json"
+    },
+    "IssuedRewardCancelRequest": {
+      "$ref": "./IssuedRewardCancelRequest.json"
+    },
+    "IssuedRewardIssueRequest": {
+      "$ref": "./IssuedRewardIssueRequest.json"
+    },
+    "IssuedRewardListRequest": {
+      "$ref": "./IssuedRewardListRequest.json"
+    },
+    "IssuedRewardListResponse": {
+      "$ref": "./IssuedRewardListResponse.json"
+    },
+    "IssuedRewardResponse": {
+      "$ref": "./IssuedRewardResponse.json"
+    },
     "HealthDocument": {
       "$ref": "./HealthDocument.json"
     },

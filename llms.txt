@@ -57,6 +57,7 @@ Operations:
   lip.accruals.post
   lip.redemptions.reserve / capture / reverse
   lip.accounts.get / lip.ledger.list / lip.ledger.adjust / lip.programs.get
+  lip.issuedRewards.list / issue / cancel
 
 Idempotency: derive keys from business ids (order_id), not random UUIDs per retry.
   lip.accruals.post(body, { idempotencyKey: `accrual:${order.order_id}` })
@@ -77,6 +78,9 @@ POST /lip/v1/accounts/get
 POST /lip/v1/ledger/list
 POST /lip/v1/ledger/manual-adjustments
 POST /lip/v1/programs/get
+POST /lip/v1/issued-rewards/list
+POST /lip/v1/issued-rewards/issue
+POST /lip/v1/issued-rewards/cancel
 
 Discovery: GET /.well-known/lip, GET /health
 Operations: GET /metrics (Bearer auth), RateLimit-* headers, JSON request logs
@@ -109,6 +113,7 @@ Failed deliveries persist in the SQLite outbox and resume after restart.
 - packages/protocol/src — schema source, generated types
 - packages/reference/src/engine.ts — loyalty engine rules
 - packages/server/src/server.ts — HTTP routes
+- packages/server/src/program-management.ts — non-normative draft/publish/rollback
 - packages/sdk/src/client.ts — idiomatic TypeScript client
 - packages/cli/src/cli.ts — lip CLI (serve, doctor, test, validate)
 - apps/admin/src/App.tsx — reference Admin dashboard
@@ -123,7 +128,7 @@ Reference: sakura-japan repo (Expo app + server/index.mjs BFF).
 
 - Customer auth (OTP, social, sessions)
 - Campaigns, segments, push, CRM, analytics
-- Runtime program editing (use --program at boot)
+- Portable program-authoring APIs (the reference Admin has non-normative local draft/publish)
 - Live loyalty operations over MCP (official MCP supplies docs, schemas, and validation only)
 
 ## Maintainer

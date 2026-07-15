@@ -180,6 +180,39 @@ export interface AdminPendingWebhookDelivery extends AdminWebhookDelivery {
   updated_at: string;
 }
 
+export interface ProgramValidationResult {
+  ok: boolean;
+  issues: Array<{ path: string; message: string }>;
+}
+
+export interface ProgramManagement {
+  active_revision: number;
+  active_published_at: string;
+  active_published_by: string;
+  active_program: Record<string, unknown>;
+  draft?: {
+    version: number;
+    updated_at: string;
+    updated_by: string;
+    program: unknown;
+    validation: ProgramValidationResult;
+  };
+  history: Array<{
+    revision: number;
+    published_at: string;
+    published_by: string;
+    program: Record<string, unknown>;
+  }>;
+  audit: Array<{
+    audit_id: string;
+    action: "draft.saved" | "draft.discarded" | "program.published" | "program.rolled_back";
+    actor: string;
+    occurred_at: string;
+    revision?: number;
+    draft_version?: number;
+  }>;
+}
+
 export interface AdminSnapshot {
   admin_api_version: string;
   generated_at: string;
@@ -190,6 +223,7 @@ export interface AdminSnapshot {
   };
   program: ProgramCatalog;
   program_configuration: ProgramConfiguration;
+  program_management?: ProgramManagement;
   webhooks: {
     enabled: boolean;
     pending: AdminPendingWebhookDelivery[];

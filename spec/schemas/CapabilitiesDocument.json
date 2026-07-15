@@ -79,6 +79,18 @@
           {
             "const": "ledger.manual_adjustment",
             "type": "string"
+          },
+          {
+            "const": "issued_reward.list",
+            "type": "string"
+          },
+          {
+            "const": "issued_reward.issue",
+            "type": "string"
+          },
+          {
+            "const": "issued_reward.cancel",
+            "type": "string"
           }
         ]
       }

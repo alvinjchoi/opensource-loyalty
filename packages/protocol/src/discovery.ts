@@ -23,7 +23,10 @@ export const OperationNameSchema = Type.Union([
   Type.Literal("program.get"),
   Type.Literal("account.get"),
   Type.Literal("ledger.list"),
-  Type.Literal("ledger.manual_adjustment")
+  Type.Literal("ledger.manual_adjustment"),
+  Type.Literal("issued_reward.list"),
+  Type.Literal("issued_reward.issue"),
+  Type.Literal("issued_reward.cancel")
 ]);
 
 export const WellKnownDocumentSchema = Type.Object(

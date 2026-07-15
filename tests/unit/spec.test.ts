@@ -17,7 +17,7 @@ describe("generated protocol contract", () => {
     };
 
     expect(api.openapi).toBe("3.1.2");
-    expect(Object.keys(api.paths ?? {})).toHaveLength(15);
+    expect(Object.keys(api.paths ?? {})).toHaveLength(18);
     expect(api.components?.schemas).toHaveProperty("FoodserviceOrder");
     expect(api.components?.schemas).toHaveProperty("MemberAccountResponse");
     expect(YAML.parse(readFileSync(path, "utf8"))).toHaveProperty("webhooks.loyaltyEvent");

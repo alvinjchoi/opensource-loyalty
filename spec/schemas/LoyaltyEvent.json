@@ -429,6 +429,13 @@
                   "description": "Opaque, stable identifier within the owning system.",
                   "type": "string"
                 },
+                "issued_reward_id": {
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+                  "description": "Opaque, stable identifier within the owning system.",
+                  "type": "string"
+                },
                 "order_id": {
                   "minLength": 1,
                   "maxLength": 128,

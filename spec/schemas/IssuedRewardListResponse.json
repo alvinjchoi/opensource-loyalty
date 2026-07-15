@@ -1,0 +1,157 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://loyalty-interchange.org/schema/v1/IssuedRewardListResponse.json",
+  "title": "IssuedRewardListResponse",
+  "additionalProperties": false,
+  "type": "object",
+  "required": [
+    "context",
+    "issued_rewards"
+  ],
+  "properties": {
+    "context": {
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "protocol_version",
+        "profile",
+        "request_id",
+        "processed_at"
+      ],
+      "properties": {
+        "protocol_version": {
+          "const": "1.0",
+          "type": "string"
+        },
+        "profile": {
+          "const": "foodservice/1.0",
+          "type": "string"
+        },
+        "request_id": {
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+          "description": "Opaque, stable identifier within the owning system.",
+          "type": "string"
+        },
+        "processed_at": {
+          "format": "date-time",
+          "type": "string"
+        }
+      }
+    },
+    "issued_rewards": {
+      "type": "array",
+      "items": {
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "issued_reward_id",
+          "member_id",
+          "program_id",
+          "reward_id",
+          "status",
+          "issued_at"
+        ],
+        "properties": {
+          "issued_reward_id": {
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "description": "Opaque, stable identifier within the owning system.",
+            "type": "string"
+          },
+          "member_id": {
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "description": "Opaque, stable identifier within the owning system.",
+            "type": "string"
+          },
+          "program_id": {
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "description": "Opaque, stable identifier within the owning system.",
+            "type": "string"
+          },
+          "reward_id": {
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "description": "Opaque, stable identifier within the owning system.",
+            "type": "string"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "const": "issued",
+                "type": "string"
+              },
+              {
+                "const": "redeemed",
+                "type": "string"
+              },
+              {
+                "const": "cancelled",
+                "type": "string"
+              },
+              {
+                "const": "expired",
+                "type": "string"
+              }
+            ]
+          },
+          "issued_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "redeemed_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "cancelled_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "cancellation_reason": {
+            "minLength": 1,
+            "maxLength": 255,
+            "type": "string"
+          },
+          "artifact": {
+            "additionalProperties": false,
+            "type": "object",
+            "required": [
+              "type",
+              "value"
+            ],
+            "properties": {
+              "type": {
+                "anyOf": [
+                  {
+                    "const": "code",
+                    "type": "string"
+                  },
+                  {
+                    "const": "qr_code",
+                    "type": "string"
+                  }
+                ]
+              },
+              "value": {
+                "minLength": 1,
+                "maxLength": 512,
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

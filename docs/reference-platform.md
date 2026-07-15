@@ -33,7 +33,7 @@ apps/admin                         POS, kiosk, ordering, SDK
 - `packages/storage-sqlite` stores one current snapshot per key using SQLite,
   WAL mode, and an upsert transaction.
 - `packages/server` exposes the normative HTTP binding and a separate,
-  authenticated read-only Admin API.
+  authenticated Admin API.
 - `apps/admin` renders operational state without importing the engine or reading
   SQLite directly.
 
@@ -53,8 +53,10 @@ Every successful mutation saves the new engine snapshot before the HTTP response
 is returned.
 
 The snapshot includes its format version and a fingerprint of the configured
-program. Startup rejects a snapshot created for an incompatible program instead
-of silently applying the wrong earning or tier policy.
+program. Published program definitions, drafts, retained revisions, and a local
+write audit trail are stored under a separate SQLite key. Startup reconciles a
+compatible interrupted publish and rejects unknown or incompatible state
+instead of silently applying the wrong earning or tier policy.
 
 Useful controls:
 
@@ -77,17 +79,26 @@ server exchanges it for an eight-hour, HttpOnly,
 `SameSite=Strict` session cookie. Admin data is served from
 `/admin/api/v1/snapshot`; protocol clients do not need or use this route.
 
-The current Admin is intentionally read-only for persisted server state. Its
-Configure view reads program-model capability metadata from the Admin snapshot
+The Configure view supports versioned points-program drafts, validation,
+optimistic publish, retained revision history, and rollback. Compatible changes
+to earn rates, tiers, expiration, eligibility, and rewards take effect live
+without replacing member balances or immutable ledger history. Program ids and
+currencies cannot change after publication. Writes use a double-submit CSRF
+token tied to the local Admin session; Bearer-authenticated automation is also
+supported.
+
+The same view reads program-model capability metadata from the Admin snapshot
 so operators can compare points, visits, wallet credit, paid membership, and
 hybrid structures. Only points-and-tiers is currently runnable in the reference
-engine; the other models are shown with backend blockers until write and engine
-support exists. It supports:
+engine; the other models remain marked with backend blockers. The Admin
+supports:
 
 - Program health, issued and outstanding liability, and tier distribution
 - Member search, balances, tier progress, and expiration buckets
 - Immutable ledger search and operation filtering
 - Earning policy, tier ladder, and reward-catalog inspection
+- Program draft, validate, publish, discard, and rollback operations
+- Local audit records for program writes
 - Program model planning for future configuration work
 - Protocol, storage, and endpoint diagnostics
 

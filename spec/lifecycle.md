@@ -68,3 +68,16 @@ applies. Debits MUST NOT include `expires_at`.
 Repeating an `adjustment_id` with identical facts returns the original ledger
 entry. Reusing it with different facts is a conflict. A provider MUST NOT count
 a manual entry toward qualification unless `qualifies_for_tier` is true.
+
+## Issued reward wallet
+
+A provider MAY issue a catalog reward directly to a member. An issued reward
+has a stable `issued_reward_id` and moves through `issued`, `redeemed`,
+`cancelled`, or `expired`. Optional code and QR-code artifacts MUST be unique
+within the provider's program and MUST be treated as bearer credentials.
+
+Supplying `issued_reward_id` while reserving claims that member-specific reward
+without spending points. The issued reward, member, and catalog reward MUST
+match, and only one active reservation may hold it. Capture marks it redeemed;
+reversing a captured reservation restores it to issued. Cancellation is allowed
+only before redemption and while no active reservation holds the reward.
