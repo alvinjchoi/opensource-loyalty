@@ -82,6 +82,12 @@ The HTTP binding uses `application/problem+json` as defined by RFC 9457. Clients
 MUST branch on HTTP status and stable `code`; they MUST NOT parse human-readable
 `detail` strings.
 
+Transport failures use dedicated codes distinct from domain codes:
+`invalid_json` (400), `unauthorized` (401), `not_found` (404),
+`method_not_allowed` (405), `payload_too_large` (413), and
+`unsupported_media_type` (415). Servers MUST respond `405` with an `Allow`
+header when a known path receives an unsupported HTTP method.
+
 ## Events
 
 Lifecycle events use the CloudEvents 1.0 structured JSON format. Event consumers

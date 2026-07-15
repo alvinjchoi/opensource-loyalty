@@ -35,6 +35,20 @@ interface Route {
   handle(body: never): unknown;
 }
 
+class TransportError extends Error {
+  public readonly status: number;
+  public readonly code: string;
+  public readonly title: string;
+
+  public constructor(status: number, code: string, title: string, detail: string) {
+    super(detail);
+    this.name = "TransportError";
+    this.status = status;
+    this.code = code;
+    this.title = title;
+  }
+}
+
 export interface ServerOptions {
   apiKey: string;
   reservationTtlSeconds?: number;
@@ -202,7 +216,12 @@ function problem(status: number, title: string, code: string, detail?: string): 
 async function readBody(request: IncomingMessage): Promise<unknown> {
   const contentType = request.headers["content-type"]?.split(";", 1)[0];
   if (contentType !== "application/json") {
-    throw new EngineError("invalid_state", "Content-Type must be application/json", 415);
+    throw new TransportError(
+      415,
+      "unsupported_media_type",
+      "Unsupported Media Type",
+      "Content-Type must be application/json"
+    );
   }
 
   const chunks: Buffer[] = [];
@@ -211,7 +230,7 @@ async function readBody(request: IncomingMessage): Promise<unknown> {
     const chunk = Buffer.isBuffer(rawChunk) ? rawChunk : Buffer.from(rawChunk);
     size += chunk.length;
     if (size > MAX_BODY_BYTES) {
-      throw new EngineError("invalid_state", "Request body exceeds 1 MiB", 413);
+      throw new TransportError(413, "payload_too_large", "Payload Too Large", "Request body exceeds 1 MiB");
     }
     chunks.push(chunk);
   }
@@ -219,7 +238,7 @@ async function readBody(request: IncomingMessage): Promise<unknown> {
   try {
     return JSON.parse(Buffer.concat(chunks).toString("utf8")) as unknown;
   } catch {
-    throw new EngineError("invalid_state", "Request body is not valid JSON", 400);
+    throw new TransportError(400, "invalid_json", "Bad Request", "Request body is not valid JSON");
   }
 }
 
@@ -246,6 +265,27 @@ export function createReferenceServer(engine: LoyaltyEngine, options: ServerOpti
   const routes = routeTable(engine);
   const adminSessions = new Set<string>();
   const adminEnabled = options.admin?.enabled ?? true;
+
+  const allowedMethods = new Map<string, string[]>([
+    ["/health", ["GET"]],
+    ["/favicon.ico", ["GET"]],
+    ["/.well-known/lip", ["GET"]],
+    ["/lip/v1/capabilities", ["GET"]]
+  ]);
+  for (const key of routes.keys()) {
+    const separator = key.indexOf(" ");
+    const routeMethod = key.slice(0, separator);
+    const routePath = key.slice(separator + 1);
+    const methods = allowedMethods.get(routePath) ?? [];
+    methods.push(routeMethod);
+    allowedMethods.set(routePath, methods);
+  }
+  if (adminEnabled) {
+    allowedMethods.set("/admin/api/v1/bootstrap", ["GET"]);
+    allowedMethods.set("/admin/api/v1/session", ["POST"]);
+    allowedMethods.set("/admin/api/v1/logout", ["POST"]);
+    allowedMethods.set("/admin/api/v1/snapshot", ["GET"]);
+  }
 
   return createServer((request, response) => {
     void (async () => {
@@ -342,6 +382,17 @@ export function createReferenceServer(engine: LoyaltyEngine, options: ServerOpti
 
       const route = routes.get(`${method} ${path}`);
       if (!route) {
+        const allowed = allowedMethods.get(path);
+        if (allowed && !allowed.includes(method)) {
+          response.setHeader("allow", allowed.join(", "));
+          sendJson(
+            response,
+            405,
+            problem(405, "Method Not Allowed", "method_not_allowed", `Use ${allowed.join(" or ")} for this path`),
+            "application/problem+json"
+          );
+          return;
+        }
         sendJson(response, 404, problem(404, "Not Found", "not_found"), "application/problem+json");
         return;
       }
@@ -369,6 +420,15 @@ export function createReferenceServer(engine: LoyaltyEngine, options: ServerOpti
     })().catch((error: unknown) => {
       if (response.headersSent) {
         response.end();
+        return;
+      }
+      if (error instanceof TransportError) {
+        sendJson(
+          response,
+          error.status,
+          problem(error.status, error.title, error.code, error.message),
+          "application/problem+json"
+        );
         return;
       }
       if (error instanceof EngineError) {

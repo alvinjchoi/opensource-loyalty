@@ -12,7 +12,7 @@ describe("reference HTTP server", () => {
       .toThrowError(/at least 8/);
   });
 
-  it("returns problem details for routes, media types, JSON, and body limits", async () => {
+  it("returns problem details for routes, methods, media types, JSON, and body limits", async () => {
     const running = await startReferenceServer(new LoyaltyEngine(makeProgram()), {
       apiKey: "server-test-key"
     });
@@ -20,6 +20,17 @@ describe("reference HTTP server", () => {
       const missing = await fetch(`${running.url}/missing`);
       expect(missing.status).toBe(404);
       expect(await missing.json()).toMatchObject({ code: "not_found" });
+
+      const wrongMethod = await fetch(`${running.url}/lip/v1/members/enroll`, {
+        headers: { authorization: "Bearer server-test-key" }
+      });
+      expect(wrongMethod.status).toBe(405);
+      expect(wrongMethod.headers.get("allow")).toBe("POST");
+      expect(await wrongMethod.json()).toMatchObject({ code: "method_not_allowed" });
+
+      const postToGetRoute = await fetch(`${running.url}/health`, { method: "POST" });
+      expect(postToGetRoute.status).toBe(405);
+      expect(postToGetRoute.headers.get("allow")).toBe("GET");
 
       const discovery = await fetch(`${running.url}/.well-known/lip`);
       expect(discovery.status).toBe(200);
@@ -49,6 +60,7 @@ describe("reference HTTP server", () => {
         body: "{}"
       });
       expect(wrongType.status).toBe(415);
+      expect(await wrongType.json()).toMatchObject({ code: "unsupported_media_type" });
 
       const malformed = await fetch(`${running.url}/lip/v1/members/enroll`, {
         method: "POST",
@@ -56,7 +68,7 @@ describe("reference HTTP server", () => {
         body: "{not-json"
       });
       expect(malformed.status).toBe(400);
-      expect(await malformed.json()).toMatchObject({ code: "invalid_state" });
+      expect(await malformed.json()).toMatchObject({ code: "invalid_json" });
 
       const tooLarge = await fetch(`${running.url}/lip/v1/members/enroll`, {
         method: "POST",
@@ -64,6 +76,7 @@ describe("reference HTTP server", () => {
         body: JSON.stringify({ padding: "x".repeat(1_048_576) })
       });
       expect(tooLarge.status).toBe(413);
+      expect(await tooLarge.json()).toMatchObject({ code: "payload_too_large" });
     } finally {
       await running.close();
     }

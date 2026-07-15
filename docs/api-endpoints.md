@@ -140,13 +140,16 @@ Errors use RFC 9457 problem details with `application/problem+json`.
 
 Common statuses:
 
-| Status | Meaning |
-| --- | --- |
-| `401` | Missing or invalid Bearer token. |
-| `404` | Unknown route or resource. |
-| `415` | Request body is not `application/json`. |
-| `422` | Payload failed schema validation. |
-| `500` | Unhandled server error. |
+| Status | Code | Meaning |
+| --- | --- | --- |
+| `400` | `invalid_json` | Request body is not valid JSON. |
+| `401` | `unauthorized` | Missing or invalid Bearer token. |
+| `404` | `not_found` | Unknown route or resource. |
+| `405` | `method_not_allowed` | Known path, wrong HTTP method. The `Allow` header lists supported methods. |
+| `413` | `payload_too_large` | Request body exceeds the `max_body_bytes` capability limit. |
+| `415` | `unsupported_media_type` | Request body is not `application/json`. |
+| `422` | `validation_failed` | Payload failed schema validation. |
+| `500` | `internal_error` | Unhandled server error. |
 
 Validation errors include JSON paths:
 
