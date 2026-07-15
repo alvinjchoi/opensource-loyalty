@@ -1,0 +1,68 @@
+---
+title: "Loyalty Interchange Protocol"
+sidebarTitle: "Home"
+description: "Open, vendor-neutral loyalty infrastructure for restaurant, QSR, coffee, convenience, and franchise ordering systems"
+icon: "house"
+---
+
+**LIP is an open loyalty protocol and reference platform.** It ships everything needed to go from zero to a working loyalty integration: a normative protocol spec, a deterministic reference engine, an HTTP API, a TypeScript SDK, a local Admin dashboard, a SQLite sandbox, a Docker runtime, runnable examples, and black-box conformance tests.
+
+## Quick start
+
+<Tabs>
+  <Tab title="Docker">
+    ```bash
+    git clone https://github.com/alvinjchoi/opensource-loyalty.git
+    cd opensource-loyalty
+    docker compose up --build
+    ```
+
+    Then open [http://127.0.0.1:3210/admin/](http://127.0.0.1:3210/admin/) and sign in with the key printed in the startup log (`lip-dev-key` by default).
+  </Tab>
+  <Tab title="Source">
+    Requires Node.js 20.19 or newer and npm.
+
+    ```bash
+    git clone https://github.com/alvinjchoi/opensource-loyalty.git
+    cd opensource-loyalty
+    npm install
+    npm start
+    ```
+
+    The CLI prints the Admin URL and the Admin/API key. Open the URL and sign in.
+  </Tab>
+</Tabs>
+
+<Note>
+Installed and running? Read [Essentials](/get-started/essentials) next — it covers the six things every new integrator needs: the order lifecycle, idempotency, the Admin dashboard, the CLI, reset and seed controls, and conformance checks.
+</Note>
+
+## Where to go next
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/get-started/quickstart">
+    From clean clone to a working loyalty request in five minutes.
+  </Card>
+  <Card title="TypeScript SDK" icon="code" href="/guides/typescript-sdk">
+    The idiomatic client: typed errors, exact money, and the order builder.
+  </Card>
+  <Card title="API Reference" icon="terminal" href="/api-reference/overview">
+    Every endpoint, generated from the checked-in OpenAPI 3.1 contract.
+  </Card>
+  <Card title="Webhooks" icon="bolt" href="/guides/webhooks">
+    Signed CloudEvents after every successful mutation.
+  </Card>
+  <Card title="Reference Platform" icon="server" href="/guides/reference-platform">
+    Server, Admin dashboard, storage, and implementation boundaries.
+  </Card>
+  <Card title="Protocol Spec" icon="book" href="/protocol/overview">
+    The normative contract: lifecycle rules, profiles, and conformance.
+  </Card>
+</CardGroup>
+
+## What the protocol covers
+
+- **Complete loyalty lifecycle** — member lookup, enrollment, balances, ledger history, order evaluation before checkout, accrual after payment, and redemption reserve, capture, reverse, and refund-safe adjustment flows.
+- **Foodservice-first order model** — items, modifiers, discounts, fees, taxes, tips, tenders, and totals, with channel-aware rules for counter, drive-thru, kiosk, web, mobile, pickup, delivery, and catering.
+- **Retry-safe by design** — idempotency keys, request context, RFC 9457 problem details, and partial refund, void, reversal, and duplicate-check semantics.
+- **Multiple program models** — points (executable today), visits and stamps, wallet credit, paid membership, and hybrid rewards as configuration templates.

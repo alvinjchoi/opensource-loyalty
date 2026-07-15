@@ -1,0 +1,122 @@
+---
+title: "Quickstart"
+description: "From a clean clone to a working loyalty request in five minutes"
+icon: "rocket"
+---
+
+This guide starts the stateful foodservice reference environment, validates a restaurant order, enrolls a member, and runs baseline conformance checks.
+
+## 1. Start the sandbox
+
+<Tabs>
+  <Tab title="Docker">
+    Requires Git and Docker.
+
+    ```bash
+    git clone https://github.com/alvinjchoi/opensource-loyalty.git
+    cd opensource-loyalty
+    docker compose up --build
+    ```
+
+    The Compose service stores its SQLite database in the named `lip-data` volume. If the startup log is no longer visible, read the key with:
+
+    ```bash
+    docker compose logs lip
+    ```
+  </Tab>
+  <Tab title="Source">
+    Requires Node.js 20.19 or newer and npm.
+
+    <Warning>
+    This repo uses npm workspaces with `package-lock.json`. pnpm is not the supported install path. Use `npm ci` for a clean lockfile-only install.
+    </Warning>
+
+    ```bash
+    git clone https://github.com/alvinjchoi/opensource-loyalty.git
+    cd opensource-loyalty
+    npm install
+    npm start
+    ```
+  </Tab>
+</Tabs>
+
+Keep that terminal open. It prints the Admin URL and Admin/API key:
+
+```text
+Admin: http://127.0.0.1:3210/admin/
+Admin/API key: lip-dev-key
+```
+
+The same key is used for dashboard sign-in and Bearer API requests. Quickstart creates `.lip/reference.db`, seeds six synthetic members, and preserves all activity across restarts.
+
+The local server exposes:
+
+| Surface | URL |
+| --- | --- |
+| Admin dashboard | `http://127.0.0.1:3210/admin/` |
+| Protocol API | `http://127.0.0.1:3210/lip/v1` |
+| Health | `http://127.0.0.1:3210/health` |
+| Discovery | `http://127.0.0.1:3210/.well-known/lip` |
+
+## 2. Check the environment
+
+In a second terminal:
+
+```bash
+npm run lip -- doctor http://127.0.0.1:3210 --api-key lip-dev-key
+```
+
+All discovery, health, authentication, and capability checks should pass. Docker-only users can verify with curl:
+
+```bash
+curl http://127.0.0.1:3210/health
+curl http://127.0.0.1:3210/lip/v1/capabilities \
+  -H 'Authorization: Bearer lip-dev-key'
+```
+
+## 3. Validate a restaurant order
+
+```bash
+npm run lip -- validate spec/examples/paid-order.json --schema FoodserviceOrder
+```
+
+Validation errors include a JSON path and the failed rule. Run `npm run lip -- schemas` to list every available schema.
+
+## 4. Enroll a member
+
+```bash
+curl --fail-with-body \
+  -X POST http://127.0.0.1:3210/lip/v1/members/enroll \
+  -H 'Authorization: Bearer lip-dev-key' \
+  -H 'Content-Type: application/json' \
+  --data-binary @spec/examples/enroll-request.json
+```
+
+The response contains `member-001` and an initial points balance.
+
+## 5. Run the full loyalty flow
+
+```bash
+npm run example:sdk
+```
+
+This runs the happy path end to end: enroll a member, evaluate an order, post accrual, reserve a reward, capture it, reverse it, and adjust a refunded order. The example at `examples/typescript/full-lifecycle.ts` is fewer than 50 non-empty application lines.
+
+## 6. Run baseline conformance
+
+```bash
+npm run lip -- test http://127.0.0.1:3210 --api-key lip-dev-key
+```
+
+The command checks discovery, health, authenticated capabilities, unauthenticated mutation rejection, and RFC 9457 validation errors. It exits nonzero when any check fails, so the same command can run in CI.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Essentials" icon="list-check" href="/get-started/essentials">
+    The six things every new integrator needs to know.
+  </Card>
+  <Card title="TypeScript SDK" icon="code" href="/guides/typescript-sdk">
+    Use the idiomatic client in your app.
+  </Card>
+</CardGroup>

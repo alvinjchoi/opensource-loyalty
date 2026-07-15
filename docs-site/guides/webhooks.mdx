@@ -1,0 +1,58 @@
+---
+title: "Webhooks"
+description: "Signed CloudEvents pushed after every successful mutation"
+icon: "bolt"
+---
+
+The reference platform pushes CloudEvents 1.0 structured JSON to HTTP receivers using the signature profile defined in the normative spec. Events are emitted after successful mutations:
+
+| Operation | Event type |
+| --- | --- |
+| Member enrollment | `org.loyalty-interchange.member.enrolled.v1` |
+| Accrual posted | `org.loyalty-interchange.order.accrued.v1` |
+| Order adjusted | `org.loyalty-interchange.order.adjusted.v1` |
+| Redemption reserved | `org.loyalty-interchange.redemption.reserved.v1` |
+| Redemption captured | `org.loyalty-interchange.redemption.captured.v1` |
+| Redemption reversed | `org.loyalty-interchange.redemption.reversed.v1` |
+
+Event ids are derived from the underlying resource ids (ledger entry, reservation, member), so idempotent request replays re-deliver events with the same CloudEvent `source` + `id`. Receivers deduplicate on that pair.
+
+## Enabling delivery
+
+Set environment variables before starting the server:
+
+```bash
+LIP_WEBHOOK_URL=https://receiver.example/hooks \
+LIP_WEBHOOK_SECRET=your-shared-secret \
+npm run lip -- serve --port 4010 --api-key local-dev-key
+```
+
+Optionally restrict delivered event types with a comma-separated allowlist:
+
+```bash
+LIP_WEBHOOK_EVENTS=org.loyalty-interchange.order.accrued.v1,org.loyalty-interchange.redemption.captured.v1
+```
+
+Programmatic embedders can pass subscriptions directly:
+
+```ts
+import { createDemoPlatform } from "@loyalty-interchange/server";
+
+const platform = createDemoPlatform({
+  databasePath: "./data/reference.db",
+  webhooks: [{ url: "https://receiver.example/hooks", secret: "your-shared-secret" }]
+});
+```
+
+`platform.webhooks` exposes the dispatcher, including `flush()` to await in-flight deliveries and `deliveries()` for recent delivery history.
+
+## Delivery semantics
+
+- Each event is POSTed as JSON with `LIP-Webhook-Timestamp` and `LIP-Webhook-Signature: v1=<base64url>` headers.
+- Failed deliveries (network errors or non-2xx responses) are retried with exponential backoff, three attempts total by default.
+- Delivery is at-least-once. Receivers must verify the signature over the raw body and deduplicate using CloudEvent `source` + `id`.
+- Receivers can verify with the SDK's `verifyWebhook` — see the [TypeScript SDK guide](/guides/typescript-sdk#webhook-verification).
+
+<Note>
+The normative signing and replay-protection rules live in `spec/webhooks.md` in the repository. The protocol does not yet define webhook subscription management APIs.
+</Note>

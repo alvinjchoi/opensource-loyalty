@@ -1,0 +1,67 @@
+---
+title: "Essentials"
+description: "The six things every new LIP integrator needs to know"
+icon: "list-check"
+---
+
+You have the sandbox running. Before writing integration code, understand these six concepts — they shape every request you will make.
+
+## 1. The order lifecycle
+
+Loyalty in LIP follows the payment lifecycle, not the other way around:
+
+1. **Evaluate** (`orders/evaluate`) — before checkout, estimate accrual and list available rewards for an order. Read-only, safe to retry.
+2. **Accrue** (`accruals`) — after payment, post the earn. This writes an immutable ledger entry.
+3. **Reserve → Capture** (`redemptions/reserve`, `redemptions/capture`) — hold a reward against an order, then finalize it when the order completes. Reservations expire on a TTL if never captured.
+4. **Reverse** (`redemptions/reverse`) — release or refund a redemption.
+5. **Adjust** (`orders/adjust`) — correct accrual after a refund, void, or partial return, preserving the original earn multiplier.
+
+## 2. Idempotency is mandatory
+
+Every mutating request carries `context.idempotency_key`. Reuse the same key when retrying after a lost response — the server replays the original result. Reusing a key with a *different* payload returns an `idempotency_conflict` error instead of silently double-posting points.
+
+```ts
+await lip.accruals.post(
+  { member_id: memberId, order },
+  { idempotencyKey: `accrual:${order.order_id}` }
+);
+```
+
+The OpenAPI document marks read operations with `x-lip-safe-to-retry`. The SDK retries reads automatically but never silently retries financial mutations.
+
+## 3. Errors are contracts
+
+Errors use RFC 9457 problem details with `application/problem+json`. Branch on HTTP status and the stable `code` field — never parse human-readable `detail` strings. Validation failures (`422 validation_failed`) include JSON paths for each issue. See the [API overview](/api-reference/overview) for the full status and code table.
+
+## 4. The Admin dashboard is your debugger
+
+Open `http://127.0.0.1:3210/admin/` and sign in with the printed key. You can inspect account balances, tier progress, expiring point lots, immutable ledger history, program configuration, and storage status. Every mutation you make through the API is visible here immediately.
+
+## 5. The CLI covers validation and diagnostics
+
+```bash
+npm run lip -- doctor      # discovery, health, auth, capability checks
+npm run lip -- test        # baseline HTTP conformance (CI-friendly)
+npm run lip -- schemas     # list every JSON schema
+npm run lip -- validate spec/examples/paid-order.json --schema FoodserviceOrder
+```
+
+## 6. State is durable; reset is explicit
+
+The sandbox persists to `.lip/reference.db` and hydrates members, balances, point lots, reservations, ledger entries, and idempotency records on restart. Start fresh with:
+
+```bash
+npm run lip -- quickstart --reset            # new seeded database
+npm run lip -- quickstart --reset --no-seed  # empty database
+```
+
+## Where to go from here
+
+<CardGroup cols={2}>
+  <Card title="TypeScript SDK" icon="code" href="/guides/typescript-sdk">
+    Typed client, exact money, order builder, webhook verification.
+  </Card>
+  <Card title="API Reference" icon="terminal" href="/api-reference/overview">
+    Every endpoint with request and response schemas.
+  </Card>
+</CardGroup>

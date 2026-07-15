@@ -1,0 +1,43 @@
+---
+title: "Protocol Overview"
+description: "The normative LIP contract and where it lives"
+icon: "book"
+---
+
+LIP is an open, vendor-neutral transaction protocol for loyalty. The current working draft (`0.1.0`) is foodservice-first: it focuses on member resolution, restaurant order evaluation, accrual, redemption reservation and capture, reversals, refund adjustments, program catalogs, balances, tiers, and ledger history.
+
+## Normative sources
+
+The public protocol contract lives in the repository's `spec/` directory. When guides and generated artifacts disagree, treat the normative prose and generated schemas as canonical.
+
+| Document | Contents |
+| --- | --- |
+| [Core protocol](https://github.com/alvinjchoi/opensource-loyalty/blob/main/spec/core.md) | Request context, money, errors, events, compatibility rules |
+| [Lifecycle rules](https://github.com/alvinjchoi/opensource-loyalty/blob/main/spec/lifecycle.md) | Evaluate, accrue, reserve, capture, reverse, adjust semantics |
+| [Account experience](https://github.com/alvinjchoi/opensource-loyalty/blob/main/spec/account-experience.md) | Balances, tiers, metrics, ledger |
+| [Foodservice profile](https://github.com/alvinjchoi/opensource-loyalty/blob/main/spec/profiles/foodservice.md) | Restaurant order model and channel rules |
+| [Webhooks](https://github.com/alvinjchoi/opensource-loyalty/blob/main/spec/webhooks.md) | Signing, replay protection, delivery rules |
+| [OpenAPI 3.1](https://github.com/alvinjchoi/opensource-loyalty/blob/main/spec/openapi.yaml) | Generated HTTP binding |
+| [JSON Schemas](https://github.com/alvinjchoi/opensource-loyalty/tree/main/spec/schemas) | Generated Draft 2020-12 payload schemas |
+
+## Key design decisions
+
+**RPC-style POST operations.** Protocol operations are POSTs with structured request bodies (for example `POST /lip/v1/orders/evaluate`) rather than resource-oriented REST. Reads carry a full request context — protocol version, profile, request id, source system — that does not map cleanly onto query strings.
+
+**Explicit context on every request.** Every call carries `protocol_version`, `profile`, `request_id`, `idempotency_key`, `occurred_at`, and `source`. This makes requests traceable, replay-safe, and profile-negotiated by construction.
+
+**Errors are stable contracts.** The HTTP binding uses RFC 9457 problem details. Clients branch on HTTP status and stable `code` — never on human-readable strings. Transport failures use dedicated codes (`invalid_json`, `method_not_allowed`, `payload_too_large`, `unsupported_media_type`) distinct from domain codes.
+
+**Exact money, no floats.** Monetary values are integer minor units with a currency code. Funding shares are integer basis points that must total exactly 10,000, allocated with the largest-remainder method.
+
+**Events are CloudEvents.** Lifecycle events use CloudEvents 1.0 structured JSON. Consumers deduplicate on `source` + `id` and ignore unnegotiated event types.
+
+## Conformance
+
+Black-box HTTP conformance checks run against any implementation:
+
+```bash
+npm run lip -- test https://your-implementation.example --api-key YOUR_KEY
+```
+
+The suite checks discovery, health, authenticated capabilities, unauthenticated mutation rejection, and RFC 9457 validation error shapes. It exits nonzero on failure, so it can gate CI.

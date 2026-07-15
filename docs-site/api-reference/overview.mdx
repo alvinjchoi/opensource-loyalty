@@ -1,0 +1,77 @@
+---
+title: "API Overview"
+description: "Base URL, authentication, errors, and retry rules for the LIP HTTP API"
+icon: "terminal"
+---
+
+The operation contract comes from the generated OpenAPI 3.1 document. The endpoint pages in this section are generated from that same document, so they always match the checked-in spec.
+
+## Base URL
+
+Local sandbox:
+
+```text
+http://127.0.0.1:3210/lip/v1
+```
+
+Production providers expose the same routes under their own origin and publish discovery metadata at `/.well-known/lip`.
+
+## Authentication
+
+All `/lip/v1` routes require Bearer authentication except public discovery and health checks.
+
+```bash
+curl http://127.0.0.1:3210/lip/v1/capabilities \
+  -H 'Authorization: Bearer lip-dev-key'
+```
+
+The reference token is for local development only. Production providers should issue scoped credentials, rotate secrets, and document rate limits.
+
+## Discovery
+
+| Method | Path | Auth | Purpose |
+| --- | --- | --- | --- |
+| `GET` | `/.well-known/lip` | No | Find API, health, profile, and auth metadata. |
+| `GET` | `/health` | No | Check service health. |
+| `GET` | `/lip/v1/capabilities` | Yes | Negotiate operations, reward effects, event types, and limits. |
+
+## Idempotency and retries
+
+Every mutating request contains `context.idempotency_key`. Reuse the same key when retrying after a lost response. Do not silently retry financial mutations with a new key.
+
+The OpenAPI document marks safe operations with `x-lip-safe-to-retry`. The SDK uses bounded retries for reads and discovery, but not for accrual, redemption, enrollment, or adjustment mutations.
+
+## Errors
+
+Errors use RFC 9457 problem details with `application/problem+json`.
+
+| Status | Code | Meaning |
+| --- | --- | --- |
+| `400` | `invalid_json` | Request body is not valid JSON. |
+| `401` | `unauthorized` | Missing or invalid Bearer token. |
+| `404` | `not_found` | Unknown route or resource. |
+| `405` | `method_not_allowed` | Known path, wrong HTTP method. The `Allow` header lists supported methods. |
+| `413` | `payload_too_large` | Request body exceeds the `max_body_bytes` capability limit. |
+| `415` | `unsupported_media_type` | Request body is not `application/json`. |
+| `422` | `validation_failed` | Payload failed schema validation. |
+| `500` | `internal_error` | Unhandled server error. |
+
+Validation errors include JSON paths:
+
+```json
+{
+  "type": "https://loyalty-interchange.org/problems/validation_failed",
+  "title": "Request validation failed",
+  "status": 422,
+  "code": "validation_failed",
+  "errors": [
+    { "path": "/order/totals/total", "message": "Expected required property" }
+  ]
+}
+```
+
+Domain failures (insufficient balance, expired reservations, idempotency conflicts) use their own stable codes with appropriate 4xx statuses.
+
+## Admin API boundary
+
+The local Admin dashboard uses `/admin/api/v1/*`. Those routes are reference-platform conveniences and are not part of the LIP protocol contract. POS, ordering, wallet, and loyalty-provider integrations should target `/lip/v1` only.

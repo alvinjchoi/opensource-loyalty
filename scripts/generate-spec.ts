@@ -202,4 +202,6 @@ const catalog = {
   )
 };
 await writeFile(resolve(schemaDirectory, "catalog.json"), `${JSON.stringify(catalog, null, 2)}\n`);
-await writeFile(resolve(root, "spec/openapi.yaml"), YAML.stringify(openapi, { lineWidth: 100 }));
+const openapiYaml = YAML.stringify(openapi, { lineWidth: 100 });
+await writeFile(resolve(root, "spec/openapi.yaml"), openapiYaml);
+await writeFile(resolve(root, "docs-site/api-reference/openapi.yaml"), openapiYaml);
