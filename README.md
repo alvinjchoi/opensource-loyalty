@@ -1,101 +1,159 @@
-# Loyalty Interchange Protocol - Open Loyalty Infrastructure for Developers
+# Loyalty Interchange Protocol (LIP) 👋
 
-An open, vendor-neutral loyalty protocol and reference platform for restaurants,
-QSRs, coffee shops, convenience foodservice, and franchise systems. LIP gives
-developers a local sandbox, TypeScript SDK, HTTP API, conformance tests, and
-operator dashboard for building portable loyalty integrations without starting
-from a proprietary platform.
+![GitHub stars](https://img.shields.io/github/stars/alvinjchoi/opensource-loyalty?style=social)
+![GitHub forks](https://img.shields.io/github/forks/alvinjchoi/opensource-loyalty?style=social)
+![GitHub repo size](https://img.shields.io/github/repo-size/alvinjchoi/opensource-loyalty)
+![GitHub language count](https://img.shields.io/github/languages/count/alvinjchoi/opensource-loyalty)
+![GitHub top language](https://img.shields.io/github/languages/top/alvinjchoi/opensource-loyalty)
+![GitHub last commit](https://img.shields.io/github/last-commit/alvinjchoi/opensource-loyalty?color=red)
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 
-**[Read LIP Docs](docs/README.md)** - Getting started, API endpoints, SDK guide,
-reference platform notes, and protocol specification
+**LIP is an open, vendor-neutral loyalty protocol and reference platform for developers building restaurant, QSR, coffee, convenience, and franchise ordering systems.** It ships everything needed to go from zero to a working loyalty integration: a normative protocol spec, a **deterministic reference engine**, an **HTTP API**, a **TypeScript SDK**, a local **Admin dashboard**, a SQLite sandbox, Docker runtime, runnable examples, and black-box conformance tests.
 
-## Features
+For more information, be sure to check out the **[LIP Documentation](docs/README.md)**.
 
-### Loyalty Protocol
+## Key Features of LIP ⭐
 
-- Member lookup and enrollment
-- Order evaluation before checkout
-- Accrual posting for paid orders
-- Redemption reserve, capture, reverse, and refund-safe adjustment flow
-- Program catalogs, balances, tiers, expiring lots, and ledger history
-- RFC 9457 problem details and idempotency keys for financial operations
+- 🚀 **Effortless Setup**: One command to a seeded local sandbox (`npm start`), or self-host with Docker Compose. The startup screen prints your Admin URL and API key.
 
-### Foodservice Profile
+- 🔁 **Complete Loyalty Lifecycle**: Member lookup, enrollment, balances, and ledger history. Evaluate orders before checkout, post accrual after payment, and run redemption reserve, capture, reverse, and refund-safe adjustment flows.
 
-- Restaurant order model with items, modifiers, fees, tenders, taxes, tips, and totals
-- Channel-aware rules for counter, drive-thru, kiosk, web, mobile, pickup, delivery, and catering
-- Franchise scope with brand, merchant, location, and franchisee identifiers
-- Product, category, tag, and line-kind earning exclusions
-- Partial refund, void, reversal, duplicate-check, and retry semantics
+- 🍔 **Foodservice-First Order Model**: Restaurant orders with items, modifiers, discounts, fees, taxes, tips, tenders, and totals. Channel-aware rules for counter, drive-thru, kiosk, web, mobile, pickup, delivery, and catering.
 
-### Developer Experience
+- 🏪 **Franchise-Aware Scope**: Brand, merchant, location, and franchisee identifiers, plus product, category, tag, and line-kind earning exclusions.
 
-- One-command local sandbox with seeded data: `npm start`
-- TypeScript SDK that creates request ids, timestamps, idempotency keys, and protocol context
-- Exact-money helpers and foodservice order builder
-- CLI for validation, diagnostics, quickstart, and baseline conformance
-- Generated OpenAPI client plus handwritten domain SDK
-- Runnable full-lifecycle example in `examples/typescript/full-lifecycle.ts`
+- 🎯 **Multiple Program Models**: **Points** (spend-based earn/redeem with expiring lots), **visits and stamps**, **wallet credit**, **paid membership**, and **hybrid rewards**. Points is executable in the reference engine today; the Admin surfaces the others as configuration templates with explicit backend support status.
 
-### Reference Platform
+- 🛡️ **Retry-Safe by Design**: Idempotency keys, request context, RFC 9457 problem details, and partial refund, void, reversal, duplicate-check, and settlement semantics.
 
-- Authenticated local Admin dashboard at `http://127.0.0.1:3210/admin/`
-- SQLite-backed durable sandbox state
-- Inspectable members, balances, tiers, ledger entries, rewards, and storage status
-- Program model configuration view for points, visits/stamps, wallet credit, paid membership, and hybrid rewards
-- Server-owned capability metadata so planned models show real backend blockers
-- Storage abstraction ready for production adapters such as Postgres
+- 🧰 **TypeScript SDK**: Idiomatic domain client with request ids, timestamps, idempotency keys, exact-money helpers, a foodservice order builder, and a generated low-level OpenAPI client.
 
-### Conformance and Specs
+- 🖥️ **Local Admin Dashboard**: Authenticated dashboard at `http://127.0.0.1:3210/admin/` for inspecting members, balances, tiers, rewards, ledger entries, program configuration, and storage status.
 
-- OpenAPI 3.1 HTTP contract
-- JSON Schema Draft 2020-12 payload schemas
-- Normative lifecycle, account, webhook, and foodservice profile documents
-- Black-box HTTP conformance tests
-- Checked-in examples used by tests
+- 🗄️ **Durable Sandbox Storage**: SQLite-backed state by default, with a storage adapter boundary ready for production databases such as Postgres.
 
-## Quick Start
+- 🧪 **Specs and Conformance**: OpenAPI 3.1 contract, JSON Schema Draft 2020-12 payload schemas, normative lifecycle, account, webhook, and foodservice profile documents, and black-box HTTP conformance tests you can run against any implementation.
 
-1. Install dependencies
+- 🔧 **Batteries-Included CLI**: Validation, diagnostics (`doctor`), local serving, schema listing, and baseline conformance checks.
 
-```sh
-npm install
+Want the full picture? Check out the [developer docs](docs/README.md) for a comprehensive overview.
+
+## How to Install 🚀
+
+### Quick Start with Docker 🐳
+
+Requirements: Git and Docker.
+
+```bash
+git clone https://github.com/alvinjchoi/opensource-loyalty.git
+cd opensource-loyalty
+docker compose up --build
 ```
 
-2. Start the local sandbox
-
-```sh
-npm start
-```
-
-3. Open the dashboard
-
-```text
-http://127.0.0.1:3210/admin/
-```
-
-Use the development API key:
+The startup log prints the Admin URL and the Admin/API key. With the default Compose environment, the key is:
 
 ```text
 lip-dev-key
 ```
 
-4. Check the API
+Open the Admin dashboard at [http://127.0.0.1:3210/admin/](http://127.0.0.1:3210/admin/) and sign in with that key.
 
-```sh
+> [!TIP]
+> If the terminal is no longer visible, read the same key from Docker logs with `docker compose logs lip`.
+
+Then verify the API in a second terminal:
+
+```bash
 curl http://127.0.0.1:3210/health
+curl http://127.0.0.1:3210/lip/v1/capabilities \
+  -H 'Authorization: Bearer lip-dev-key'
 ```
 
-5. Run the full SDK lifecycle
+### Installation from Source 🛠️
 
-```sh
+Requirements: Git, Node.js 20.19 or newer, and npm.
+
+> [!NOTE]
+> This repo uses npm workspaces with `package-lock.json`. pnpm is not the supported install path. For a clean lockfile-only install, use `npm ci` instead of `npm install`.
+
+```bash
+git clone https://github.com/alvinjchoi/opensource-loyalty.git
+cd opensource-loyalty
+npm install
+npm start
+```
+
+The CLI prints:
+
+```text
+Admin: http://127.0.0.1:3210/admin/
+Admin/API key: lip-dev-key
+```
+
+In a second terminal, check the server and run the baseline conformance suite:
+
+```bash
+npm run lip -- doctor http://127.0.0.1:3210 --api-key lip-dev-key
+npm run lip -- test http://127.0.0.1:3210 --api-key lip-dev-key
+```
+
+Run the full SDK lifecycle — enroll a member, evaluate an order, post accrual, reserve and capture a reward, reverse it, and adjust a refunded order:
+
+```bash
 npm run example:sdk
 ```
 
-That example enrolls a member, evaluates an order, posts accrual, reserves and
-captures a reward, reverses the reward, and adjusts a refunded order.
+### What You Should See ✅
 
-## Project Structure
+The local server exposes:
+
+- Admin dashboard: `http://127.0.0.1:3210/admin/`
+- Protocol API: `http://127.0.0.1:3210/lip/v1`
+- Health: `http://127.0.0.1:3210/health`
+- Discovery: `http://127.0.0.1:3210/.well-known/lip`
+
+### Running the API Separately
+
+Use this when you only need the reference API and Admin app:
+
+```bash
+npm run lip -- serve
+```
+
+Useful options:
+
+```bash
+npm run lip -- serve --reset
+npm run lip -- serve --reset --no-seed
+npm run lip -- serve --database .lip/another.db
+npm run lip -- serve --port 4010 --api-key local-dev-key
+```
+
+### Self-Hosting Configuration ⚙️
+
+The Compose service runs the reference server and Admin dashboard on port `3210` and stores SQLite state in the named `lip-data` volume. Configure runtime values with environment variables:
+
+```bash
+LIP_API_KEY="replace-with-a-long-local-key"
+LIP_PORT=3210
+LIP_SEED_DEMO=true
+docker compose up --build
+```
+
+> [!WARNING]
+> The container is a single-node reference runtime, not a hosted multi-tenant production deployment. For production, build on the protocol and storage adapter boundary: SQLite sandbox → storage adapter contract → Postgres production adapter → tenant-aware Admin API → scoped users, roles, and audit log.
+
+### Target Install Experience 📦
+
+The verified install paths today are Docker and source. Once packages are published, the intended CLI experience is:
+
+```bash
+npx @loyalty-interchange/cli serve
+```
+
+An optional thin Python-friendly wrapper may provide `pipx install opensource-loyalty`, but the canonical runtime is the TypeScript server and protocol packages in this repo.
+
+## Project Structure 🗂️
 
 ```text
 |-- apps/
@@ -104,10 +162,10 @@ captures a reward, reverses the reward, and adjusts a refunded order.
 |-- examples/
 |   `-- typescript/         # Runnable SDK lifecycle examples
 |-- packages/
-|   |-- cli/                # lip CLI: quickstart, validation, doctor, conformance
+|   |-- cli/                # CLI: serve, quickstart, validation, doctor, conformance
 |   |-- protocol/           # TypeScript types, schemas, validation, protocol contracts
 |   |-- reference/          # Deterministic loyalty engine and Admin snapshot model
-|   |-- sdk/                # Idiomatic TypeScript SDK and generated OpenAPI client
+|   |-- sdk/                # Domain SDK and generated low-level OpenAPI client
 |   |-- server/             # Reference HTTP server and non-normative Admin API
 |   |-- storage/            # Storage adapter interface
 |   `-- storage-sqlite/     # Durable SQLite adapter for local and single-node use
@@ -116,26 +174,26 @@ captures a reward, reverses the reward, and adjusts a refunded order.
 `-- tests/                  # Unit, integration, and black-box conformance tests
 ```
 
-## Tech Stack
+## Tech Stack 🧱
 
-- **Language:** TypeScript
-- **Runtime:** Node.js 20.19+
+- **Language:** TypeScript on Node.js 20.19+
 - **Frontend:** React, Vite, Tailwind CSS, lucide-react
 - **API:** Node HTTP server with OpenAPI 3.1 contract
 - **Validation:** JSON Schema Draft 2020-12 via TypeBox
 - **SDK:** Handwritten domain client plus generated low-level OpenAPI client
-- **Storage:** SQLite by default, storage adapter boundary for Postgres and other backends
-- **Testing:** Vitest, black-box HTTP conformance tests
-- **Packaging:** npm workspaces
-- **License:** Apache-2.0
+- **Storage:** SQLite by default, adapter boundary for Postgres and other backends
+- **Testing:** Vitest and black-box HTTP conformance tests
+- **Packaging:** Docker today, npm CLI package planned
 
-## Scripts
+## Common Commands 🧑‍💻
 
-```sh
+```bash
 npm start             # Start the local sandbox and Admin dashboard
-npm run quickstart    # Same sandbox path, explicit command name
+npm run serve         # Same sandbox path with the public command name
 npm run lip -- doctor # Check discovery, health, auth, and capabilities
 npm run lip -- test   # Run baseline HTTP conformance checks
+npm run lip -- schemas                 # List supported JSON schemas
+npm run lip -- validate spec/examples/paid-order.json --schema FoodserviceOrder
 npm run example:sdk   # Run the full TypeScript SDK lifecycle
 npm run typecheck     # Type-check all packages and Admin app
 npm test              # Run the full test suite
@@ -144,42 +202,18 @@ npm run generate      # Regenerate schemas, OpenAPI, and SDK client
 npm run verify        # Full local verification pipeline
 ```
 
-## Running the API Separately
+## Documentation 📚
 
-Use this when you only need the reference API and Admin app:
+Developer guides:
 
-```sh
-npm run lip -- quickstart
-```
+- [Getting started](docs/getting-started.md) — shortest path from clone to working request
+- [Five-minute quickstart](docs/quickstart.md) — validation, Docker, reset, seed, and conformance details
+- [API endpoints](docs/api-endpoints.md) — routes, auth, examples, errors, retries, and webhooks
+- [TypeScript SDK](docs/typescript-sdk.md) — SDK operations, errors, money helpers, and order builder
+- [Reference platform](docs/reference-platform.md) — server, Admin, storage, and implementation boundaries
+- [Punchh compatibility](docs/punchh-compatibility.md) — migration coverage and adapter gaps
 
-Useful options:
-
-```sh
-npm run lip -- quickstart --reset
-npm run lip -- quickstart --reset --no-seed
-npm run lip -- quickstart --database .lip/another.db
-npm run lip -- quickstart --port 4010 --api-key local-dev-key
-```
-
-The server exposes:
-
-- Protocol API: `http://127.0.0.1:3210/lip/v1`
-- Discovery: `http://127.0.0.1:3210/.well-known/lip`
-- Health: `http://127.0.0.1:3210/health`
-- Admin dashboard: `http://127.0.0.1:3210/admin/`
-
-## Developer Guides
-
-- [Getting started](docs/getting-started.md) - shortest path from clone to working request
-- [API endpoints](docs/api-endpoints.md) - routes, auth, examples, errors, retries, and webhooks
-- [TypeScript SDK](docs/typescript-sdk.md) - SDK client, operation methods, errors, money, and order builder
-- [Reference platform](docs/reference-platform.md) - server, Admin, storage, and implementation boundaries
-- [Five-minute quickstart](docs/quickstart.md) - validation, Docker, reset, seed, and conformance details
-- [Punchh compatibility](docs/punchh-compatibility.md) - migration coverage and adapter gaps
-
-## Specification
-
-The public protocol contract lives in `spec/`:
+Normative specification (canonical when docs and generated artifacts disagree):
 
 - [Spec overview](spec/README.md)
 - [Core protocol](spec/core.md)
@@ -190,49 +224,30 @@ The public protocol contract lives in `spec/`:
 - [OpenAPI](spec/openapi.yaml)
 - [Generated JSON Schemas](spec/schemas)
 
-When docs and generated artifacts disagree, treat the normative prose and
-generated schemas in `spec/` as canonical.
+## What's Next? 🌟
 
-## Storage and Production Path
-
-SQLite is the default because it makes the repo easy to clone, run, inspect, and
-test without infrastructure. It is the right choice for local development,
-single-node demos, conformance tests, and self-hosted evaluation.
-
-For hosted multi-tenant production, the intended path is:
-
-```text
-SQLite sandbox
-  -> storage adapter contract
-  -> Postgres production adapter
-  -> tenant-aware Admin API
-  -> scoped users, roles, and audit log
-```
-
-The protocol API under `/lip/v1` is separate from the reference Admin API under
-`/admin/api/v1`. Product features can grow in the reference platform without
-accidentally becoming protocol requirements.
-
-## Roadmap
-
-Current priorities are tracked in [PLAN.md](PLAN.md).
-
-Near-term focus:
+Current priorities are tracked in [PLAN.md](PLAN.md). Near-term focus:
 
 - Minimal developer onboarding
-- Program-as-code configuration drafts
-- Program validation, preview, publish, and rollback
+- `serve` CLI alias and public package publishing
+- Program-as-code configuration drafts with validation, preview, publish, and rollback
 - Reward wallet and reward management APIs
 - Webhook subscription management
 - Postgres storage adapter
 - More SDK examples and machine-readable docs
 
-## License
+## Contributing 🤝
 
-Apache-2.0 - See [LICENSE](LICENSE) for details.
+Contributions are welcome! Start with [CONTRIBUTING.md](CONTRIBUTING.md), run `npm run verify` before opening a pull request, and keep protocol changes backed by schemas, examples, and conformance tests.
 
-## Contributing
+## Security 🛡️
 
-Contributions are welcome. Start with [CONTRIBUTING.md](CONTRIBUTING.md), run
-`npm run verify` before opening a pull request, and keep protocol changes backed
-by schemas, examples, and conformance tests.
+If you believe you've found a security vulnerability, please follow the responsible disclosure process in [SECURITY.md](SECURITY.md) rather than opening a public issue.
+
+## License 📜
+
+This project is licensed under [Apache-2.0](LICENSE).
+
+## Support 💬
+
+If you have any questions, suggestions, or need assistance, please [open an issue](https://github.com/alvinjchoi/opensource-loyalty/issues) — let's build open loyalty infrastructure together! 💪
