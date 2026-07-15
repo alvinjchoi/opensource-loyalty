@@ -1,0 +1,15 @@
+{
+  "files": [],
+  "references": [
+    { "path": "./packages/protocol" },
+    { "path": "./packages/reference" },
+    { "path": "./packages/storage" },
+    { "path": "./packages/storage-sqlite" },
+    { "path": "./packages/server" },
+    { "path": "./packages/cli" },
+    { "path": "./packages/sdk" },
+    { "path": "./scripts" },
+    { "path": "./examples" },
+    { "path": "./tests" }
+  ]
+}

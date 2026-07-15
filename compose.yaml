@@ -1,0 +1,17 @@
+services:
+  lip:
+    build: .
+    environment:
+      HOST: 0.0.0.0
+      PORT: 3210
+      LIP_API_KEY: ${LIP_API_KEY:-lip-dev-key}
+      LIP_DATABASE_PATH: /data/reference.db
+      LIP_SEED_DEMO: ${LIP_SEED_DEMO:-true}
+    ports:
+      - "${LIP_PORT:-3210}:3210"
+    volumes:
+      - lip-data:/data
+    restart: unless-stopped
+
+volumes:
+  lip-data:
