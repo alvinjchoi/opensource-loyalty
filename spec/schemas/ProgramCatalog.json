@@ -240,6 +240,83 @@
         }
       }
     },
+    "account_earning": {
+      "minItems": 1,
+      "type": "array",
+      "items": {
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "unit",
+          "mode",
+          "amount",
+          "multiplier_eligible"
+        ],
+        "properties": {
+          "unit": {
+            "anyOf": [
+              {
+                "const": "points",
+                "type": "string"
+              },
+              {
+                "const": "visits",
+                "type": "string"
+              },
+              {
+                "const": "stamps",
+                "type": "string"
+              },
+              {
+                "const": "credits",
+                "type": "string"
+              },
+              {
+                "const": "custom",
+                "type": "string"
+              }
+            ]
+          },
+          "mode": {
+            "anyOf": [
+              {
+                "const": "spend",
+                "type": "string"
+              },
+              {
+                "const": "per_order",
+                "type": "string"
+              }
+            ]
+          },
+          "amount": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "spend": {
+            "additionalProperties": false,
+            "type": "object",
+            "required": [
+              "amount",
+              "currency"
+            ],
+            "properties": {
+              "amount": {
+                "minimum": 1,
+                "type": "integer"
+              },
+              "currency": {
+                "pattern": "^[A-Z]{3}$",
+                "type": "string"
+              }
+            }
+          },
+          "multiplier_eligible": {
+            "type": "boolean"
+          }
+        }
+      }
+    },
     "accounts": {
       "minItems": 1,
       "type": "array",

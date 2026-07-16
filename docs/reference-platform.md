@@ -22,8 +22,8 @@ apps/admin                         POS, kiosk, ordering, SDK
               packages/reference
                      |
               packages/storage
-                     |
-          packages/storage-sqlite
+                 /       \
+packages/storage-sqlite  packages/storage-postgres
 ```
 
 - `packages/reference` owns deterministic loyalty behavior and exports a
@@ -32,6 +32,8 @@ apps/admin                         POS, kiosk, ordering, SDK
   database.
 - `packages/storage-sqlite` stores one current snapshot per key using SQLite,
   WAL mode, and an upsert transaction.
+- `packages/storage-postgres` stores core engine entities in normalized,
+  tenant-scoped tables and coordinates instances with advisory locks.
 - `packages/server` exposes the normative HTTP binding and a separate,
   authenticated Admin API.
 - `apps/admin` renders operational state without importing the engine or reading
@@ -89,9 +91,10 @@ supported.
 
 The same view reads program-model capability metadata from the Admin snapshot
 so operators can compare points, visits, wallet credit, paid membership, and
-hybrid structures. Only points-and-tiers is currently runnable in the reference
-engine; the other models remain marked with backend blockers. The Admin
-supports:
+hybrid structures. All five models are runnable in the reference engine.
+Hybrid programs accrue each configured unit independently, expose every member
+balance, and reserve rewards against the reward's configured cost unit. The
+Admin supports:
 
 - Program health, issued and outstanding liability, and tier distribution
 - Member search, balances, tier progress, and expiration buckets
@@ -99,13 +102,18 @@ supports:
 - Earning policy, tier ladder, and reward-catalog inspection
 - Program draft, validate, publish, discard, and rollback operations
 - Local audit records for program writes
+- Tenant-scoped users with fixed roles and permissions
+- One-time API key issuance, expiration, revocation, and access audit history
 - Program model planning for future configuration work
 - Protocol, storage, and endpoint diagnostics
 
-The shared development token is suitable for a local reference environment,
-not a hosted multi-tenant deployment. Production Admin work requires scoped
-users, authorization, tenant isolation, audit logging, CSRF controls for future
-writes, secret rotation, and a production database adapter.
+The shared development token is suitable for bootstrapping a local reference
+environment. The runtime also supports persisted tenant-scoped users and hashed
+API keys with role-based authorization, expiration, revocation, CSRF-protected
+Admin writes, and audit records. The Postgres protocol runtime coordinates
+engine writes across instances; hosted production still requires location
+scoping and asynchronous Postgres repositories for the remaining Admin
+extension services.
 
 ## Operational guards
 
@@ -152,12 +160,27 @@ state. Active plans can multiply earning and gate rewards through
 `reward.metadata.membership_plan_ids`; expired memberships are lapsed by the
 embedded scheduler. Billing and customer authentication remain outside LIP.
 
+## Engagement integrations
+
+The Admin API calculates member, balance, daily ledger, reward, and campaign
+aggregates from engine state. CRM member exports are available as JSON or
+formula-safe CSV and filter out members without marketing consent by default.
+
+Persisted messaging jobs target existing static or dynamic segments. Marketing
+deliveries enforce `member.attributes.marketing_consent`; transactional
+deliveries are explicit. The bundled webhook adapter signs each message,
+retains delivery attempts and errors, and retries with bounded exponential
+backoff. Provider SDKs plug in through `MessagingConnectorAdapter` without
+changing protocol routes.
+
 ## Extension path
 
-Database adapters implement `StateStore<LoyaltyEngineState>`. A future hosted
-platform can add Postgres without changing the protocol or engine API. POS and
-ordering integrations should continue to target `/lip/v1`; vendor-specific
-mappings belong in adapter packages and conformance fixtures.
+SQLite adapters implement the synchronous `StateStore<T>` contract. PostgreSQL
+uses `AsyncStateStore<T>`, normalized engine repositories, optimistic revisions,
+transaction advisory locks, and scheduler leases. Neither storage choice
+changes the protocol API. POS and ordering integrations should continue to
+target `/lip/v1`; vendor-specific mappings belong in adapter packages and
+conformance fixtures.
 
 Admin modules and workflows should consume a versioned platform API rather than
 engine internals. That keeps operational tooling replaceable and prevents local

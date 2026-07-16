@@ -185,6 +185,47 @@ export function makeWalletCreditProgram(): ProgramDefinition {
   };
 }
 
+export function makeHybridProgram(): ProgramDefinition {
+  const program = makeProgram();
+  return {
+    ...program,
+    name: "Demo hybrid rewards",
+    accounts: [
+      { unit: "points", unit_label: "Points", is_primary: true },
+      { unit: "credits", unit_label: "Credit cents", is_primary: false },
+      { unit: "stamps", unit_label: "Stamps", is_primary: false }
+    ],
+    metrics: [
+      ...(program.metrics ?? []),
+      {
+        metric_id: "credit-balance",
+        name: "Credit balance",
+        unit: "credits",
+        source: "current_balance"
+      }
+    ],
+    balance_expiration: { type: "after_earned", days: 30, warning_days: [7] },
+    wallet_credit_policy: {
+      earn_bps: 500,
+      liability_classification: "promotional"
+    },
+    visit_stamp_policy: {
+      unit: "stamps",
+      amount_per_order: 1,
+      threshold: 3,
+      reset_on_issue: true,
+      issue_reward_id: "free-entree",
+      issued_reward_ttl_seconds: 86_400
+    },
+    rewards: program.rewards.map((reward) =>
+      reward.reward_id === "one-dollar-off"
+        ? { ...reward, cost: { unit: "credits", amount: 50 } }
+        : { ...reward, cost: { unit: "points", amount: reward.points_cost } }
+    ),
+    metadata: { program_model: "hybrid" }
+  };
+}
+
 export function makeMembershipProgram(): ProgramDefinition {
   const program = makeProgram();
   return {

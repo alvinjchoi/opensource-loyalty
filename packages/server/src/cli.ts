@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { resolve } from "node:path";
-import { createDemoPlatform } from "./platform.js";
+import { createDemoPlatform, createPostgresProtocolPlatform } from "./platform.js";
 import { startReferenceServer } from "./server.js";
 
 function positiveIntegerEnvironment(name: string, fallback: number): number {
@@ -18,9 +18,17 @@ const port = Number.parseInt(process.env.PORT ?? "3210", 10);
 const host = process.env.HOST ?? "127.0.0.1";
 const apiKey = process.env.LIP_API_KEY ?? "lip-dev-key";
 const databasePath = resolve(process.env.LIP_DATABASE_PATH ?? ".lip/reference.db");
+const databaseUrl = process.env.LIP_DATABASE_URL;
 const rateLimit = positiveIntegerEnvironment("LIP_RATE_LIMIT_REQUESTS", 120);
 const rateWindowMs = positiveIntegerEnvironment("LIP_RATE_LIMIT_WINDOW_MS", 60_000);
-const platform = createDemoPlatform({ databasePath, seed: process.env.LIP_SEED_DEMO !== "false" });
+const platform = databaseUrl
+  ? await createPostgresProtocolPlatform({
+      connectionString: databaseUrl,
+      ...(process.env.LIP_TENANT_ID ? { tenantId: process.env.LIP_TENANT_ID } : {}),
+      seed: process.env.LIP_SEED_DEMO !== "false",
+      reset: process.env.LIP_RESET === "true"
+    })
+  : createDemoPlatform({ databasePath, seed: process.env.LIP_SEED_DEMO !== "false" });
 
 const ansi = {
   reset: "\u001B[0m",
@@ -85,13 +93,21 @@ const running = await startReferenceServer(platform.engine, {
   ...(process.env.LIP_STRUCTURED_LOGS === "false" ? {} : {
     requestLogger: (entry) => console.log(JSON.stringify({ event: "http_request", ...entry }))
   }),
-  persistState: (state) => platform.store.save(state),
+  ...("executeEngineOperation" in platform
+    ? { executeEngineOperation: platform.executeEngineOperation }
+    : { persistState: (state) => platform.store.save(state) }),
   admin: {
     ...(platform.adminAssetRoot ? { assetRoot: platform.adminAssetRoot } : {}),
     storage: platform.store.status,
-    programs: platform.programs,
-    campaigns: platform.campaigns,
-    memberships: platform.memberships,
+    ...("programs" in platform
+      ? {
+          programs: platform.programs,
+          campaigns: platform.campaigns,
+          memberships: platform.memberships,
+          access: platform.access,
+          engagement: platform.engagement
+        }
+      : {}),
     webhookManager: platform.webhooks
   }
 });
@@ -103,15 +119,14 @@ console.log(formatRuntimeReady({
   adminUrl: `${displayUrl}/admin/`,
   apiBaseUrl: displayUrl,
   apiKey,
-  databasePath,
+  databasePath: databaseUrl ? "Postgres (tenant-scoped normalized tables)" : databasePath,
   bindUrl: running.url
 }));
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.once(signal, () => {
     void running.close().then(() => {
-      platform.close();
-      process.exit(0);
+      void Promise.resolve(platform.close()).then(() => process.exit(0));
     });
   });
 }

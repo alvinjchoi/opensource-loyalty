@@ -100,14 +100,16 @@ const templateSeeds: ProgramModelTemplateSeed[] = [
     summary: "Combine points, tiers, wallet credit, and campaign rewards in one program.",
     best_for: "Multi-location groups",
     cadence: "Rules-based",
-    engine_support: "planned",
-    admin_write_support: "planned",
-    supported_features: ["Multiple account units", "Stacking policy", "Campaign triggers"],
-    blockers: [
-      "Multiple account units and stacking policy are not implemented.",
-      "Campaign and segmentation modules do not exist yet."
+    engine_support: "implemented",
+    admin_write_support: "implemented",
+    supported_features: [
+      "Multiple account units",
+      "Per-unit earning and reward costs",
+      "Independent expiration and reservations",
+      "Campaign and segment targeting"
     ],
-    next_steps: ["Add multi-unit accounts, stacking rules, campaign triggers, and segment targeting."]
+    blockers: [],
+    next_steps: ["Configure account units, earning policies, and each reward's cost unit."]
   }
 ];
 
@@ -133,8 +135,8 @@ export function programConfigurationFor(program: ProgramDefinition): ReferencePr
   const currentModelId = inferProgramModel(program);
   return {
     current_model_id: currentModelId,
-    editable: ["points", "visits", "wallet_credit", "paid_membership"].includes(currentModelId),
-    publish_supported: ["points", "visits", "wallet_credit", "paid_membership"].includes(currentModelId),
+    editable: ["points", "visits", "wallet_credit", "paid_membership", "hybrid"].includes(currentModelId),
+    publish_supported: ["points", "visits", "wallet_credit", "paid_membership", "hybrid"].includes(currentModelId),
     templates: templateSeeds.map((template) => ({
       ...template,
       status: template.model_id === currentModelId
@@ -147,7 +149,7 @@ export function programConfigurationFor(program: ProgramDefinition): ReferencePr
       "Edit and validate the active program draft in Admin.",
       "Publish compatible changes without restarting the reference server.",
       "Rollback to one of the 20 retained published revisions.",
-      "Replace the shared local Admin identity with scoped production users and roles."
+      "Create scoped users or machine keys for each production integration."
     ]
   };
 }

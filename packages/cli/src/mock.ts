@@ -56,6 +56,8 @@ export async function startMockServer(options: MockOptions): Promise<RunningServ
       programs: platform.programs,
       campaigns: platform.campaigns,
       memberships: platform.memberships,
+      access: platform.access,
+      engagement: platform.engagement,
       webhookManager: platform.webhooks
     }
   });

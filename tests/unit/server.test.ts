@@ -17,6 +17,37 @@ describe("reference HTTP server", () => {
       .toThrowError(/at least 8/);
   });
 
+  it("commits protocol operations through an external transaction hook", async () => {
+    const engine = new LoyaltyEngine(makeProgram());
+    let executions = 0;
+    let directPersists = 0;
+    const running = await startReferenceServer(engine, {
+      apiKey: "transaction-test-key",
+      executeEngineOperation: async (operation) => {
+        executions += 1;
+        return operation();
+      },
+      persistState: () => {
+        directPersists += 1;
+      }
+    });
+    try {
+      const response = await fetch(`${running.url}/lip/v1/members/enroll`, {
+        method: "POST",
+        headers: {
+          authorization: "Bearer transaction-test-key",
+          "content-type": "application/json"
+        },
+        body: JSON.stringify(makeEnroll("transaction-hook-enroll"))
+      });
+      expect(response.status).toBe(201);
+      expect(executions).toBe(1);
+      expect(directPersists).toBe(0);
+    } finally {
+      await running.close();
+    }
+  });
+
   it("returns problem details for routes, methods, media types, JSON, and body limits", async () => {
     const running = await startReferenceServer(new LoyaltyEngine(makeProgram()), {
       apiKey: "server-test-key"
@@ -184,7 +215,7 @@ describe("reference HTTP server", () => {
       const bootstrapBody = await bootstrap.text();
       expect(bootstrapBody).not.toContain("admin-test-key");
       expect(JSON.parse(bootstrapBody)).toMatchObject({
-        admin_api_version: "0.3",
+        admin_api_version: "0.4",
         auth: {
           mode: "api_key",
           requires_login: true,
@@ -276,7 +307,7 @@ describe("reference HTTP server", () => {
       });
       expect(snapshot.status).toBe(200);
       expect(await snapshot.json()).toMatchObject({
-        admin_api_version: "0.3",
+        admin_api_version: "0.4",
         platform: { storage: { driver: "sqlite", persistent: true } },
         webhooks: {
           enabled: true,
@@ -322,6 +353,8 @@ describe("reference HTTP server", () => {
         programs: platform.programs,
         campaigns: platform.campaigns,
         webhookManager: platform.webhooks,
+        access: platform.access,
+        engagement: platform.engagement,
         storage: platform.store.status
       }
     });
@@ -364,6 +397,26 @@ describe("reference HTTP server", () => {
         expect.objectContaining({ subscription_id: webhookBody.subscription_id })
       ]);
 
+      const apiKeyResponse = await fetch(`${running.url}/admin/api/v1/access/api-keys`, {
+        method: "POST",
+        headers: { cookie, "content-type": "application/json", "x-lip-csrf": csrf },
+        body: JSON.stringify({ name: "Test integration", role: "integration" })
+      });
+      expect(apiKeyResponse.status).toBe(201);
+      const createdKey = await apiKeyResponse.json() as {
+        secret: string;
+        api_key: { key_id: string };
+      };
+      expect(createdKey.secret).toMatch(/^lip_sk_/);
+      const scopedCapabilities = await fetch(`${running.url}/lip/v1/capabilities`, {
+        headers: { authorization: `Bearer ${createdKey.secret}` }
+      });
+      expect(scopedCapabilities.status).toBe(200);
+      const rejectedAdmin = await fetch(`${running.url}/admin/api/v1/snapshot`, {
+        headers: { authorization: `Bearer ${createdKey.secret}` }
+      });
+      expect(rejectedAdmin.status).toBe(401);
+
       const segmentResponse = await fetch(`${running.url}/admin/api/v1/segments`, {
         method: "PUT",
         headers: { cookie, "content-type": "application/json", "x-lip-csrf": csrf },
@@ -371,6 +424,53 @@ describe("reference HTTP server", () => {
       });
       expect(segmentResponse.status).toBe(200);
       const segment = await segmentResponse.json() as { segment_id: string };
+      const connectorResponse = await fetch(
+        `${running.url}/admin/api/v1/engagement/connectors`,
+        {
+          method: "PUT",
+          headers: { cookie, "content-type": "application/json", "x-lip-csrf": csrf },
+          body: JSON.stringify({
+            name: "CRM",
+            type: "webhook",
+            configuration: { url: "https://crm.example/messages" },
+            secret: "engagement-test-secret"
+          })
+        }
+      );
+      expect(connectorResponse.status).toBe(200);
+      const connector = await connectorResponse.json() as { connector_id: string };
+      const messageResponse = await fetch(`${running.url}/admin/api/v1/engagement/messages`, {
+        method: "POST",
+        headers: { cookie, "content-type": "application/json", "x-lip-csrf": csrf },
+        body: JSON.stringify({
+          idempotency_key: "admin-message-001",
+          connector_id: connector.connector_id,
+          segment_id: segment.segment_id,
+          template_id: "receipt-follow-up",
+          content: { text: "Thanks for visiting" },
+          purpose: "transactional"
+        })
+      });
+      expect(messageResponse.status).toBe(201);
+      expect(await messageResponse.json()).toMatchObject({
+        status: "queued",
+        deliveries: [expect.objectContaining({ member_id: "member-001", status: "pending" })]
+      });
+      const analyticsResponse = await fetch(`${running.url}/admin/api/v1/analytics`, {
+        headers: { cookie }
+      });
+      expect(analyticsResponse.status).toBe(200);
+      expect(await analyticsResponse.json()).toMatchObject({
+        members: { total: 1, active: 1 }
+      });
+      const exportResponse = await fetch(
+        `${running.url}/admin/api/v1/exports/members?format=json&include_unconsented=true`,
+        { headers: { cookie } }
+      );
+      expect(exportResponse.status).toBe(200);
+      expect(await exportResponse.json()).toMatchObject({
+        members: [expect.objectContaining({ member_id: "member-001" })]
+      });
       const campaignResponse = await fetch(`${running.url}/admin/api/v1/campaigns`, {
         method: "PUT",
         headers: { cookie, "content-type": "application/json", "x-lip-csrf": csrf },
@@ -457,6 +557,22 @@ describe("reference HTTP server", () => {
       expect(rolledBack.status).toBe(200);
       expect(platform.engine.inspectAdmin().program.earning.rate.amount).toBe(
         makeProgram().earn_rate.points
+      );
+
+      const revokedKey = await fetch(
+        `${running.url}/admin/api/v1/access/api-keys/revoke`,
+        {
+          method: "POST",
+          headers: { cookie, "content-type": "application/json", "x-lip-csrf": csrf },
+          body: JSON.stringify({ key_id: createdKey.api_key.key_id })
+        }
+      );
+      expect(revokedKey.status).toBe(200);
+      expect(await fetch(`${running.url}/lip/v1/capabilities`, {
+        headers: { authorization: `Bearer ${createdKey.secret}` }
+      })).toHaveProperty("status", 401);
+      expect(platform.access.snapshot().audit.map(({ action }) => action)).toContain(
+        "access.api_key.revoked"
       );
 
       const deletedWebhook = await fetch(

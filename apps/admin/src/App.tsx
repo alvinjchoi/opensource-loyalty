@@ -41,7 +41,8 @@ import type {
   LedgerOperation,
   ProgramModelId,
   ProgramModelStatus,
-  RewardDefinition
+  RewardDefinition,
+  TenantRole
 } from "./types.js";
 
 type View = "overview" | "members" | "ledger" | "program" | "developer";
@@ -315,6 +316,17 @@ function MemberDetail({ member, onClose, unit }: {
         <IconButton label="Close member details" onClick={onClose}><X size={18} /></IconButton>
       </div>
       <div className="detail-balance"><span>Available {unit}</span><strong>{formatNumber(member.balance.available)}</strong><TierBadge tier={member.member.tier_id} /></div>
+      {(member.balances?.length ?? 0) > 1 ? (
+        <div className="account-balances">
+          {member.balances!.map((balance) => (
+            <div key={balance.account_id}>
+              <span>{balance.unit}</span>
+              <strong>{formatNumber(balance.available)}</strong>
+              {balance.reserved ? <small>{formatNumber(balance.reserved)} reserved</small> : null}
+            </div>
+          ))}
+        </div>
+      ) : null}
       <dl className="detail-list">
         <div><dt>Status</dt><dd>{member.member.status}</dd></div>
         <div><dt>Joined</dt><dd>{formatDate(member.member.joined_at)}</dd></div>
@@ -330,7 +342,7 @@ function MemberDetail({ member, onClose, unit }: {
       <div className="expiring-list">
         <h4>Expiring balances</h4>
         {member.expiring_balances.length ? member.expiring_balances.map((balance) => (
-          <div key={balance.expires_at}><span>{formatDate(balance.expires_at)}</span><strong>{formatNumber(balance.amount)}</strong></div>
+          <div key={`${balance.unit}:${balance.expires_at}`}><span>{balance.unit} · {formatDate(balance.expires_at)}</span><strong>{formatNumber(balance.amount)}</strong></div>
         )) : <p>None scheduled</p>}
       </div>
     </aside>
@@ -558,6 +570,7 @@ function Program({ snapshot, onChanged }: {
           name: reward.name,
           ...(reward.description ? { description: reward.description } : {}),
           points_cost: reward.cost.amount,
+          cost: reward.cost,
           effect: reward.effect,
           funding: reward.funding
         }
@@ -565,6 +578,10 @@ function Program({ snapshot, onChanged }: {
           reward_id: "new-reward",
           name: "New reward",
           points_cost: 100,
+          cost: {
+            unit: program.accounts.find((account) => account.is_primary)?.unit ?? "points",
+            amount: 100
+          },
           effect: {
             type: "discount",
             amount: { currency: program.currency, amount: 100 },
@@ -768,7 +785,7 @@ function Program({ snapshot, onChanged }: {
           </div>
         </aside>
       </section>
-      <Section heading="Next implementation work" description="Configuration work owned by the reference Admin API">
+      <Section heading="Operator next actions" description="Configuration work owned by the reference Admin API">
         <div className="next-action-list">
           {configuration.next_actions.map((action) => <div key={action}><Settings2 size={15} aria-hidden="true" /><span>{action}</span></div>)}
         </div>
@@ -787,6 +804,23 @@ function Program({ snapshot, onChanged }: {
           <div><dt>Tier reset</dt><dd>{program.tier_policy?.period.time_zone ?? "Not configured"}</dd></div>
         </dl>
       </section>
+      {(program.account_earning?.length ?? 0) > 1 ? (
+        <Section heading="Account earning" description="Each account accrues and expires independently. Reward cards below show which account pays their cost.">
+          <div className="account-policy-grid">
+            {program.account_earning!.map((earning) => (
+              <div key={earning.unit}>
+                <strong>{earning.unit}</strong>
+                <span>
+                  {formatNumber(earning.amount)} per {earning.mode === "per_order"
+                    ? "eligible order"
+                    : `${formatNumber(earning.spend?.amount ?? 0)} minor spend units`}
+                </span>
+                <small>{earning.multiplier_eligible ? "Tier and membership multipliers apply" : "No earn multiplier"}</small>
+              </div>
+            ))}
+          </div>
+        </Section>
+      ) : null}
       <Section heading="Tiers" description="Annual qualification thresholds">
         <div className="table-scroll"><table><thead><tr><th>Tier</th><th>Threshold</th><th>Earn multiplier</th><th>Benefits</th></tr></thead><tbody>
           {program.tiers.map((tier) => <tr key={tier.tier_id}><td><TierBadge tier={tier.tier_id} /></td><td>{formatNumber(tier.minimum)} points</td><td>{percentage(tier.earn_multiplier_bps ?? 10_000)}</td><td>{tier.benefits.map((benefit) => benefit.name).join(", ") || "—"}</td></tr>)}
@@ -922,7 +956,32 @@ function Developer({ snapshot, onChanged }: {
   const [webhookSecret, setWebhookSecret] = useState("");
   const [webhookBusy, setWebhookBusy] = useState(false);
   const [webhookError, setWebhookError] = useState("");
+  const [accessBusy, setAccessBusy] = useState(false);
+  const [accessError, setAccessError] = useState("");
+  const [userEmail, setUserEmail] = useState("");
+  const [userRole, setUserRole] = useState<TenantRole>("operator");
+  const [keyName, setKeyName] = useState("");
+  const [keyRole, setKeyRole] = useState<TenantRole>("integration");
+  const [generatedKey, setGeneratedKey] = useState("");
+  const [engagementBusy, setEngagementBusy] = useState(false);
+  const [engagementError, setEngagementError] = useState("");
+  const [connectorName, setConnectorName] = useState("");
+  const [connectorUrl, setConnectorUrl] = useState("");
+  const [connectorSecret, setConnectorSecret] = useState("");
+  const [messageConnector, setMessageConnector] = useState(
+    snapshot.engagement.connectors[0]?.connector_id ?? ""
+  );
+  const [messageSegment, setMessageSegment] = useState(
+    snapshot.campaigns.segments[0]?.segment_id ?? ""
+  );
+  const [messageTemplate, setMessageTemplate] = useState("loyalty-update");
+  const [messageText, setMessageText] = useState("");
   const subscriptions = snapshot.webhooks.subscriptions ?? [];
+  const access = snapshot.access_control;
+  const analytics = snapshot.analytics;
+  const tenantRoles: TenantRole[] = [
+    "owner", "admin", "operator", "developer", "viewer", "integration"
+  ];
   async function webhookWrite(path: string, body: unknown, method: "PUT" | "POST" = "POST") {
     setWebhookBusy(true);
     setWebhookError("");
@@ -935,6 +994,55 @@ function Developer({ snapshot, onChanged }: {
       setWebhookBusy(false);
     }
   }
+  async function accessWrite<T>(
+    path: string,
+    body: unknown,
+    method: "PUT" | "POST" = "POST"
+  ): Promise<T | undefined> {
+    setAccessBusy(true);
+    setAccessError("");
+    try {
+      const result = await adminWrite(path, method, body) as T;
+      await onChanged();
+      return result;
+    } catch (cause) {
+      setAccessError(cause instanceof Error ? cause.message : "Access update failed");
+      return undefined;
+    } finally {
+      setAccessBusy(false);
+    }
+  }
+  async function engagementWrite<T>(
+    path: string,
+    body: unknown,
+    method: "PUT" | "POST" = "POST"
+  ): Promise<T | undefined> {
+    setEngagementBusy(true);
+    setEngagementError("");
+    try {
+      const result = await adminWrite(path, method, body) as T;
+      await onChanged();
+      return result;
+    } catch (cause) {
+      setEngagementError(cause instanceof Error ? cause.message : "Engagement update failed");
+      return undefined;
+    } finally {
+      setEngagementBusy(false);
+    }
+  }
+  useEffect(() => {
+    if (!messageConnector && snapshot.engagement.connectors[0]) {
+      setMessageConnector(snapshot.engagement.connectors[0].connector_id);
+    }
+    if (!messageSegment && snapshot.campaigns.segments[0]) {
+      setMessageSegment(snapshot.campaigns.segments[0].segment_id);
+    }
+  }, [
+    messageConnector,
+    messageSegment,
+    snapshot.campaigns.segments,
+    snapshot.engagement.connectors
+  ]);
   const webhookRows = [
     ...snapshot.webhooks.pending.map((delivery) => ({
       key: delivery.delivery_id,
@@ -981,6 +1089,266 @@ function Developer({ snapshot, onChanged }: {
         <div><ShieldCheck size={18} /><span>Admin session</span><strong>HttpOnly cookie</strong></div>
         <div><CircleGauge size={18} /><span>Loyalty API</span><strong>15 operations</strong></div>
       </Section>
+      {analytics ? (
+        <Section
+          heading="Analytics and CRM export"
+          description="Operational aggregates are calculated from the ledger, reservations, campaigns, and consent flags."
+        >
+          <div className="analytics-grid">
+            <div><span>Active members</span><strong>{formatNumber(analytics.members.active)}</strong></div>
+            <div><span>Marketing consent</span><strong>{formatNumber(analytics.members.marketing_consented)}</strong></div>
+            <div><span>Campaign runs</span><strong>{formatNumber(analytics.campaigns.runs)}</strong></div>
+            <div><span>Rewards issued</span><strong>{formatNumber(analytics.campaigns.rewards_issued)}</strong></div>
+          </div>
+          <div className="analytics-balances">
+            {analytics.balances.map((balance) => (
+              <div key={balance.unit}>
+                <strong>{formatNumber(balance.outstanding)} {balance.unit}</strong>
+                <span>{formatNumber(balance.reserved)} reserved</span>
+              </div>
+            ))}
+          </div>
+          <div className="program-editor-actions">
+            <CommandButton
+              onClick={() => window.open("/admin/api/v1/exports/members?format=csv", "_blank")}
+              variant="text"
+            >
+              Export consented CSV
+            </CommandButton>
+            <CommandButton
+              onClick={() => window.open(
+                "/admin/api/v1/exports/members?format=json&include_unconsented=true",
+                "_blank"
+              )}
+              variant="text"
+            >
+              Export operational JSON
+            </CommandButton>
+          </div>
+        </Section>
+      ) : null}
+      <Section
+        heading="Messaging connectors"
+        description="Queue consent-aware segment messages through signed connector adapters with idempotency and retry."
+      >
+        <div className="engagement-forms">
+          <div>
+            <h4>Webhook connector</h4>
+            <input onChange={(event) => setConnectorName(event.target.value)} placeholder="CRM webhook" value={connectorName} />
+            <input onChange={(event) => setConnectorUrl(event.target.value)} placeholder="https://crm.example/messages" type="url" value={connectorUrl} />
+            <input onChange={(event) => setConnectorSecret(event.target.value)} placeholder="Signing secret (16+ characters)" type="password" value={connectorSecret} />
+            <CommandButton
+              disabled={engagementBusy || !connectorName || !connectorUrl || connectorSecret.length < 16}
+              onClick={() => void (async () => {
+                const created = await engagementWrite<{ connector_id: string }>(
+                  "/admin/api/v1/engagement/connectors",
+                  {
+                    name: connectorName,
+                    type: "webhook",
+                    configuration: { url: connectorUrl },
+                    secret: connectorSecret
+                  },
+                  "PUT"
+                );
+                if (created) {
+                  setConnectorSecret("");
+                  setMessageConnector(created.connector_id);
+                }
+              })()}
+            >
+              Save connector
+            </CommandButton>
+          </div>
+          <div>
+            <h4>Segment message</h4>
+            <select onChange={(event) => setMessageConnector(event.target.value)} value={messageConnector}>
+              <option value="">Choose connector</option>
+              {snapshot.engagement.connectors.filter(({ active }) => active).map((connector) => (
+                <option key={connector.connector_id} value={connector.connector_id}>{connector.name}</option>
+              ))}
+            </select>
+            <select onChange={(event) => setMessageSegment(event.target.value)} value={messageSegment}>
+              <option value="">Choose segment</option>
+              {snapshot.campaigns.segments.map((segment) => (
+                <option key={segment.segment_id} value={segment.segment_id}>{segment.name}</option>
+              ))}
+            </select>
+            <input onChange={(event) => setMessageTemplate(event.target.value)} placeholder="Template id" value={messageTemplate} />
+            <textarea onChange={(event) => setMessageText(event.target.value)} placeholder="Message text" value={messageText} />
+            <CommandButton
+              disabled={engagementBusy || !messageConnector || !messageSegment || !messageTemplate || !messageText}
+              onClick={() => void engagementWrite(
+                "/admin/api/v1/engagement/messages",
+                {
+                  idempotency_key: `admin-${Date.now()}`,
+                  connector_id: messageConnector,
+                  segment_id: messageSegment,
+                  template_id: messageTemplate,
+                  content: { text: messageText },
+                  purpose: "marketing"
+                }
+              )}
+            >
+              Queue message
+            </CommandButton>
+          </div>
+        </div>
+        {engagementError ? <div className="error-banner" role="alert">{engagementError}</div> : null}
+        <div className="engagement-list">
+          {snapshot.engagement.connectors.map((connector) => (
+            <div key={connector.connector_id}>
+              <span>
+                <strong>{connector.name}</strong>
+                {connector.type} · {connector.active ? "active" : "inactive"} · secret {connector.secret_configured ? "set" : "missing"}
+              </span>
+              <CommandButton
+                disabled={engagementBusy}
+                onClick={() => void engagementWrite(
+                  "/admin/api/v1/engagement/connectors/delete",
+                  { connector_id: connector.connector_id }
+                )}
+                variant="text"
+              >
+                Remove
+              </CommandButton>
+            </div>
+          ))}
+          {snapshot.engagement.jobs.slice(0, 8).map((job) => (
+            <div key={job.job_id}>
+              <span>
+                <strong>{job.template_id}</strong>
+                {job.status} · {job.deliveries.filter(({ status }) => status === "delivered").length}/{job.deliveries.length} delivered
+              </span>
+              {["queued", "partial"].includes(job.status) ? (
+                <CommandButton
+                  disabled={engagementBusy}
+                  onClick={() => void engagementWrite(
+                    "/admin/api/v1/engagement/messages/run",
+                    { job_id: job.job_id }
+                  )}
+                  variant="text"
+                >
+                  Run now
+                </CommandButton>
+              ) : null}
+            </div>
+          ))}
+        </div>
+      </Section>
+      {access ? (
+        <Section
+          heading={`Tenant access · ${access.tenant.name}`}
+          description="Scoped users and machine keys are isolated to this program tenant. API key secrets are shown once."
+        >
+          <div className="access-forms">
+            <div>
+              <h4>Add or update user</h4>
+              <input
+                onChange={(event) => setUserEmail(event.target.value)}
+                placeholder="operator@example.com"
+                type="email"
+                value={userEmail}
+              />
+              <select
+                onChange={(event) => setUserRole(event.target.value as TenantRole)}
+                value={userRole}
+              >
+                {tenantRoles.filter((role) => role !== "integration").map((role) => (
+                  <option key={role} value={role}>{role}</option>
+                ))}
+              </select>
+              <CommandButton
+                disabled={accessBusy || !userEmail}
+                onClick={() => void accessWrite(
+                  "/admin/api/v1/access/users",
+                  { email: userEmail, role: userRole },
+                  "PUT"
+                )}
+              >
+                Save user
+              </CommandButton>
+            </div>
+            <div>
+              <h4>Create machine key</h4>
+              <input
+                onChange={(event) => setKeyName(event.target.value)}
+                placeholder="Mobile BFF"
+                value={keyName}
+              />
+              <select
+                onChange={(event) => setKeyRole(event.target.value as TenantRole)}
+                value={keyRole}
+              >
+                {tenantRoles.map((role) => <option key={role} value={role}>{role}</option>)}
+              </select>
+              <CommandButton
+                disabled={accessBusy || !keyName}
+                onClick={() => void (async () => {
+                  const created = await accessWrite<{ secret: string }>(
+                    "/admin/api/v1/access/api-keys",
+                    { name: keyName, role: keyRole }
+                  );
+                  if (created) setGeneratedKey(created.secret);
+                })()}
+              >
+                Create key
+              </CommandButton>
+            </div>
+          </div>
+          {generatedKey ? (
+            <div className="generated-key" role="status">
+              <strong>Copy this key now</strong>
+              <code>{generatedKey}</code>
+              <CommandButton onClick={() => setGeneratedKey("")} variant="text">Dismiss</CommandButton>
+            </div>
+          ) : null}
+          {accessError ? <div className="error-banner" role="alert">{accessError}</div> : null}
+          <div className="access-lists">
+            <div>
+              <h4>Users</h4>
+              {access.users.map((user) => (
+                <div key={user.user_id}>
+                  <span><strong>{user.email}</strong>{user.role} · {user.active ? "active" : "disabled"}</span>
+                </div>
+              ))}
+              {access.users.length === 0 ? <p className="record-count">No tenant users.</p> : null}
+            </div>
+            <div>
+              <h4>Machine keys</h4>
+              {access.api_keys.map((key) => (
+                <div key={key.key_id}>
+                  <span>
+                    <strong>{key.name}</strong>
+                    {key.prefix}… · {key.role} · {key.active ? "active" : "revoked"}
+                  </span>
+                  {key.active ? (
+                    <CommandButton
+                      disabled={accessBusy}
+                      onClick={() => void accessWrite(
+                        "/admin/api/v1/access/api-keys/revoke",
+                        { key_id: key.key_id }
+                      )}
+                      variant="text"
+                    >
+                      Revoke
+                    </CommandButton>
+                  ) : null}
+                </div>
+              ))}
+              {access.api_keys.length === 0 ? <p className="record-count">No machine keys.</p> : null}
+            </div>
+          </div>
+          <div className="access-audit">
+            <h4>Recent tenant audit</h4>
+            {access.audit.slice(0, 8).map((entry) => (
+              <div key={entry.audit_id}>
+                <code>{entry.action}</code>
+                <span>{entry.actor_id} · {entry.resource_type} · {formatDate(entry.occurred_at, true)}</span>
+              </div>
+            ))}
+          </div>
+        </Section>
+      ) : null}
       <Section heading="Webhook subscriptions" description="Persisted runtime receivers. Signing secrets are write-only.">
         <div className="webhook-subscription-form">
           <input aria-label="Webhook URL" onChange={(event) => setWebhookUrl(event.target.value)} placeholder="https://receiver.example/hooks" type="url" value={webhookUrl} />

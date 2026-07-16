@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import type { LoyaltyEventType } from "@loyalty-interchange/protocol";
+import type { LoyaltyEvent, LoyaltyEventType } from "@loyalty-interchange/protocol";
 import {
   LoyaltyEngine,
   programDefinitionFingerprint,
@@ -9,10 +9,13 @@ import {
   type ProgramDefinition
 } from "@loyalty-interchange/reference";
 import { SqliteStateStore } from "@loyalty-interchange/storage-sqlite";
+import { PostgresEngineRepository } from "@loyalty-interchange/storage-postgres";
 import { createDemoProgram, seedDemoData } from "./demo.js";
 import { CampaignService } from "./campaigns.js";
 import { MembershipService } from "./memberships.js";
+import { AccessControlService } from "./access-control.js";
 import { EventedLoyaltyEngine } from "./evented-engine.js";
+import { EngagementService } from "./engagement.js";
 import { ProgramManagementService } from "./program-management.js";
 import { SqliteWebhookOutbox } from "./webhook-outbox.js";
 import { SqliteWebhookHistoryStore } from "./webhook-history.js";
@@ -46,7 +49,28 @@ export interface DemoPlatform {
   programs: ProgramManagementService;
   campaigns: CampaignService;
   memberships: MembershipService;
+  access: AccessControlService;
+  engagement: EngagementService;
   close(): void;
+}
+
+export interface PostgresProtocolPlatform {
+  engine: LoyaltyEngine;
+  store: PostgresEngineRepository;
+  adminAssetRoot?: string;
+  webhooks: WebhookDispatcher;
+  executeEngineOperation<T>(operation: () => T | Promise<T>): Promise<T>;
+  close(): Promise<void>;
+}
+
+export interface PostgresProtocolPlatformOptions {
+  connectionString: string;
+  tenantId?: string;
+  reset?: boolean;
+  seed?: boolean;
+  adminAssetRoot?: string;
+  program?: ProgramDefinition;
+  webhooks?: WebhookSubscription[];
 }
 
 export function webhookSubscriptionsFromEnv(
@@ -91,6 +115,8 @@ export function createDemoPlatform(options: DemoPlatformOptions): DemoPlatform {
   let webhookSubscriptionStore: SqliteWebhookSubscriptionStore | undefined;
   let campaigns: CampaignService | undefined;
   let memberships: MembershipService | undefined;
+  let access: AccessControlService | undefined;
+  let engagement: EngagementService | undefined;
   try {
     if (options.reset) store.clear();
     let state = store.load();
@@ -151,6 +177,19 @@ export function createDemoPlatform(options: DemoPlatformOptions): DemoPlatform {
       schedulerIntervalMs: 30_000,
       ...(options.reset ? { reset: true } : {})
     });
+    access = new AccessControlService({
+      path: options.databasePath,
+      tenantId: program.program_id,
+      tenantName: program.name ?? program.program_id,
+      ...(options.reset ? { reset: true } : {})
+    });
+    engagement = new EngagementService({
+      path: options.databasePath,
+      engine,
+      campaigns,
+      schedulerIntervalMs: 30_000,
+      ...(options.reset ? { reset: true } : {})
+    });
     programs.bindPublisher((nextProgram) => {
       const previousProgram = engine.getProgramDefinition();
       try {
@@ -176,9 +215,13 @@ export function createDemoPlatform(options: DemoPlatformOptions): DemoPlatform {
       programs,
       campaigns,
       memberships,
+      access,
+      engagement,
       close: () => {
         campaigns?.close();
         memberships?.close();
+        access?.close();
+        engagement?.close();
         programs.close();
         store.close();
         webhookSubscriptionStore?.close();
@@ -198,8 +241,82 @@ export function createDemoPlatform(options: DemoPlatformOptions): DemoPlatform {
     webhookSubscriptionStore?.close();
     campaigns?.close();
     memberships?.close();
+    access?.close();
+    engagement?.close();
     programs.close();
     store.close();
     throw error;
   }
+}
+
+export async function createPostgresProtocolPlatform(
+  options: PostgresProtocolPlatformOptions
+): Promise<PostgresProtocolPlatform> {
+  const program = options.program ?? createDemoProgram();
+  const tenantId = options.tenantId ?? program.program_id;
+  const store = new PostgresEngineRepository({
+    connectionString: options.connectionString,
+    tenantId,
+    programId: program.program_id
+  });
+  await store.migrate();
+  if (options.reset) await store.clear();
+  const stored = await store.load();
+  if (
+    stored &&
+    stored.state.program_fingerprint !== programDefinitionFingerprint(program)
+  ) {
+    await store.close();
+    throw new Error(
+      "Postgres engine state uses a different program definition; publish a compatible migration or reset explicitly"
+    );
+  }
+  const dispatcher = new WebhookDispatcher({
+    subscriptions: options.webhooks ?? webhookSubscriptionsFromEnv(),
+    onError: (message) => console.error(`[lip] ${message}`)
+  });
+  let armed = false;
+  let transactionEvents: LoyaltyEvent[] | undefined;
+  const engine = new EventedLoyaltyEngine(program, {
+    ...(stored ? { state: stored.state } : {}),
+    emit: (event) => {
+      if (!armed) return;
+      if (transactionEvents) transactionEvents.push(event);
+      else dispatcher.emit(event);
+    }
+  });
+  if (!stored && options.seed !== false && !options.program) seedDemoData(engine);
+  armed = true;
+  if (!stored) {
+    try {
+      await store.save(engine.exportState(), 0);
+    } catch (error) {
+      await store.close();
+      throw error;
+    }
+  }
+  const adminAssetRoot = options.adminAssetRoot ?? discoverAdminAssetRoot();
+  return {
+    engine,
+    store,
+    ...(adminAssetRoot ? { adminAssetRoot } : {}),
+    webhooks: dispatcher,
+    executeEngineOperation: async (operation) => {
+      const committed = await store.mutate(engine, async () => {
+        const events: LoyaltyEvent[] = [];
+        transactionEvents = events;
+        try {
+          return { result: await operation(), events };
+        } finally {
+          transactionEvents = undefined;
+        }
+      });
+      for (const event of committed.events) dispatcher.emit(event);
+      return committed.result;
+    },
+    close: async () => {
+      await dispatcher.flush();
+      await store.close();
+    }
+  };
 }

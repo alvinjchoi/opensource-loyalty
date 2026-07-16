@@ -88,6 +88,10 @@ Enable MCP: [`mcp.json`](mcp.json) · Skills: [`skills/README.md`](skills/README
   helpers, order builder, typed errors, and webhook verification.
 - [Reference platform](reference-platform.md): understand the local server,
   durable SQLite state, Admin dashboard, and non-normative boundaries.
+- [PostgreSQL production storage](postgres.md): normalized tenant tables,
+  migrations, transaction locks, multi-instance serving, and scheduler leases.
+- [Engagement integrations](engagement.md): analytics, consent-safe CRM
+  exports, signed messaging connectors, jobs, retry, and adapter contracts.
 - [Punchh compatibility](punchh-compatibility.md): map a restaurant loyalty
   migration against current LIP coverage and adapter gaps.
 

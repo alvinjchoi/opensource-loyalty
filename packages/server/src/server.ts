@@ -34,6 +34,17 @@ import type { WebhookAdminStatus, WebhookDispatcher, WebhookSubscription } from 
 import type { ProgramManagementService } from "./program-management.js";
 import type { CampaignService } from "./campaigns.js";
 import type { MembershipService } from "./memberships.js";
+import {
+  engagementAnalytics,
+  memberExport,
+  type EngagementService
+} from "./engagement.js";
+import type {
+  AccessControlService,
+  TenantPermission,
+  TenantPrincipal,
+  TenantRole
+} from "./access-control.js";
 
 const MAX_BODY_BYTES = 1_048_576;
 const DEFAULT_LOCAL_API_KEY = "lip-dev-key";
@@ -62,6 +73,12 @@ export interface ServerOptions {
   apiKey: string;
   reservationTtlSeconds?: number;
   persistState?: (state: LoyaltyEngineState) => void;
+  /**
+   * Runs a protocol operation inside an external storage transaction. A
+   * Postgres deployment uses this hook to reload, lock, mutate, and commit one
+   * engine revision before the HTTP response is sent.
+   */
+  executeEngineOperation?: <T>(operation: () => T | Promise<T>) => Promise<T>;
   rateLimit?: false | {
     maxRequests?: number;
     windowMs?: number;
@@ -81,6 +98,8 @@ export interface ServerOptions {
     programs?: ProgramManagementService;
     campaigns?: CampaignService;
     memberships?: MembershipService;
+    access?: AccessControlService;
+    engagement?: EngagementService;
   };
 }
 
@@ -107,7 +126,7 @@ interface AdminStorageDescriptor {
 }
 
 interface AdminBootstrapDocument {
-  admin_api_version: "0.3";
+  admin_api_version: "0.4";
   generated_at: string;
   status: true;
   auth: {
@@ -150,9 +169,65 @@ function equalSecret(left: string, right: string): boolean {
   return leftBuffer.length === rightBuffer.length && timingSafeEqual(leftBuffer, rightBuffer);
 }
 
-function isAuthorized(request: IncomingMessage, apiKey: string): boolean {
+interface AdminSession {
+  csrf: string;
+  principal: TenantPrincipal;
+}
+
+function bearerSecret(request: IncomingMessage): string | undefined {
   const authorization = request.headers.authorization ?? "";
-  return authorization.startsWith("Bearer ") && equalSecret(authorization.slice(7), apiKey);
+  return authorization.startsWith("Bearer ") ? authorization.slice(7) : undefined;
+}
+
+function rootPrincipal(options: ServerOptions): TenantPrincipal {
+  return options.admin?.access?.rootPrincipal() ?? {
+    tenant_id: "default",
+    actor_id: "root",
+    actor_type: "root",
+    role: "owner",
+    permissions: [
+      "admin:read", "admin:write", "program:publish", "access:manage",
+      "protocol:read", "protocol:write"
+    ]
+  };
+}
+
+function bearerPrincipal(
+  request: IncomingMessage,
+  options: ServerOptions
+): TenantPrincipal | undefined {
+  const secret = bearerSecret(request);
+  if (!secret) return undefined;
+  if (equalSecret(secret, options.apiKey)) {
+    return rootPrincipal(options);
+  }
+  return options.admin?.access?.authenticate(secret);
+}
+
+function protocolAuthorized(
+  request: IncomingMessage,
+  options: ServerOptions,
+  permission: "protocol:read" | "protocol:write"
+): boolean {
+  const principal = bearerPrincipal(request, options);
+  return Boolean(
+    principal &&
+    (principal.actor_type === "root" ||
+      options.admin?.access?.hasPermission(principal, permission))
+  );
+}
+
+const protocolReadPaths = new Set([
+  "/lip/v1/capabilities",
+  "/lip/v1/members/lookup",
+  "/lip/v1/programs/get",
+  "/lip/v1/accounts/get",
+  "/lip/v1/ledger/list",
+  "/lip/v1/issued-rewards/list"
+]);
+
+function protocolPermission(path: string): "protocol:read" | "protocol:write" {
+  return protocolReadPaths.has(path) ? "protocol:read" : "protocol:write";
 }
 
 function adminStorage(options: ServerOptions): AdminStorageDescriptor {
@@ -166,11 +241,11 @@ function adminStorage(options: ServerOptions): AdminStorageDescriptor {
 function adminBootstrapDocument(
   options: ServerOptions,
   request: IncomingMessage,
-  sessions: ReadonlyMap<string, string>
+  sessions: ReadonlyMap<string, AdminSession>
 ): AdminBootstrapDocument {
   const usesDefaultLocalKey = options.apiKey === DEFAULT_LOCAL_API_KEY;
   return {
-    admin_api_version: "0.3",
+    admin_api_version: "0.4",
     generated_at: new Date().toISOString(),
     status: true,
     auth: {
@@ -183,7 +258,7 @@ function adminBootstrapDocument(
         : "Copy the Admin/API key from the terminal that started this server. Docker users can run docker compose logs lip."
     },
     session: {
-      authenticated: isAdminAuthorized(request, options.apiKey, sessions)
+      authenticated: isAdminAuthorized(request, options, sessions)
     },
     platform: {
       protocol_version: "1.0",
@@ -312,28 +387,57 @@ function cookieValue(request: IncomingMessage, name: string): string | undefined
 
 function isAdminAuthorized(
   request: IncomingMessage,
-  apiKey: string,
-  sessions: ReadonlyMap<string, string>
+  options: ServerOptions,
+  sessions: ReadonlyMap<string, AdminSession>
 ): boolean {
-  return isAuthorized(request, apiKey) || sessions.has(cookieValue(request, "lip_admin_session") ?? "");
+  const principal = adminPrincipal(request, options, sessions);
+  return Boolean(
+    principal &&
+    (principal.actor_type === "root" ||
+      options.admin?.access?.hasPermission(principal, "admin:read"))
+  );
 }
 
 function isAdminWriteAuthorized(
   request: IncomingMessage,
-  apiKey: string,
-  sessions: ReadonlyMap<string, string>
+  options: ServerOptions,
+  sessions: ReadonlyMap<string, AdminSession>,
+  permission: TenantPermission = "admin:write"
 ): boolean {
-  if (isAuthorized(request, apiKey)) return true;
+  const bearer = bearerPrincipal(request, options);
+  if (bearer) {
+    return bearer.actor_type === "root" ||
+      Boolean(options.admin?.access?.hasPermission(bearer, permission));
+  }
   const session = cookieValue(request, "lip_admin_session");
   const csrfCookie = cookieValue(request, "lip_admin_csrf");
   const csrfHeader = request.headers["x-lip-csrf"];
   if (!session || !csrfCookie || typeof csrfHeader !== "string") return false;
   const expected = sessions.get(session);
-  return Boolean(expected && equalSecret(expected, csrfCookie) && equalSecret(expected, csrfHeader));
+  return Boolean(
+    expected &&
+    (expected.principal.actor_type === "root" ||
+      options.admin?.access?.hasPermission(expected.principal, permission)) &&
+    equalSecret(expected.csrf, csrfCookie) &&
+    equalSecret(expected.csrf, csrfHeader)
+  );
 }
 
-function adminActor(request: IncomingMessage, apiKey: string): string {
-  return isAuthorized(request, apiKey) ? "api-key-admin" : "local-admin";
+function adminPrincipal(
+  request: IncomingMessage,
+  options: ServerOptions,
+  sessions: ReadonlyMap<string, AdminSession>
+): TenantPrincipal | undefined {
+  return bearerPrincipal(request, options) ??
+    sessions.get(cookieValue(request, "lip_admin_session") ?? "")?.principal;
+}
+
+function adminActor(
+  request: IncomingMessage,
+  options: ServerOptions,
+  sessions: ReadonlyMap<string, AdminSession>
+): string {
+  return adminPrincipal(request, options, sessions)?.actor_id ?? "unknown-admin";
 }
 
 const contentTypes: Record<string, string> = {
@@ -541,7 +645,7 @@ export function createReferenceServer(engine: LoyaltyEngine, options: ServerOpti
     throw new Error("Reference server API key must contain at least 8 characters");
   }
   const routes = routeTable(engine);
-  const adminSessions = new Map<string, string>();
+  const adminSessions = new Map<string, AdminSession>();
   const adminEnabled = options.admin?.enabled ?? true;
   const rateLimiter = options.rateLimit === false ? undefined : createRateLimiter(options.rateLimit);
   const metrics = options.metrics === false ? undefined : new HttpMetrics();
@@ -566,6 +670,11 @@ export function createReferenceServer(engine: LoyaltyEngine, options: ServerOpti
     allowedMethods.set("/admin/api/v1/session", ["POST"]);
     allowedMethods.set("/admin/api/v1/logout", ["POST"]);
     allowedMethods.set("/admin/api/v1/snapshot", ["GET"]);
+    if (options.admin?.access) {
+      allowedMethods.set("/admin/api/v1/access/users", ["PUT"]);
+      allowedMethods.set("/admin/api/v1/access/api-keys", ["POST"]);
+      allowedMethods.set("/admin/api/v1/access/api-keys/revoke", ["POST"]);
+    }
     if (options.admin?.programs) {
       allowedMethods.set("/admin/api/v1/program/draft", ["PUT", "DELETE"]);
       allowedMethods.set("/admin/api/v1/program/draft/validate", ["POST"]);
@@ -612,6 +721,51 @@ export function createReferenceServer(engine: LoyaltyEngine, options: ServerOpti
           ? "/admin/*"
           : "unmatched";
       metrics?.observe(method, normalizedPath, response.statusCode, durationMs);
+      if (
+        options.admin?.access &&
+        path.startsWith("/admin/api/v1/") &&
+        !["GET", "HEAD", "OPTIONS"].includes(method) &&
+        !["/admin/api/v1/session", "/admin/api/v1/logout"].includes(path) &&
+        response.statusCode < 400
+      ) {
+        const principal = adminPrincipal(request, options, adminSessions);
+        if (principal) {
+          try {
+            options.admin.access.recordAudit(
+              principal,
+              `admin.${method.toLowerCase()}`,
+              path,
+              undefined,
+              { status: response.statusCode },
+              requestId
+            );
+          } catch {
+            // Audit persistence must never change an already completed response.
+          }
+        }
+      }
+      if (
+        options.admin?.access &&
+        path.startsWith("/lip/v1/") &&
+        protocolPermission(path) === "protocol:write" &&
+        response.statusCode < 400
+      ) {
+        const principal = bearerPrincipal(request, options);
+        if (principal) {
+          try {
+            options.admin.access.recordAudit(
+              principal,
+              "protocol.write",
+              path,
+              undefined,
+              { status: response.statusCode },
+              requestId
+            );
+          } catch {
+            // Audit persistence must never change an already completed response.
+          }
+        }
+      }
       if (!options.requestLogger) return;
       const contentLength = response.getHeader("content-length");
       const entry: StructuredRequestLog = {
@@ -659,7 +813,7 @@ export function createReferenceServer(engine: LoyaltyEngine, options: ServerOpti
       }
 
       if (metrics && method === "GET" && path === "/metrics") {
-        if (!isAuthorized(request, options.apiKey)) {
+        if (!protocolAuthorized(request, options, "protocol:read")) {
           response.setHeader("www-authenticate", "Bearer");
           sendJson(response, 401, problem(401, "Unauthorized", "unauthorized"), "application/problem+json");
           return;
@@ -680,7 +834,7 @@ export function createReferenceServer(engine: LoyaltyEngine, options: ServerOpti
       }
 
       if (method === "GET" && path === "/lip/v1/capabilities") {
-        if (!isAuthorized(request, options.apiKey)) {
+        if (!protocolAuthorized(request, options, "protocol:read")) {
           response.setHeader("www-authenticate", "Bearer");
           sendJson(response, 401, problem(401, "Unauthorized", "unauthorized"), "application/problem+json");
           return;
@@ -706,13 +860,22 @@ export function createReferenceServer(engine: LoyaltyEngine, options: ServerOpti
         const candidate = body && typeof body === "object"
           ? (body as { api_key?: unknown }).api_key
           : undefined;
-        if (typeof candidate !== "string" || !equalSecret(candidate, options.apiKey)) {
+        const principal = typeof candidate === "string"
+          ? (equalSecret(candidate, options.apiKey)
+              ? rootPrincipal(options)
+              : options.admin?.access?.authenticate(candidate))
+          : undefined;
+        if (
+          !principal ||
+          (principal.actor_type !== "root" &&
+            !options.admin?.access?.hasPermission(principal, "admin:read"))
+        ) {
           sendJson(response, 401, problem(401, "Unauthorized", "unauthorized"), "application/problem+json");
           return;
         }
         const session = randomUUID();
         const csrf = randomUUID();
-        adminSessions.set(session, csrf);
+        adminSessions.set(session, { csrf, principal });
         response.writeHead(204, {
           "set-cookie": [
             `lip_admin_session=${encodeURIComponent(session)}; Path=/admin; HttpOnly; SameSite=Strict; Max-Age=28800`,
@@ -740,14 +903,16 @@ export function createReferenceServer(engine: LoyaltyEngine, options: ServerOpti
       }
 
       if (adminEnabled && method === "GET" && path === "/admin/api/v1/snapshot") {
-        if (!isAdminAuthorized(request, options.apiKey, adminSessions)) {
+        if (!isAdminAuthorized(request, options, adminSessions)) {
           sendJson(response, 401, problem(401, "Unauthorized", "unauthorized"), "application/problem+json");
           return;
         }
-        const snapshot = engine.inspectAdmin();
-        options.persistState?.(engine.exportState());
+        const snapshot = options.executeEngineOperation
+          ? await options.executeEngineOperation(() => engine.inspectAdmin())
+          : engine.inspectAdmin();
+        if (!options.executeEngineOperation) options.persistState?.(engine.exportState());
         sendJson(response, 200, {
-          admin_api_version: "0.3",
+          admin_api_version: "0.4",
           platform: {
             protocol_version: "1.0",
             profile: "foodservice/1.0",
@@ -771,9 +936,220 @@ export function createReferenceServer(engine: LoyaltyEngine, options: ServerOpti
             memberships: [],
             audit: []
           },
+          ...(options.admin?.access
+            ? { access_control: options.admin.access.snapshot() }
+            : {}),
+          engagement: options.admin?.engagement?.snapshot() ?? {
+            connectors: [],
+            jobs: []
+          },
+          ...(options.admin?.campaigns
+            ? { analytics: engagementAnalytics(engine, options.admin.campaigns) }
+            : {}),
           ...snapshot
         });
         return;
+      }
+
+      if (
+        adminEnabled &&
+        method === "GET" &&
+        ["/admin/api/v1/analytics", "/admin/api/v1/exports/members"].includes(path)
+      ) {
+        if (!isAdminAuthorized(request, options, adminSessions)) {
+          sendJson(response, 401, problem(401, "Unauthorized", "unauthorized"), "application/problem+json");
+          return;
+        }
+        if (path === "/admin/api/v1/analytics") {
+          if (!options.admin?.campaigns) {
+            throw new TransportError(404, "not_found", "Not Found", "Analytics are unavailable");
+          }
+          const analytics = options.executeEngineOperation
+            ? await options.executeEngineOperation(
+                () => engagementAnalytics(engine, options.admin!.campaigns!)
+              )
+            : engagementAnalytics(engine, options.admin.campaigns);
+          if (!options.executeEngineOperation) options.persistState?.(engine.exportState());
+          sendJson(response, 200, analytics);
+          return;
+        }
+        const url = new URL(request.url ?? "/", "http://localhost");
+        const format = url.searchParams.get("format") === "json" ? "json" : "csv";
+        const marketingOnly = url.searchParams.get("include_unconsented") !== "true";
+        const exported = options.executeEngineOperation
+          ? await options.executeEngineOperation(
+              () => memberExport(engine, { format, marketingOnly })
+            )
+          : memberExport(engine, { format, marketingOnly });
+        if (!options.executeEngineOperation) options.persistState?.(engine.exportState());
+        if (format === "json") {
+          sendJson(response, 200, { members: exported });
+        } else {
+          const body = exported as string;
+          response.writeHead(200, {
+            "content-type": "text/csv; charset=utf-8",
+            "content-disposition": "attachment; filename=lip-members.csv",
+            "content-length": Buffer.byteLength(body),
+            "cache-control": "no-store"
+          });
+          response.end(body);
+        }
+        return;
+      }
+
+      const engagement = options.admin?.engagement;
+      if (
+        adminEnabled &&
+        engagement &&
+        path.startsWith("/admin/api/v1/engagement/") &&
+        ["PUT", "POST"].includes(method)
+      ) {
+        if (!isAdminAuthorized(request, options, adminSessions)) {
+          sendJson(response, 401, problem(401, "Unauthorized", "unauthorized"), "application/problem+json");
+          return;
+        }
+        if (!isAdminWriteAuthorized(request, options, adminSessions)) {
+          sendJson(response, 403, problem(403, "Forbidden", "forbidden"), "application/problem+json");
+          return;
+        }
+        const body = await readBody(request);
+        const values = body && typeof body === "object" && !Array.isArray(body)
+          ? body as Record<string, unknown>
+          : {};
+        if (method === "PUT" && path === "/admin/api/v1/engagement/connectors") {
+          if (
+            typeof values["name"] !== "string" ||
+            typeof values["type"] !== "string" ||
+            !values["configuration"] ||
+            typeof values["configuration"] !== "object" ||
+            Array.isArray(values["configuration"])
+          ) {
+            throw new TransportError(422, "validation_failed", "Validation Failed", "Connector fields are invalid");
+          }
+          sendJson(response, 200, engagement.upsertConnector({
+            ...(typeof values["connector_id"] === "string"
+              ? { connector_id: values["connector_id"] }
+              : {}),
+            name: values["name"],
+            type: values["type"],
+            ...(typeof values["active"] === "boolean" ? { active: values["active"] } : {}),
+            configuration: values["configuration"] as Record<string, unknown>,
+            ...(typeof values["secret"] === "string" ? { secret: values["secret"] } : {})
+          }));
+          return;
+        }
+        if (method === "POST" && path === "/admin/api/v1/engagement/connectors/delete") {
+          if (typeof values["connector_id"] !== "string") {
+            throw new TransportError(422, "validation_failed", "Validation Failed", "connector_id is required");
+          }
+          sendJson(response, 200, { removed: engagement.removeConnector(values["connector_id"]) });
+          return;
+        }
+        if (method === "POST" && path === "/admin/api/v1/engagement/messages") {
+          if (
+            typeof values["idempotency_key"] !== "string" ||
+            typeof values["connector_id"] !== "string" ||
+            typeof values["segment_id"] !== "string" ||
+            typeof values["template_id"] !== "string" ||
+            !values["content"] ||
+            typeof values["content"] !== "object" ||
+            Array.isArray(values["content"])
+          ) {
+            throw new TransportError(422, "validation_failed", "Validation Failed", "Message fields are invalid");
+          }
+          sendJson(response, 201, engagement.enqueue({
+            idempotency_key: values["idempotency_key"],
+            connector_id: values["connector_id"],
+            segment_id: values["segment_id"],
+            template_id: values["template_id"],
+            content: values["content"] as Record<string, unknown>,
+            ...(values["purpose"] === "transactional" ? { purpose: "transactional" as const } : {})
+          }));
+          return;
+        }
+        if (method === "POST" && path === "/admin/api/v1/engagement/messages/run") {
+          if (typeof values["job_id"] !== "string") {
+            throw new TransportError(422, "validation_failed", "Validation Failed", "job_id is required");
+          }
+          sendJson(response, 200, await engagement.runJob(values["job_id"]));
+          return;
+        }
+      }
+
+      const access = options.admin?.access;
+      if (
+        adminEnabled &&
+        access &&
+        path.startsWith("/admin/api/v1/access/") &&
+        ["PUT", "POST"].includes(method)
+      ) {
+        if (!isAdminAuthorized(request, options, adminSessions)) {
+          sendJson(response, 401, problem(401, "Unauthorized", "unauthorized"), "application/problem+json");
+          return;
+        }
+        if (!isAdminWriteAuthorized(request, options, adminSessions, "access:manage")) {
+          sendJson(
+            response,
+            403,
+            problem(403, "Forbidden", "forbidden", "Permission access:manage is required"),
+            "application/problem+json"
+          );
+          return;
+        }
+        const principal = adminPrincipal(request, options, adminSessions)!;
+        const body = await readBody(request);
+        const values = body && typeof body === "object" && !Array.isArray(body)
+          ? body as Record<string, unknown>
+          : {};
+        if (method === "PUT" && path === "/admin/api/v1/access/users") {
+          if (typeof values["email"] !== "string" || typeof values["role"] !== "string") {
+            throw new TransportError(
+              422,
+              "validation_failed",
+              "Request validation failed",
+              "email and role are required"
+            );
+          }
+          sendJson(response, 200, access.upsertUser({
+            ...(typeof values["user_id"] === "string" ? { user_id: values["user_id"] } : {}),
+            email: values["email"],
+            role: values["role"] as TenantRole,
+            ...(typeof values["name"] === "string" ? { name: values["name"] } : {}),
+            ...(typeof values["active"] === "boolean" ? { active: values["active"] } : {})
+          }, principal));
+          return;
+        }
+        if (method === "POST" && path === "/admin/api/v1/access/api-keys") {
+          if (typeof values["name"] !== "string" || typeof values["role"] !== "string") {
+            throw new TransportError(
+              422,
+              "validation_failed",
+              "Request validation failed",
+              "name and role are required"
+            );
+          }
+          sendJson(response, 201, access.createApiKey({
+            name: values["name"],
+            role: values["role"] as TenantRole,
+            ...(typeof values["expires_at"] === "string"
+              ? { expires_at: values["expires_at"] }
+              : {})
+          }, principal));
+          return;
+        }
+        if (method === "POST" && path === "/admin/api/v1/access/api-keys/revoke") {
+          if (typeof values["key_id"] !== "string") {
+            throw new TransportError(
+              422,
+              "validation_failed",
+              "Request validation failed",
+              "key_id is required"
+            );
+          }
+          access.revokeApiKey(values["key_id"], principal);
+          sendJson(response, 200, { revoked: true });
+          return;
+        }
       }
 
       const memberships = options.admin?.memberships;
@@ -783,11 +1159,11 @@ export function createReferenceServer(engine: LoyaltyEngine, options: ServerOpti
         ["/admin/api/v1/memberships/grant", "/admin/api/v1/memberships/status"].includes(path) &&
         method === "POST"
       ) {
-        if (!isAdminAuthorized(request, options.apiKey, adminSessions)) {
+        if (!isAdminAuthorized(request, options, adminSessions)) {
           sendJson(response, 401, problem(401, "Unauthorized", "unauthorized"), "application/problem+json");
           return;
         }
-        if (!isAdminWriteAuthorized(request, options.apiKey, adminSessions)) {
+        if (!isAdminWriteAuthorized(request, options, adminSessions)) {
           sendJson(
             response,
             403,
@@ -800,7 +1176,7 @@ export function createReferenceServer(engine: LoyaltyEngine, options: ServerOpti
         const values = body && typeof body === "object" && !Array.isArray(body)
           ? body as Record<string, unknown>
           : {};
-        const actor = adminActor(request, options.apiKey);
+        const actor = adminActor(request, options, adminSessions);
         if (path === "/admin/api/v1/memberships/grant") {
           if (
             typeof values["member_id"] !== "string" ||
@@ -849,11 +1225,11 @@ export function createReferenceServer(engine: LoyaltyEngine, options: ServerOpti
           "/admin/api/v1/campaigns/run"].includes(path) &&
         ["PUT", "POST"].includes(method)
       ) {
-        if (!isAdminAuthorized(request, options.apiKey, adminSessions)) {
+        if (!isAdminAuthorized(request, options, adminSessions)) {
           sendJson(response, 401, problem(401, "Unauthorized", "unauthorized"), "application/problem+json");
           return;
         }
-        if (!isAdminWriteAuthorized(request, options.apiKey, adminSessions)) {
+        if (!isAdminWriteAuthorized(request, options, adminSessions)) {
           sendJson(
             response,
             403,
@@ -934,7 +1310,10 @@ export function createReferenceServer(engine: LoyaltyEngine, options: ServerOpti
           sendJson(
             response,
             200,
-            campaigns.runCampaign(values["campaign_id"], adminActor(request, options.apiKey))
+            campaigns.runCampaign(
+              values["campaign_id"],
+              adminActor(request, options, adminSessions)
+            )
           );
           return;
         }
@@ -947,11 +1326,11 @@ export function createReferenceServer(engine: LoyaltyEngine, options: ServerOpti
         path.startsWith("/admin/api/v1/webhooks/") &&
         ["PUT", "POST"].includes(method)
       ) {
-        if (!isAdminAuthorized(request, options.apiKey, adminSessions)) {
+        if (!isAdminAuthorized(request, options, adminSessions)) {
           sendJson(response, 401, problem(401, "Unauthorized", "unauthorized"), "application/problem+json");
           return;
         }
-        if (!isAdminWriteAuthorized(request, options.apiKey, adminSessions)) {
+        if (!isAdminWriteAuthorized(request, options, adminSessions)) {
           sendJson(
             response,
             403,
@@ -1026,11 +1405,15 @@ export function createReferenceServer(engine: LoyaltyEngine, options: ServerOpti
         path.startsWith("/admin/api/v1/program/") &&
         ["PUT", "POST", "DELETE"].includes(method)
       ) {
-        if (!isAdminAuthorized(request, options.apiKey, adminSessions)) {
+        if (!isAdminAuthorized(request, options, adminSessions)) {
           sendJson(response, 401, problem(401, "Unauthorized", "unauthorized"), "application/problem+json");
           return;
         }
-        if (!isAdminWriteAuthorized(request, options.apiKey, adminSessions)) {
+        const requiredPermission: TenantPermission =
+          ["/admin/api/v1/program/publish", "/admin/api/v1/program/rollback"].includes(path)
+            ? "program:publish"
+            : "admin:write";
+        if (!isAdminWriteAuthorized(request, options, adminSessions, requiredPermission)) {
           sendJson(
             response,
             403,
@@ -1043,7 +1426,7 @@ export function createReferenceServer(engine: LoyaltyEngine, options: ServerOpti
         const values = body && typeof body === "object" && !Array.isArray(body)
           ? body as Record<string, unknown>
           : {};
-        const actor = adminActor(request, options.apiKey);
+        const actor = adminActor(request, options, adminSessions);
 
         if (method === "PUT" && path === "/admin/api/v1/program/draft") {
           sendJson(response, 200, programManagement.saveDraft(values["program"], actor));
@@ -1123,7 +1506,7 @@ export function createReferenceServer(engine: LoyaltyEngine, options: ServerOpti
         return;
       }
 
-      if (!isAuthorized(request, options.apiKey)) {
+      if (!protocolAuthorized(request, options, protocolPermission(path))) {
         response.setHeader("www-authenticate", "Bearer");
         sendJson(response, 401, problem(401, "Unauthorized", "unauthorized"), "application/problem+json");
         return;
@@ -1141,8 +1524,10 @@ export function createReferenceServer(engine: LoyaltyEngine, options: ServerOpti
         return;
       }
 
-      const result = route.handle(validation.value as never);
-      options.persistState?.(engine.exportState());
+      const result = options.executeEngineOperation
+        ? await options.executeEngineOperation(() => route.handle(validation.value as never))
+        : route.handle(validation.value as never);
+      if (!options.executeEngineOperation) options.persistState?.(engine.exportState());
       sendJson(response, route.status, result);
     })().catch((error: unknown) => {
       if (response.headersSent) {

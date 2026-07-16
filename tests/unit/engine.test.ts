@@ -5,6 +5,7 @@ import {
   makeContext,
   makeAnnualTierProgram,
   makeEnroll,
+  makeHybridProgram,
   makeOrder,
   makeProgram,
   makeStampProgram,
@@ -824,6 +825,124 @@ describe("LoyaltyEngine financial lifecycle", () => {
     expect(engine.getLedger()).toContainEqual(
       expect.objectContaining({ operation: "expiration", unit: "credits", amount: -5 })
     );
+  });
+
+  it("executes hybrid points, credit, and stamp accounts independently", () => {
+    const program = makeHybridProgram();
+    const engine = new LoyaltyEngine(program, { ids: sequentialIds() });
+    const enrolled = engine.enroll(makeEnroll("hybrid-enroll"));
+    expect(enrolled.balances.map(({ unit, amount }) => ({ unit, amount }))).toEqual([
+      { unit: "points", amount: 0 },
+      { unit: "credits", amount: 0 },
+      { unit: "stamps", amount: 0 }
+    ]);
+
+    const preview = engine.evaluate({
+      context: makeContext("hybrid-preview"),
+      member_id: "member-001",
+      order: makeOrder({ order_id: "hybrid-preview-order" })
+    });
+    expect(preview.estimated_accrual).toEqual({ unit: "points", amount: 110 });
+    expect(preview.estimated_accruals).toEqual([
+      { unit: "points", amount: 110 },
+      { unit: "credits", amount: 55 },
+      { unit: "stamps", amount: 1 }
+    ]);
+    expect(engine.getProgram({
+      context: makeContext("hybrid-program"),
+      program_id: "demo-foodservice"
+    }).program.account_earning).toEqual([
+      expect.objectContaining({ unit: "points", mode: "spend", amount: 10 }),
+      expect.objectContaining({ unit: "credits", mode: "spend", amount: 500 }),
+      expect.objectContaining({ unit: "stamps", mode: "per_order", amount: 1 })
+    ]);
+
+    const accrued = engine.postAccrual({
+      context: makeContext("hybrid-accrual"),
+      member_id: "member-001",
+      order: makeOrder({ order_id: "hybrid-order" })
+    });
+    expect(accrued.entries?.map(({ unit, amount }) => ({ unit, amount }))).toEqual([
+      { unit: "points", amount: 110 },
+      { unit: "credits", amount: 55 },
+      { unit: "stamps", amount: 1 }
+    ]);
+    expect(accrued.balances.map(({ unit, available }) => ({ unit, available }))).toEqual([
+      { unit: "points", available: 110 },
+      { unit: "credits", available: 55 },
+      { unit: "stamps", available: 1 }
+    ]);
+
+    const adjusted = engine.adjustOrder({
+      context: makeContext("hybrid-adjust"),
+      member_id: "member-001",
+      program_id: "demo-foodservice",
+      adjustment: {
+        adjustment_id: "hybrid-refund",
+        original_order_id: "hybrid-order",
+        type: "partial_refund",
+        reason: "Side returned",
+        occurred_at: "2026-07-14T11:00:00.000Z",
+        order_total_delta: { amount: -100, currency: "USD" },
+        eligible_spend_delta: { amount: -100, currency: "USD" }
+      }
+    });
+    expect(adjusted.entries?.map(({ unit, amount }) => ({ unit, amount }))).toEqual([
+      { unit: "points", amount: -10 },
+      { unit: "credits", amount: -5 },
+      { unit: "stamps", amount: 0 }
+    ]);
+
+    const held = engine.reserve({
+      context: makeContext("hybrid-reserve"),
+      redemption_id: "hybrid-redemption",
+      member_id: "member-001",
+      reward_id: "one-dollar-off",
+      order: makeOrder({ order_id: "hybrid-redemption-order" })
+    });
+    expect(held.reservation.cost).toEqual({ unit: "credits", amount: 50 });
+    expect(held.balances.find(({ unit }) => unit === "credits")).toMatchObject({
+      amount: 50,
+      reserved: 50,
+      available: 0
+    });
+    engine.capture({
+      context: makeContext("hybrid-capture"),
+      reservation_id: held.reservation.reservation_id,
+      order_id: "hybrid-redemption-order"
+    });
+    expect(engine.getAccount({
+      context: makeContext("hybrid-account"),
+      member_id: "member-001",
+      program_id: "demo-foodservice"
+    }).balances).toEqual(expect.arrayContaining([
+      expect.objectContaining({ unit: "points", amount: 100 }),
+      expect.objectContaining({ unit: "credits", amount: 0 }),
+      expect.objectContaining({ unit: "stamps", amount: 1 })
+    ]));
+
+    engine.postManualAdjustment({
+      context: makeContext("hybrid-manual-credit"),
+      member_id: "member-001",
+      program_id: "demo-foodservice",
+      adjustment_id: "hybrid-manual-credit",
+      unit: "credits",
+      amount: 7,
+      classification: "service_recovery",
+      reason: "Hybrid account correction",
+      qualifies_for_tier: false
+    });
+    expect(engine.getAccount({
+      context: makeContext("hybrid-manual-account"),
+      member_id: "member-001",
+      program_id: "demo-foodservice"
+    }).balances.find(({ unit }) => unit === "credits")).toMatchObject({ amount: 7 });
+
+    const restored = new LoyaltyEngine(program, { state: engine.exportState(), ids: sequentialIds() });
+    expect(restored.inspectAdmin().program_configuration).toMatchObject({
+      current_model_id: "hybrid"
+    });
+    expect(restored.inspectAdmin().members[0]?.balances).toHaveLength(3);
   });
 
   it("posts signed refund adjustments once", () => {

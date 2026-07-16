@@ -1,0 +1,48 @@
+{
+  "name": "@loyalty-interchange/storage-postgres",
+  "version": "0.1.0",
+  "description": "Normalized PostgreSQL engine storage and coordination for Loyalty Interchange.",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/alvinjchoi/opensource-loyalty.git",
+    "directory": "packages/storage-postgres"
+  },
+  "homepage": "https://github.com/alvinjchoi/opensource-loyalty#readme",
+  "bugs": {
+    "url": "https://github.com/alvinjchoi/opensource-loyalty/issues"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "sideEffects": false,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "migrations"
+  ],
+  "scripts": {
+    "build": "tsc -b",
+    "prepack": "npm run build"
+  },
+  "dependencies": {
+    "@loyalty-interchange/reference": "0.1.0",
+    "@loyalty-interchange/storage": "0.1.0",
+    "pg": "^8.22.0"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.20.0"
+  }
+}

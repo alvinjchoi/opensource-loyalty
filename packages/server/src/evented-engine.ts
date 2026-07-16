@@ -63,13 +63,17 @@ export class EventedLoyaltyEngine extends LoyaltyEngine {
 
   public override postAccrual(request: AccrualPostRequest): LedgerResponse {
     const response = super.postAccrual(request);
-    this.publishEntry("org.loyalty-interchange.order.accrued.v1", "accrued", response.entry);
+    for (const entry of response.entries ?? [response.entry]) {
+      this.publishEntry("org.loyalty-interchange.order.accrued.v1", "accrued", entry);
+    }
     return response;
   }
 
   public override adjustOrder(request: OrderAdjustmentRequest): LedgerResponse {
     const response = super.adjustOrder(request);
-    this.publishEntry("org.loyalty-interchange.order.adjusted.v1", "adjusted", response.entry);
+    for (const entry of response.entries ?? [response.entry]) {
+      this.publishEntry("org.loyalty-interchange.order.adjusted.v1", "adjusted", entry);
+    }
     return response;
   }
 

@@ -2,6 +2,7 @@ export type EngineErrorCode =
   | "conflict"
   | "currency_mismatch"
   | "expired"
+  | "forbidden"
   | "idempotency_conflict"
   | "insufficient_balance"
   | "invalid_order"

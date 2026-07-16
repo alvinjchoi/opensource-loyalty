@@ -13,6 +13,11 @@ const workspaces: Array<{ name: string; entry: string; required?: string[] }> = 
   { name: "@loyalty-interchange/storage", entry: "dist/index" },
   { name: "@loyalty-interchange/storage-sqlite", entry: "dist/index" },
   {
+    name: "@loyalty-interchange/storage-postgres",
+    entry: "dist/index",
+    required: ["migrations/001_normalized_engine.sql"]
+  },
+  {
     name: "@loyalty-interchange/server",
     entry: "dist/index",
     required: ["dist/admin/index.html"]

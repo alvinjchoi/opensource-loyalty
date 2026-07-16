@@ -66,15 +66,20 @@ portable LIP contract focused on interoperability.
   reward issuance, card reset, ledger units, Admin publish, and persistence.
 - [x] Paid membership plans with durable member entitlements, validity windows,
   earn multipliers, gated rewards, scheduler-driven lapse, and Admin controls.
+- [x] Hybrid programs with independently accrued points, credit, and visit/stamp
+  accounts, per-unit reward costs, expiration, reservations, and refund entries.
 - [x] Persistent webhook subscription CRUD, event filters, signing-secret
   rotation, delivery visibility, and immediate retry for pending deliveries.
 - [x] Persist completed webhook delivery history and support completed-event
   replay.
 - [x] Add per-subscription timeout, backoff, and retry policies.
-- [ ] Scoped Admin users, roles, permissions, tenant/location scoping, and audit
-  log entries for every write.
-- [ ] Import/export contracts for members, transactions, rewards, and ledger
-  reports.
+- [x] Scoped Admin users, fixed roles and permissions, tenant-scoped API keys,
+  key expiration/revocation, and audit entries for Admin and protocol writes.
+- [ ] Location-level scoping and custom role definitions.
+- [x] Consent-filtered member CRM exports in JSON and CSV.
+- [x] Ledger/member/campaign analytics plus signed, idempotent messaging
+  connectors with persisted jobs, retries, and Admin controls.
+- [ ] Bulk imports and transaction, reward, and ledger report exports.
 
 ### Phase 3: docs portal parity with Open WebUI
 
@@ -215,8 +220,11 @@ turning implementation-specific operations into normative LIP requirements.
 - [x] Responsive Admin views for health, members, ledger, program, and developer status
 - [x] One-command startup with durable state, reset, and seed controls
 - [x] Docker volume persistence and package-level storage verification
-- [ ] Tenant-aware Postgres adapter and migration tooling
-- [ ] Scoped Admin users, roles, and audit log
+- [x] Tenant-aware normalized Postgres engine adapter, numbered migrations,
+  optimistic revisions, advisory transaction locks, and scheduler leases
+- [ ] Move program, campaign, membership, access, and webhook extension stores
+  to the asynchronous Postgres state contract
+- [x] Scoped Admin users, roles, tenant API keys, and audit log
 - [x] Program configuration editor with validation and publish workflow
 - [ ] Extension API for adapters, workflows, and custom Admin modules
 

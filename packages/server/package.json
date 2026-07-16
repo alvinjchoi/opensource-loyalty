@@ -29,6 +29,7 @@
   "dependencies": {
     "@loyalty-interchange/protocol": "0.1.0",
     "@loyalty-interchange/reference": "0.1.0",
+    "@loyalty-interchange/storage-postgres": "0.1.0",
     "@loyalty-interchange/storage-sqlite": "0.1.0",
     "@sinclair/typebox": "^0.34.52"
   }

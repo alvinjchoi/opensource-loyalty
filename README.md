@@ -22,11 +22,12 @@ For more information, be sure to check out the **[LIP Documentation](docs/README
 - 🏪 **Franchise-Aware Scope**: Brand, merchant, location, and franchisee identifiers, plus product, category, tag, and line-kind earning exclusions.
 
 - 🎯 **Multiple Program Models**: executable **points**, **visits/stamps**,
-  **wallet credit**, and **paid membership** programs, with hybrid multi-account
-  execution still explicitly marked as planned.
+  **wallet credit**, **paid membership**, and hybrid multi-account programs with
+  independent earning, balances, expiration, reward costs, and reservations.
 - 📣 **Engagement Platform**: persisted static or dynamic segments, scheduled
   reward campaigns, idempotent wallet issuance, reward draft CRUD, and
-  membership lifecycle controls in Admin.
+  membership lifecycle controls in Admin. Ledger analytics, consent-filtered
+  CRM exports, and signed messaging connector jobs include retries and audit.
 
 - 🛡️ **Retry-Safe by Design**: Idempotency keys, request context, RFC 9457 problem details, and partial refund, void, reversal, duplicate-check, and settlement semantics.
 
@@ -34,7 +35,9 @@ For more information, be sure to check out the **[LIP Documentation](docs/README
 
 - 🖥️ **Local Admin Dashboard**: Authenticated dashboard at `http://127.0.0.1:3210/admin/` for inspecting members and ledger activity, plus versioned program drafts, validation, live publish, and rollback.
 
-- 🗄️ **Durable Sandbox Storage**: SQLite-backed state by default, with a storage adapter boundary ready for production databases such as Postgres.
+- 🗄️ **Durable Storage**: SQLite-backed local state by default plus normalized,
+  tenant-scoped Postgres tables, migrations, optimistic revisions, advisory
+  transaction locks, and scheduler leases for multi-instance protocol serving.
 
 - 🧪 **Specs and Conformance**: OpenAPI 3.1 contract, JSON Schema Draft 2020-12 payload schemas, normative lifecycle, account, webhook, and foodservice profile documents, and black-box HTTP conformance tests you can run against any implementation.
 
@@ -172,7 +175,9 @@ custom program is loaded.
 
 ### Self-Hosting Configuration ⚙️
 
-The Compose service runs the reference server and Admin dashboard on port `3210` and stores SQLite state in the named `lip-data` volume. Configure runtime values with environment variables:
+The default Compose service runs the reference server and Admin dashboard on
+port `3210` and stores SQLite state in the named `lip-data` volume. Configure
+runtime values with environment variables:
 
 ```bash
 LIP_API_KEY="replace-with-a-long-local-key"
@@ -184,6 +189,10 @@ LIP_STRUCTURED_LOGS=true
 docker compose up --build
 ```
 
+For the Postgres-backed profile, run `docker compose --profile postgres up
+--build`; its API defaults to port `3211`. See
+[PostgreSQL production storage](docs/postgres.md).
+
 Authenticated protocol requests are limited per remote client. Responses
 include `RateLimit-*` headers and return RFC 9457 problem details with HTTP 429
 when exhausted. The CLI and container emit one JSON `http_request` record per
@@ -192,7 +201,9 @@ response without logging API keys or request bodies. The authenticated
 text format.
 
 > [!WARNING]
-> The container is a single-node reference runtime, not a hosted multi-tenant production deployment. For production, build on the protocol and storage adapter boundary: SQLite sandbox → storage adapter contract → Postgres production adapter → tenant-aware Admin API → scoped users, roles, and audit log.
+> The Postgres protocol runtime coordinates engine mutations across instances.
+> The complete Admin service suite still uses SQLite-backed extension stores;
+> production Admin deployments must port those stores and add location scoping.
 
 ### npm Install Experience 📦
 
@@ -222,6 +233,7 @@ first registry release is completed.
 |   |-- sdk/                # Domain SDK and generated low-level OpenAPI client
 |   |-- server/             # Reference HTTP server and non-normative Admin API
 |   |-- storage/            # Storage adapter interface
+|   |-- storage-postgres/   # Normalized Postgres adapter, migrations, locks, leases
 |   `-- storage-sqlite/     # Durable SQLite adapter for local and single-node use
 |-- scripts/                # Spec, SDK, examples, and package verification scripts
 |-- spec/                   # Normative prose, OpenAPI, generated schemas, and examples
@@ -235,7 +247,7 @@ first registry release is completed.
 - **API:** Node HTTP server with OpenAPI 3.1 contract
 - **Validation:** JSON Schema Draft 2020-12 via TypeBox
 - **SDK:** Handwritten domain client plus generated low-level OpenAPI client
-- **Storage:** SQLite by default, adapter boundary for Postgres and other backends
+- **Storage:** SQLite sandbox or normalized, tenant-scoped PostgreSQL
 - **Testing:** Vitest and black-box HTTP conformance tests
 - **Packaging:** Docker today, npm CLI package planned
 
@@ -287,7 +299,7 @@ Current priorities are tracked in [PLAN.md](PLAN.md). Near-term focus:
 - Program-as-code configuration drafts with validation, preview, publish, and rollback
 - Reward wallet and reward management APIs
 - Webhook subscription management
-- Postgres storage adapter
+- Async Postgres stores for the remaining Admin extension services
 - More SDK examples and machine-readable docs
 
 ## Contributing 🤝

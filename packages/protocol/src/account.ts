@@ -93,6 +93,23 @@ export const ProgramAccountDefinitionSchema = Type.Object(
   { additionalProperties: false }
 );
 
+export const AccountEarningRuleSchema = Type.Object(
+  {
+    unit: LoyaltyUnitSchema,
+    mode: Type.Union([Type.Literal("spend"), Type.Literal("per_order")]),
+    amount: Type.Integer({ minimum: 0 }),
+    spend: Type.Optional(Type.Object(
+      {
+        amount: Type.Integer({ minimum: 1 }),
+        currency: Type.String({ pattern: "^[A-Z]{3}$" })
+      },
+      { additionalProperties: false }
+    )),
+    multiplier_eligible: Type.Boolean()
+  },
+  { additionalProperties: false }
+);
+
 export const ProgramMetricDefinitionSchema = Type.Object(
   {
     metric_id: IdSchema,
@@ -154,6 +171,7 @@ export const ProgramCatalogSchema = Type.Object(
     description: Type.Optional(Type.String({ minLength: 1, maxLength: 2_000 })),
     currency: Type.String({ pattern: "^[A-Z]{3}$" }),
     earning: EarningPolicySchema,
+    account_earning: Type.Optional(Type.Array(AccountEarningRuleSchema, { minItems: 1 })),
     accounts: Type.Array(ProgramAccountDefinitionSchema, { minItems: 1 }),
     metrics: Type.Array(ProgramMetricDefinitionSchema),
     tiers: Type.Array(TierDefinitionSchema),
@@ -236,6 +254,7 @@ export const MemberAccountResponseSchema = Type.Object(
 );
 
 export type ProgramAccountDefinition = Static<typeof ProgramAccountDefinitionSchema>;
+export type AccountEarningRule = Static<typeof AccountEarningRuleSchema>;
 export type EarningExclusions = Static<typeof EarningExclusionsSchema>;
 export type EarningPolicy = Static<typeof EarningPolicySchema>;
 export type TierQualificationPolicy = Static<typeof TierQualificationPolicySchema>;

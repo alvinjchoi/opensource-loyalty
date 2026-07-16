@@ -208,6 +208,177 @@
         }
       }
     },
+    "entries": {
+      "minItems": 1,
+      "type": "array",
+      "items": {
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "entry_id",
+          "member_id",
+          "program_id",
+          "account_id",
+          "operation",
+          "unit",
+          "amount",
+          "occurred_at"
+        ],
+        "properties": {
+          "entry_id": {
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "description": "Opaque, stable identifier within the owning system.",
+            "type": "string"
+          },
+          "member_id": {
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "description": "Opaque, stable identifier within the owning system.",
+            "type": "string"
+          },
+          "program_id": {
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "description": "Opaque, stable identifier within the owning system.",
+            "type": "string"
+          },
+          "account_id": {
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "description": "Opaque, stable identifier within the owning system.",
+            "type": "string"
+          },
+          "operation": {
+            "anyOf": [
+              {
+                "const": "accrual",
+                "type": "string"
+              },
+              {
+                "const": "redemption",
+                "type": "string"
+              },
+              {
+                "const": "reversal",
+                "type": "string"
+              },
+              {
+                "const": "adjustment",
+                "type": "string"
+              },
+              {
+                "const": "expiration",
+                "type": "string"
+              },
+              {
+                "const": "manual",
+                "type": "string"
+              }
+            ]
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "const": "points",
+                "type": "string"
+              },
+              {
+                "const": "visits",
+                "type": "string"
+              },
+              {
+                "const": "stamps",
+                "type": "string"
+              },
+              {
+                "const": "credits",
+                "type": "string"
+              },
+              {
+                "const": "custom",
+                "type": "string"
+              }
+            ]
+          },
+          "amount": {
+            "type": "integer"
+          },
+          "occurred_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "related_entry_id": {
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "description": "Opaque, stable identifier within the owning system.",
+            "type": "string"
+          },
+          "order_id": {
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "description": "Opaque, stable identifier within the owning system.",
+            "type": "string"
+          },
+          "adjustment_id": {
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "description": "Opaque, stable identifier within the owning system.",
+            "type": "string"
+          },
+          "reservation_id": {
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "description": "Opaque, stable identifier within the owning system.",
+            "type": "string"
+          },
+          "classification": {
+            "anyOf": [
+              {
+                "const": "bonus",
+                "type": "string"
+              },
+              {
+                "const": "gift",
+                "type": "string"
+              },
+              {
+                "const": "migration",
+                "type": "string"
+              },
+              {
+                "const": "service_recovery",
+                "type": "string"
+              },
+              {
+                "const": "correction",
+                "type": "string"
+              }
+            ]
+          },
+          "reason": {
+            "minLength": 1,
+            "maxLength": 255,
+            "type": "string"
+          },
+          "qualifies_for_tier": {
+            "type": "boolean"
+          }
+        }
+      }
+    },
     "balances": {
       "type": "array",
       "items": {

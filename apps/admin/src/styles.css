@@ -483,6 +483,37 @@ td code { display: block; margin-top: 3px; max-width: 260px; overflow: hidden; t
 .reward-actions { display: flex; gap: 6px; justify-content: flex-end; }
 .membership-form { align-items: center; display: grid; gap: 10px; grid-template-columns: minmax(180px, 1fr) minmax(160px, .6fr) auto; padding: 16px; }
 .membership-form input, .membership-form select { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; color: inherit; font: inherit; min-height: 40px; padding: 0 11px; }
+.access-forms { display: grid; gap: 16px; grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 16px; }
+.access-forms > div { align-items: stretch; background: var(--surface-subtle); border: 1px solid var(--border); border-radius: 10px; display: grid; gap: 9px; padding: 14px; }
+.access-forms h4, .access-lists h4, .access-audit h4 { margin: 0 0 4px; }
+.access-forms input, .access-forms select { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; color: inherit; font: inherit; min-height: 40px; padding: 0 11px; }
+.generated-key { align-items: center; background: var(--surface-subtle); border-block: 1px solid var(--border); display: grid; gap: 7px; padding: 14px 16px; }
+.generated-key code { overflow-wrap: anywhere; user-select: all; }
+.access-lists { display: grid; gap: 16px; grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 16px; }
+.access-lists > div > div { align-items: center; border-top: 1px solid var(--border); display: flex; gap: 10px; justify-content: space-between; min-height: 48px; }
+.access-lists span { display: grid; font-size: 11px; gap: 3px; }
+.access-audit { border-top: 1px solid var(--border); padding: 16px; }
+.access-audit > div { align-items: center; display: flex; gap: 12px; justify-content: space-between; min-height: 34px; }
+.access-audit span { color: var(--text-secondary); font-size: 10px; }
+.account-balances { display: grid; gap: 1px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.account-balances > div { background: var(--surface-subtle); display: grid; gap: 2px; padding: 10px 14px; }
+.account-balances span, .account-balances small { color: var(--text-secondary); font-size: 10px; }
+.account-policy-grid { display: grid; gap: 1px; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); }
+.account-policy-grid > div { background: var(--surface-subtle); display: grid; gap: 5px; padding: 16px; }
+.account-policy-grid span, .account-policy-grid small { color: var(--text-secondary); font-size: 10px; }
+.analytics-grid { display: grid; gap: 1px; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.analytics-grid > div, .analytics-balances > div { background: var(--surface-subtle); display: grid; gap: 4px; padding: 16px; }
+.analytics-grid span, .analytics-balances span { color: var(--text-secondary); font-size: 10px; }
+.analytics-grid strong { font-size: 20px; }
+.analytics-balances { display: grid; gap: 1px; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+.engagement-forms { display: grid; gap: 16px; grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 16px; }
+.engagement-forms > div { background: var(--surface-subtle); border: 1px solid var(--border); border-radius: 10px; display: grid; gap: 9px; padding: 14px; }
+.engagement-forms h4 { margin: 0 0 4px; }
+.engagement-forms input, .engagement-forms select, .engagement-forms textarea { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; color: inherit; font: inherit; min-height: 40px; padding: 9px 11px; }
+.engagement-forms textarea { min-height: 78px; resize: vertical; }
+.engagement-list { padding: 0 16px 16px; }
+.engagement-list > div { align-items: center; border-top: 1px solid var(--border); display: flex; gap: 10px; justify-content: space-between; min-height: 48px; }
+.engagement-list span { display: grid; font-size: 11px; gap: 3px; }
 
 @media (max-width: 1050px) {
   .stats-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -490,6 +521,9 @@ td code { display: block; margin-top: 3px; max-width: 260px; overflow: hidden; t
   .webhook-subscription-form { grid-template-columns: 1fr; }
   .campaign-forms { grid-template-columns: 1fr; }
   .membership-form { grid-template-columns: 1fr; }
+  .access-forms, .access-lists { grid-template-columns: 1fr; }
+  .engagement-forms { grid-template-columns: 1fr; }
+  .analytics-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .members-layout.has-detail { grid-template-columns: minmax(0, 1fr); }
   .member-detail { position: static; }
 }

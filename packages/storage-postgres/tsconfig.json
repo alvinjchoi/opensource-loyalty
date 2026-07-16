@@ -4,13 +4,12 @@
     "composite": true,
     "rootDir": "src",
     "outDir": "dist",
-    "tsBuildInfoFile": "../../dist/.tsbuildinfo/server.tsbuildinfo"
+    "tsBuildInfoFile": "../../dist/.tsbuildinfo/storage-postgres.tsbuildinfo"
   },
   "include": ["src/**/*.ts"],
   "references": [
     { "path": "../protocol" },
     { "path": "../reference" },
-    { "path": "../storage-postgres" },
-    { "path": "../storage-sqlite" }
+    { "path": "../storage" }
   ]
 }

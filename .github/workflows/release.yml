@@ -37,6 +37,7 @@ jobs:
           npm publish --workspace @loyalty-interchange/storage
           npm publish --workspace @loyalty-interchange/reference
           npm publish --workspace @loyalty-interchange/storage-sqlite
+          npm publish --workspace @loyalty-interchange/storage-postgres
           npm publish --workspace @loyalty-interchange/server
           npm publish --workspace @loyalty-interchange/sdk
           npm publish --workspace @loyalty-interchange/cli

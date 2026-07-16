@@ -16,5 +16,41 @@ services:
       - lip-data:/data
     restart: unless-stopped
 
+  postgres:
+    image: postgres:17-alpine
+    profiles: ["postgres"]
+    environment:
+      POSTGRES_DB: loyalty
+      POSTGRES_USER: loyalty
+      POSTGRES_PASSWORD: ${LIP_POSTGRES_PASSWORD:-lip-local-password}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U loyalty -d loyalty"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+    volumes:
+      - lip-postgres-data:/var/lib/postgresql/data
+
+  lip-postgres:
+    build: .
+    profiles: ["postgres"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      HOST: 0.0.0.0
+      PORT: 3210
+      LIP_API_KEY: ${LIP_API_KEY:-lip-dev-key}
+      LIP_DATABASE_URL: postgres://loyalty:${LIP_POSTGRES_PASSWORD:-lip-local-password}@postgres:5432/loyalty
+      LIP_TENANT_ID: ${LIP_TENANT_ID:-demo-foodservice}
+      LIP_SEED_DEMO: ${LIP_SEED_DEMO:-true}
+      LIP_RATE_LIMIT_REQUESTS: ${LIP_RATE_LIMIT_REQUESTS:-120}
+      LIP_RATE_LIMIT_WINDOW_MS: ${LIP_RATE_LIMIT_WINDOW_MS:-60000}
+      LIP_STRUCTURED_LOGS: ${LIP_STRUCTURED_LOGS:-true}
+    ports:
+      - "${LIP_POSTGRES_PORT:-3211}:3210"
+    restart: unless-stopped
+
 volumes:
   lip-data:
+  lip-postgres-data:

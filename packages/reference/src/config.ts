@@ -20,6 +20,10 @@ export interface RewardDefinition {
   description?: string;
   image_url?: string;
   points_cost: number;
+  cost?: {
+    unit: "points" | "visits" | "stamps" | "credits";
+    amount: number;
+  };
   effect: RewardEffect;
   funding: FundingShare[];
   available_from?: string;

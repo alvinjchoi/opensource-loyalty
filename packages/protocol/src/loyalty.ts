@@ -100,6 +100,7 @@ export const EvaluationResponseSchema = Type.Object(
     member_id: IdSchema,
     order_id: IdSchema,
     estimated_accrual: AccrualAmountSchema,
+    estimated_accruals: Type.Optional(Type.Array(AccrualAmountSchema, { minItems: 1 })),
     rewards: Type.Array(RewardCandidateSchema),
     balances: Type.Array(BalanceSchema),
     expires_at: DateTimeSchema
@@ -160,6 +161,7 @@ export const LedgerResponseSchema = Type.Object(
   {
     context: ResponseContextSchema,
     entry: LedgerEntrySchema,
+    entries: Type.Optional(Type.Array(LedgerEntrySchema, { minItems: 1 })),
     balances: Type.Array(BalanceSchema)
   },
   { additionalProperties: false }
@@ -350,6 +352,7 @@ export const ManualAdjustmentRequestSchema = Type.Object(
     member_id: IdSchema,
     program_id: IdSchema,
     adjustment_id: IdSchema,
+    unit: Type.Optional(LoyaltyUnitSchema),
     amount: Type.Union([
       Type.Integer({ maximum: -1 }),
       Type.Integer({ minimum: 1 })
@@ -387,6 +390,7 @@ export const ProblemDetailsSchema = Type.Object(
 
 export type RewardEffect = Static<typeof RewardEffectSchema>;
 export type RewardCandidate = Static<typeof RewardCandidateSchema>;
+export type AccrualAmount = Static<typeof AccrualAmountSchema>;
 export type EvaluationRequest = Static<typeof EvaluationRequestSchema>;
 export type EvaluationResponse = Static<typeof EvaluationResponseSchema>;
 export type LedgerEntry = Static<typeof LedgerEntrySchema>;

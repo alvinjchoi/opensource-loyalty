@@ -123,6 +123,14 @@ export class CampaignService {
     });
   }
 
+  public membersForSegment(segmentId: string): string[] {
+    const segment = this.state.segments.find((candidate) => candidate.segment_id === segmentId);
+    if (!segment) {
+      throw new EngineError("not_found", `Segment ${segmentId} was not found`, 404);
+    }
+    return this.resolveSegmentMembers(segment);
+  }
+
   public upsertSegment(input: {
     segment_id?: string;
     name: string;

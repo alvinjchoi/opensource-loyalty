@@ -5,6 +5,8 @@ export type ProgramModelStatus = "active" | "available" | "planned";
 export type ProgramModelSupport = "implemented" | "planned";
 
 export interface Balance {
+  account_id: string;
+  unit: string;
   amount: number;
   reserved: number;
   available: number;
@@ -17,6 +19,8 @@ export interface AccountMetric {
 }
 
 export interface ExpiringBalance {
+  account_id: string;
+  unit: string;
   amount: number;
   expires_at: string;
 }
@@ -42,6 +46,7 @@ export interface Member {
 export interface AdminMember {
   member: Member;
   balance: Balance;
+  balances?: Balance[];
   metrics: AccountMetric[];
   expiring_balances: ExpiringBalance[];
   tier_progress?: TierProgress;
@@ -96,6 +101,14 @@ export interface ProgramCatalog {
       line_kinds: string[];
     };
   };
+  account_earning?: Array<{
+    unit: string;
+    mode: "spend" | "per_order";
+    amount: number;
+    spend?: { amount: number; currency: string };
+    multiplier_eligible: boolean;
+  }>;
+  accounts: Array<{ unit: string; unit_label?: string; is_primary: boolean }>;
   tiers: TierDefinition[];
   rewards: RewardDefinition[];
   point_expiration?: { type: string; days: number; warning_days: number[] };
@@ -243,6 +256,96 @@ export interface CampaignPlatform {
   }>;
 }
 
+export type TenantRole =
+  "owner" | "admin" | "operator" | "developer" | "viewer" | "integration";
+
+export interface AccessControl {
+  tenant: { tenant_id: string; name: string; created_at: string };
+  users: Array<{
+    user_id: string;
+    email: string;
+    name?: string;
+    role: TenantRole;
+    active: boolean;
+  }>;
+  api_keys: Array<{
+    key_id: string;
+    name: string;
+    prefix: string;
+    role: TenantRole;
+    active: boolean;
+    created_at: string;
+    expires_at?: string;
+    last_used_at?: string;
+    revoked_at?: string;
+  }>;
+  audit: Array<{
+    audit_id: string;
+    actor_id: string;
+    action: string;
+    resource_type: string;
+    resource_id?: string;
+    request_id?: string;
+    occurred_at: string;
+  }>;
+  role_permissions: Record<TenantRole, string[]>;
+}
+
+export interface EngagementPlatform {
+  connectors: Array<{
+    connector_id: string;
+    name: string;
+    type: string;
+    active: boolean;
+    configuration: Record<string, unknown>;
+    secret_configured: boolean;
+    created_at: string;
+    updated_at: string;
+  }>;
+  jobs: Array<{
+    job_id: string;
+    connector_id: string;
+    segment_id: string;
+    template_id: string;
+    purpose: "marketing" | "transactional";
+    status: "queued" | "running" | "completed" | "partial" | "failed";
+    created_at: string;
+    completed_at?: string;
+    deliveries: Array<{
+      delivery_id: string;
+      member_id: string;
+      status: "pending" | "delivered" | "failed" | "skipped";
+      attempts: number;
+      error?: string;
+    }>;
+  }>;
+}
+
+export interface EngagementAnalytics {
+  generated_at: string;
+  members: { total: number; active: number; marketing_consented: number };
+  balances: Array<{ unit: string; outstanding: number; reserved: number }>;
+  ledger_by_day: Array<{
+    date: string;
+    unit: string;
+    earned: number;
+    redeemed: number;
+    expired: number;
+  }>;
+  rewards: Array<{
+    reward_id: string;
+    reserved: number;
+    captured: number;
+    reversed: number;
+  }>;
+  campaigns: {
+    configured: number;
+    runs: number;
+    members_targeted: number;
+    rewards_issued: number;
+  };
+}
+
 export interface AdminSnapshot {
   admin_api_version: string;
   generated_at: string;
@@ -255,6 +358,9 @@ export interface AdminSnapshot {
   program_configuration: ProgramConfiguration;
   program_management?: ProgramManagement;
   campaigns: CampaignPlatform;
+  access_control?: AccessControl;
+  engagement: EngagementPlatform;
+  analytics?: EngagementAnalytics;
   memberships: {
     memberships: Array<{
       member_id: string;
