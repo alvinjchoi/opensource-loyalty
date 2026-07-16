@@ -21,7 +21,12 @@ For more information, be sure to check out the **[LIP Documentation](docs/README
 
 - 🏪 **Franchise-Aware Scope**: Brand, merchant, location, and franchisee identifiers, plus product, category, tag, and line-kind earning exclusions.
 
-- 🎯 **Multiple Program Models**: **Points** (spend-based earn/redeem with expiring lots), **visits and stamps**, **wallet credit**, **paid membership**, and **hybrid rewards**. Points is executable in the reference engine today; the Admin surfaces the others as configuration templates with explicit backend support status.
+- 🎯 **Multiple Program Models**: executable **points**, **visits/stamps**,
+  **wallet credit**, and **paid membership** programs, with hybrid multi-account
+  execution still explicitly marked as planned.
+- 📣 **Engagement Platform**: persisted static or dynamic segments, scheduled
+  reward campaigns, idempotent wallet issuance, reward draft CRUD, and
+  membership lifecycle controls in Admin.
 
 - 🛡️ **Retry-Safe by Design**: Idempotency keys, request context, RFC 9457 problem details, and partial refund, void, reversal, duplicate-check, and settlement semantics.
 
@@ -189,15 +194,18 @@ text format.
 > [!WARNING]
 > The container is a single-node reference runtime, not a hosted multi-tenant production deployment. For production, build on the protocol and storage adapter boundary: SQLite sandbox → storage adapter contract → Postgres production adapter → tenant-aware Admin API → scoped users, roles, and audit log.
 
-### Target Install Experience 📦
+### npm Install Experience 📦
 
-The verified install paths today are Docker and source. Once packages are published, the intended CLI experience is:
+The packages and provenance-enabled release workflow are publish-ready. After
+the one-time npm organization/trusted-publisher setup, the install experience is:
 
 ```bash
 npx @loyalty-interchange/cli serve
 ```
 
-An optional thin Python-friendly wrapper may provide `pipx install opensource-loyalty`, but the canonical runtime is the TypeScript server and protocol packages in this repo.
+See [the release guide](docs/releasing.md) for dry-run verification and trusted
+publishing setup. Docker and source remain the verified install paths until the
+first registry release is completed.
 
 ## Project Structure 🗂️
 

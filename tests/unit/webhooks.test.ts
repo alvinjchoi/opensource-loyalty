@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 import { LoyaltyEventSchema, validate, type LoyaltyEvent } from "@loyalty-interchange/protocol";
 import {
   EventedLoyaltyEngine,
+  SqliteWebhookHistoryStore,
   SqliteWebhookOutbox,
   WebhookDispatcher,
   createDemoPlatform,
@@ -78,6 +79,62 @@ function eventedEngine(emitted: LoyaltyEvent[], clock = new MutableClock()): Eve
 }
 
 describe("WebhookDispatcher", () => {
+  it("validates and updates managed subscriptions without exposing secrets", async () => {
+    const persisted: unknown[] = [];
+    const captured: CapturedRequest[] = [];
+    const dispatcher = new WebhookDispatcher({
+      subscriptions: [],
+      fetch: capturingFetch(captured, [204]),
+      onSubscriptionsChanged: (subscriptions) => persisted.push(subscriptions)
+    });
+    expect(() => dispatcher.upsertSubscription({
+      url: "ftp://receiver.example/hooks",
+      secret: "long-enough-secret"
+    })).toThrowError(/HTTP/);
+    expect(() => dispatcher.upsertSubscription({
+      url: "https://user:pass@receiver.example/hooks",
+      secret: "long-enough-secret"
+    })).toThrowError(/credentials/);
+    expect(() => dispatcher.upsertSubscription({
+      url: "https://receiver.example/hooks",
+      secret: "short"
+    })).toThrowError(/16/);
+    expect(() => dispatcher.upsertSubscription({
+      url: "https://receiver.example/hooks",
+      secret: "long-enough-secret",
+      retry_policy: { max_attempts: 0, backoff_ms: -1, timeout_ms: 10 }
+    })).toThrowError(/retry policy/);
+
+    const created = dispatcher.upsertSubscription({
+      url: "https://receiver.example/hooks",
+      secret: "long-enough-secret",
+      events: [
+        "org.loyalty-interchange.member.enrolled.v1",
+        "org.loyalty-interchange.member.enrolled.v1"
+      ],
+      retry_policy: { max_attempts: 2, backoff_ms: 10, timeout_ms: 1000 }
+    });
+    expect(created).not.toHaveProperty("secret");
+    expect(created.events).toHaveLength(1);
+    expect(created.retry_policy?.max_attempts).toBe(2);
+    dispatcher.rotateSecret(created.subscription_id, "replacement-secret");
+    dispatcher.upsertSubscription({
+      subscription_id: created.subscription_id,
+      url: created.url,
+      secret: "replacement-secret",
+      active: false
+    });
+    dispatcher.emit(makeEvent());
+    await dispatcher.flush();
+    expect(captured).toHaveLength(0);
+    expect(dispatcher.removeSubscription("missing")).toBe(false);
+    expect(dispatcher.retryDelivery("missing")).toBe(false);
+    expect(dispatcher.replayDelivery("missing")).toBe(false);
+    expect(() => dispatcher.rotateSecret("missing", "replacement-secret")).toThrowError(/not found/);
+    expect(dispatcher.removeSubscription(created.subscription_id)).toBe(true);
+    expect(persisted.length).toBeGreaterThan(2);
+  });
+
   it("signs deliveries so SDK receivers can verify them", async () => {
     const captured: CapturedRequest[] = [];
     const dispatcher = new WebhookDispatcher({
@@ -148,6 +205,59 @@ describe("WebhookDispatcher", () => {
       })
     ]);
     expect(errors).toHaveLength(1);
+
+    const policyAttempts: CapturedRequest[] = [];
+    const policyDispatcher = new WebhookDispatcher({
+      subscriptions: [{
+        url: "https://receiver.example/policy",
+        secret: "hook-secret",
+        retry_policy: { max_attempts: 2, backoff_ms: 0, timeout_ms: 1000 }
+      }],
+      fetch: capturingFetch(policyAttempts, [500, 500, 200])
+    });
+    policyDispatcher.emit(makeEvent());
+    await policyDispatcher.flush();
+    expect(policyAttempts).toHaveLength(2);
+  });
+
+  it("persists completed delivery history and replays archived events", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "lip-webhook-history-"));
+    const databasePath = join(directory, "reference.db");
+    const captured: CapturedRequest[] = [];
+    try {
+      const firstStore = new SqliteWebhookHistoryStore({
+        path: databasePath,
+        key: "webhook-history"
+      });
+      const first = new WebhookDispatcher({
+        subscriptions: [{ url: "https://receiver.example/hooks", secret: "hook-secret" }],
+        fetch: capturingFetch(captured, [204]),
+        historyStore: firstStore
+      });
+      first.emit(makeEvent());
+      await first.flush();
+      const deliveryId = first.deliveries()[0]!.delivery_id;
+      firstStore.close();
+
+      const secondStore = new SqliteWebhookHistoryStore({
+        path: databasePath,
+        key: "webhook-history"
+      });
+      const second = new WebhookDispatcher({
+        subscriptions: [{ url: "https://receiver.example/hooks", secret: "hook-secret" }],
+        fetch: capturingFetch(captured, [204]),
+        historyStore: secondStore
+      });
+      expect(second.deliveries()).toEqual([
+        expect.objectContaining({ delivery_id: deliveryId, status: "delivered" })
+      ]);
+      expect(second.replayDelivery(deliveryId)).toBe(true);
+      await second.flush();
+      expect(captured).toHaveLength(2);
+      secondStore.close();
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 
   it("respects per-subscription event-type filters", async () => {
@@ -254,13 +364,58 @@ describe("EventedLoyaltyEngine", () => {
       reason: "Birthday bonus",
       qualifies_for_tier: false
     });
+    engine.issueReward({
+      context: makeContext("webhook-issued-reward"),
+      issued_reward_id: "issued-webhook-001",
+      member_id: "member-001",
+      program_id: "demo-foodservice",
+      reward_id: "one-dollar-off"
+    });
+    const issuedReservation = engine.reserve({
+      context: makeContext("webhook-issued-reserve"),
+      redemption_id: "redemption-issued-001",
+      member_id: "member-001",
+      reward_id: "one-dollar-off",
+      issued_reward_id: "issued-webhook-001",
+      order: makeOrder({ order_id: "order-issued-redemption" })
+    });
+    engine.capture({
+      context: makeContext("webhook-issued-capture"),
+      reservation_id: issuedReservation.reservation.reservation_id,
+      order_id: "order-issued-redemption"
+    });
+    engine.reverse({
+      context: makeContext("webhook-issued-reverse"),
+      reservation_id: issuedReservation.reservation.reservation_id,
+      reason: "Order voided"
+    });
+    engine.issueReward({
+      context: makeContext("webhook-issued-cancel"),
+      issued_reward_id: "issued-webhook-002",
+      member_id: "member-001",
+      program_id: "demo-foodservice",
+      reward_id: "one-dollar-off"
+    });
+    engine.cancelIssuedReward({
+      context: makeContext("webhook-cancel-reward"),
+      issued_reward_id: "issued-webhook-002",
+      reason: "Campaign cancelled"
+    });
 
     expect(emitted.map((event) => event.type)).toEqual([
       "org.loyalty-interchange.member.enrolled.v1",
       "org.loyalty-interchange.order.accrued.v1",
       "org.loyalty-interchange.redemption.reserved.v1",
       "org.loyalty-interchange.redemption.captured.v1",
-      "org.loyalty-interchange.balance.changed.v1"
+      "org.loyalty-interchange.balance.changed.v1",
+      "org.loyalty-interchange.issued-reward.issued.v1",
+      "org.loyalty-interchange.redemption.reserved.v1",
+      "org.loyalty-interchange.redemption.captured.v1",
+      "org.loyalty-interchange.issued-reward.redeemed.v1",
+      "org.loyalty-interchange.redemption.reversed.v1",
+      "org.loyalty-interchange.issued-reward.restored.v1",
+      "org.loyalty-interchange.issued-reward.issued.v1",
+      "org.loyalty-interchange.issued-reward.cancelled.v1"
     ]);
     for (const event of emitted) {
       const result = validate(LoyaltyEventSchema, event);
@@ -347,6 +502,35 @@ describe("platform webhook wiring", () => {
     } finally {
       platform.close();
       receiver.close();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("persists runtime subscription CRUD and secret rotation across restart", () => {
+    const directory = mkdtempSync(join(tmpdir(), "lip-webhook-subscriptions-"));
+    const databasePath = join(directory, "reference.db");
+    try {
+      const first = createDemoPlatform({ databasePath, reset: true, seed: false });
+      expect(first.webhooks.listSubscriptions()).toEqual([]);
+      const created = first.webhooks.upsertSubscription({
+        url: "https://receiver.example/hooks",
+        secret: "initial-secret-value"
+      });
+      expect(created).toMatchObject({ active: true, url: "https://receiver.example/hooks" });
+      first.close();
+
+      const second = createDemoPlatform({ databasePath, seed: false });
+      expect(second.webhooks.listSubscriptions()).toEqual([
+        expect.objectContaining({ subscription_id: created.subscription_id })
+      ]);
+      second.webhooks.rotateSecret(created.subscription_id, "rotated-secret-value");
+      expect(second.webhooks.removeSubscription(created.subscription_id)).toBe(true);
+      second.close();
+
+      const third = createDemoPlatform({ databasePath, seed: false });
+      expect(third.webhooks.listSubscriptions()).toEqual([]);
+      third.close();
+    } finally {
       rmSync(directory, { recursive: true, force: true });
     }
   });

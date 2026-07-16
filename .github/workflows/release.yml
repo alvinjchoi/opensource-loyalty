@@ -1,0 +1,43 @@
+name: Publish npm packages
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Build and inspect packages without publishing
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: npm
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+      - run: npm ci
+      - run: npm run verify
+      - run: npm run spec:check
+      - name: Inspect package contents
+        run: npm run test:packages
+      - name: Publish packages in dependency order
+        if: github.event_name == 'release' || inputs.dry_run == false
+        run: |
+          npm publish --workspace @loyalty-interchange/protocol
+          npm publish --workspace @loyalty-interchange/storage
+          npm publish --workspace @loyalty-interchange/reference
+          npm publish --workspace @loyalty-interchange/storage-sqlite
+          npm publish --workspace @loyalty-interchange/server
+          npm publish --workspace @loyalty-interchange/sdk
+          npm publish --workspace @loyalty-interchange/cli
+          npm publish --workspace @loyalty-interchange/mcp

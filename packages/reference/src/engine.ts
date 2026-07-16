@@ -117,6 +117,14 @@ export interface ReferenceAdminMember {
   last_activity_at?: string;
 }
 
+export interface ReferenceMembership {
+  plan_id: string;
+  status: "active" | "lapsed" | "cancelled";
+  valid_from: string;
+  valid_until: string;
+  billing_reference?: string;
+}
+
 export interface ReferenceAdminSnapshot {
   generated_at: string;
   program: ProgramCatalog;
@@ -127,6 +135,11 @@ export interface ReferenceAdminSnapshot {
     points_issued: number;
     points_redeemed: number;
     expiring_points: number;
+    primary_unit: "points" | "visits" | "stamps" | "credits";
+    primary_balance_outstanding: number;
+    primary_balance_issued: number;
+    primary_balance_redeemed: number;
+    expiring_primary_balance: number;
     ledger_entries: number;
   };
   members: ReferenceAdminMember[];
@@ -202,6 +215,15 @@ export function assertCompatibleProgramUpdate(
   if (next.currency !== current.currency) {
     throw new EngineError("invalid_program", "A published program currency cannot be changed", 409);
   }
+  const currentUnit = current.accounts?.find((account) => account.is_primary)?.unit ?? "points";
+  const nextUnit = next.accounts?.find((account) => account.is_primary)?.unit ?? "points";
+  if (nextUnit !== currentUnit) {
+    throw new EngineError(
+      "invalid_program",
+      "A published program primary account unit cannot be changed",
+      409
+    );
+  }
 }
 
 export function retargetProgramState(
@@ -270,6 +292,17 @@ export class LoyaltyEngine {
     // Constructing a temporary engine runs the complete program validator.
     new LoyaltyEngine(program, { clock: this.clock, ids: this.ids });
     assertCompatibleProgramUpdate(this.program, program);
+    const nextRewardIds = new Set(program.rewards.map((reward) => reward.reward_id));
+    const removedActiveReward = [...this.issuedRewards.values()].find((issuedReward) =>
+      issuedReward.status === "issued" && !nextRewardIds.has(issuedReward.reward_id)
+    );
+    if (removedActiveReward) {
+      throw new EngineError(
+        "conflict",
+        `Reward ${removedActiveReward.reward_id} has active issued rewards and cannot be removed`,
+        409
+      );
+    }
     this.program = clone(program);
   }
 
@@ -336,6 +369,16 @@ export class LoyaltyEngine {
     }));
   }
 
+  public setMemberMembership(memberId: string, membership?: ReferenceMembership): Member {
+    const member = this.members.get(memberId);
+    if (!member) throw new EngineError("member_not_found", `Member ${memberId} was not found`, 404);
+    const attributes = clone(member.attributes ?? {});
+    if (membership) attributes["membership"] = clone(membership);
+    else delete attributes["membership"];
+    member.attributes = attributes;
+    return this.memberSnapshot(member);
+  }
+
   public getAccount(request: MemberAccountRequest): MemberAccountResponse {
     this.assertProgramId(request.program_id);
     return this.once("account.get", request.context, request, () => {
@@ -388,15 +431,15 @@ export class LoyaltyEngine {
       const member = this.activeMember(request.member_id);
       this.assertOrder(request.order, member);
       const rewards = this.program.rewards.map((reward) => this.rewardCandidate(reward, request.member_id));
-      const multiplierBps = this.tierMultiplierBps(request.member_id);
+      const multiplierBps = this.earningMultiplierBps(request.member_id);
       return {
         context: this.responseContext(request.context),
         evaluation_id: this.ids("eval"),
         member_id: request.member_id,
         order_id: request.order.order_id,
         estimated_accrual: {
-          unit: "points",
-          amount: this.accrualPoints(request.order, multiplierBps)
+          unit: this.primaryUnit(),
+          amount: this.accrualAmount(request.order, multiplierBps)
         },
         rewards,
         balances: [this.balance(request.member_id)],
@@ -426,14 +469,14 @@ export class LoyaltyEngine {
         return this.ledgerResponse(request.context, existingEntry);
       }
 
-      const multiplierBps = this.tierMultiplierBps(request.member_id);
-      const amount = this.accrualPoints(request.order, multiplierBps);
+      const multiplierBps = this.earningMultiplierBps(request.member_id);
+      const amount = this.accrualAmount(request.order, multiplierBps);
       const entry = this.addLedger({
         member_id: request.member_id,
         operation: "accrual",
         amount,
         order_id: request.order.order_id,
-        ...(amount > 0 && this.program.point_expiration ? {
+        ...(amount > 0 && this.expirationPolicy() ? {
           expires_at: this.pointExpirationIso(),
           create_point_lot: true
         } : {})
@@ -443,6 +486,7 @@ export class LoyaltyEngine {
         fingerprint: businessFingerprint,
         multiplierBps
       });
+      this.issueThresholdRewards(request.member_id, request.context);
       return this.ledgerResponse(request.context, entry);
     });
   }
@@ -586,8 +630,14 @@ export class LoyaltyEngine {
           throw new EngineError("conflict", "Issued reward already has an active reservation");
         }
       }
+      if (!issuedReward && this.membershipUnavailable(reward, request.member_id)) {
+        throw new EngineError(
+          "reward_not_available",
+          `Reward ${reward.reward_id} requires an active membership`
+        );
+      }
       if (!issuedReward && this.balance(request.member_id).available < reward.points_cost) {
-        throw new EngineError("insufficient_balance", "Member does not have enough available points");
+        throw new EngineError("insufficient_balance", "Member does not have enough available balance");
       }
 
       const now = this.isoNow();
@@ -599,7 +649,7 @@ export class LoyaltyEngine {
         ...(issuedReward ? { issued_reward_id: issuedReward.issued_reward_id } : {}),
         order_id: request.order.order_id,
         status: "reserved",
-        cost: { unit: "points", amount: issuedReward ? 0 : reward.points_cost },
+        cost: { unit: this.primaryUnit(), amount: issuedReward ? 0 : reward.points_cost },
         effect: clone(reward.effect),
         funding: this.fundingAllocations(reward),
         created_at: now,
@@ -633,7 +683,7 @@ export class LoyaltyEngine {
 
       const balance = this.balance(reservation.member_id);
       if (balance.amount < reservation.cost.amount) {
-        throw new EngineError("insufficient_balance", "Member no longer has enough points");
+        throw new EngineError("insufficient_balance", "Member no longer has enough balance");
       }
       if (reservation.cost.amount > 0) {
         this.consumePointLots(
@@ -740,8 +790,12 @@ export class LoyaltyEngine {
       }
 
       const originalAccrual = this.accrualsByOrder.get(adjustment.original_order_id);
-      const multiplierBps = originalAccrual?.multiplierBps ?? this.tierMultiplierBps(member.member_id);
-      const amount = this.pointsForSignedSpend(adjustment.eligible_spend_delta.amount, multiplierBps);
+      const multiplierBps = originalAccrual?.multiplierBps ?? this.earningMultiplierBps(member.member_id);
+      const amount = ["points", "credits"].includes(this.primaryUnit())
+        ? this.pointsForSignedSpend(adjustment.eligible_spend_delta.amount, multiplierBps)
+        : ["full_refund", "void"].includes(adjustment.type) && originalAccrual
+          ? -(this.ledger.get(originalAccrual.entryId)?.amount ?? 0)
+          : 0;
       if (amount < 0) this.consumePointLots(request.member_id, -amount);
       const entry = this.addLedger({
         member_id: request.member_id,
@@ -749,7 +803,7 @@ export class LoyaltyEngine {
         amount,
         order_id: adjustment.original_order_id,
         adjustment_id: adjustment.adjustment_id,
-        ...(amount > 0 && this.program.point_expiration ? {
+        ...(amount > 0 && this.expirationPolicy() ? {
           expires_at: this.pointExpirationIso(),
           create_point_lot: true
         } : {})
@@ -801,7 +855,7 @@ export class LoyaltyEngine {
 
       if (request.amount < 0) this.consumePointLots(request.member_id, -request.amount);
       const expiresAt = request.amount > 0
-        ? request.expires_at ?? (this.program.point_expiration ? this.pointExpirationIso() : undefined)
+        ? request.expires_at ?? (this.expirationPolicy() ? this.pointExpirationIso() : undefined)
         : undefined;
       const entry = this.addLedger({
         member_id: request.member_id,
@@ -881,22 +935,29 @@ export class LoyaltyEngine {
       .filter((entry) => entry.operation === "redemption")
       .reduce((sum, entry) => sum + Math.abs(entry.amount), 0);
 
+    const outstanding = members.reduce((sum, { balance }) => sum + balance.amount, 0);
+    const expiring = members.reduce(
+      (sum, member) => sum + member.expiring_balances.reduce(
+        (memberSum, balance) => memberSum + balance.amount,
+        0
+      ),
+      0
+    );
     return {
       generated_at: this.isoNow(),
       program: this.programCatalog(),
       program_configuration: programConfigurationFor(this.program),
       summary: {
         active_members: members.filter(({ member }) => member.status === "active").length,
-        points_outstanding: members.reduce((sum, { balance }) => sum + balance.amount, 0),
+        points_outstanding: outstanding,
         points_issued: pointsIssued,
         points_redeemed: pointsRedeemed,
-        expiring_points: members.reduce(
-          (sum, member) => sum + member.expiring_balances.reduce(
-            (memberSum, balance) => memberSum + balance.amount,
-            0
-          ),
-          0
-        ),
+        expiring_points: expiring,
+        primary_unit: this.primaryUnit(),
+        primary_balance_outstanding: outstanding,
+        primary_balance_issued: pointsIssued,
+        primary_balance_redeemed: pointsRedeemed,
+        expiring_primary_balance: expiring,
         ledger_entries: ledger.length
       },
       members,
@@ -988,7 +1049,7 @@ export class LoyaltyEngine {
     )) {
       throw new EngineError("invalid_program", "Eligible channels must be non-empty and unique", 400);
     }
-    const expiration = program.point_expiration;
+    const expiration = program.point_expiration ?? program.balance_expiration;
     if (expiration && (
       !Number.isInteger(expiration.days) ||
       expiration.days <= 0 ||
@@ -1000,14 +1061,26 @@ export class LoyaltyEngine {
       throw new EngineError("invalid_program", "Point expiration and warnings are invalid", 400);
     }
     const accounts = program.accounts ?? [{ unit: "points", unit_label: "points", is_primary: true }];
+    const primaryUnit = accounts[0]?.unit;
     if (
       accounts.length !== 1 ||
-      accounts[0]?.unit !== "points" ||
+      !primaryUnit ||
+      !["points", "visits", "stamps", "credits"].includes(primaryUnit) ||
       accounts.filter((account) => account.is_primary).length !== 1
     ) {
       throw new EngineError(
         "invalid_program",
-        "The reference engine requires one primary points account",
+        "The reference engine requires one primary points, visits, stamps, or credits account",
+        400
+      );
+    }
+    if (
+      primaryUnit !== "points" &&
+      ((primaryUnit !== "credits" && expiration) || (program.tiers?.length ?? 0) > 0)
+    ) {
+      throw new EngineError(
+        "invalid_program",
+        "Non-points programs do not support tiers; visit/stamp programs do not support expiration",
         400
       );
     }
@@ -1015,10 +1088,10 @@ export class LoyaltyEngine {
     for (const metric of program.metrics ?? []) {
       if (
         metricIds.has(metric.metric_id) ||
-        metric.unit !== "points" ||
+        metric.unit !== primaryUnit ||
         !["current_balance", "lifetime_earned", "qualification_earned"].includes(metric.source)
       ) {
-        throw new EngineError("invalid_program", "Metrics need unique ids and points units", 400);
+        throw new EngineError("invalid_program", "Metrics need unique ids in the primary account unit", 400);
       }
       metricIds.add(metric.metric_id);
     }
@@ -1112,6 +1185,58 @@ export class LoyaltyEngine {
         throw new EngineError("invalid_program", `Reward ${reward.reward_id} availability is inverted`, 400);
       }
     }
+    const visitPolicy = program.visit_stamp_policy;
+    if (primaryUnit === "points" && visitPolicy) {
+      throw new EngineError("invalid_program", "Points programs cannot define visit_stamp_policy", 400);
+    }
+    const walletPolicy = program.wallet_credit_policy;
+    if (primaryUnit === "points" && (walletPolicy || program.balance_expiration)) {
+      throw new EngineError("invalid_program", "Points programs cannot define wallet credit policy", 400);
+    }
+    if (primaryUnit === "credits" && (
+      visitPolicy ||
+      !walletPolicy ||
+      !Number.isInteger(walletPolicy.earn_bps) ||
+      walletPolicy.earn_bps <= 0 ||
+      walletPolicy.earn_bps > 10_000
+    )) {
+      throw new EngineError("invalid_program", "Wallet credit policy is invalid", 400);
+    }
+    if (["visits", "stamps"].includes(primaryUnit) && walletPolicy) {
+      throw new EngineError("invalid_program", "Visit/stamp programs cannot define wallet credit policy", 400);
+    }
+    if (program.membership_policy) {
+      const planIds = new Set<string>();
+      for (const plan of program.membership_policy.plans) {
+        if (
+          !plan.plan_id ||
+          !plan.name ||
+          planIds.has(plan.plan_id) ||
+          (plan.earn_multiplier_bps !== undefined &&
+            (!Number.isInteger(plan.earn_multiplier_bps) || plan.earn_multiplier_bps <= 0))
+        ) {
+          throw new EngineError("invalid_program", "Membership plans are invalid", 400);
+        }
+        planIds.add(plan.plan_id);
+      }
+      if (planIds.size === 0) {
+        throw new EngineError("invalid_program", "Membership policy requires a plan", 400);
+      }
+    }
+    if (["visits", "stamps"].includes(primaryUnit) && (
+      !visitPolicy ||
+      visitPolicy.unit !== primaryUnit ||
+      !Number.isInteger(visitPolicy.amount_per_order) ||
+      visitPolicy.amount_per_order <= 0 ||
+      !Number.isInteger(visitPolicy.threshold) ||
+      visitPolicy.threshold <= 0 ||
+      !rewardIds.has(visitPolicy.issue_reward_id) ||
+      (visitPolicy.issued_reward_ttl_seconds !== undefined &&
+        (!Number.isInteger(visitPolicy.issued_reward_ttl_seconds) ||
+          visitPolicy.issued_reward_ttl_seconds < 60))
+    )) {
+      throw new EngineError("invalid_program", "Visit/stamp policy is invalid", 400);
+    }
   }
 
   private assertProgramId(programId: string): void {
@@ -1151,10 +1276,14 @@ export class LoyaltyEngine {
       currency: this.program.currency,
       earning: {
         rate: {
-          unit: "points",
-          amount: this.program.earn_rate.points,
+          unit: this.primaryUnit(),
+          amount: this.program.visit_stamp_policy?.amount_per_order ??
+            this.program.wallet_credit_policy?.earn_bps ??
+            this.program.earn_rate.points,
           spend: {
-            amount: this.program.earn_rate.spend_minor_units,
+            amount: this.program.wallet_credit_policy
+              ? 10_000
+              : this.program.earn_rate.spend_minor_units,
             currency: this.program.currency
           }
         },
@@ -1185,14 +1314,34 @@ export class LoyaltyEngine {
         name: reward.name ?? reward.reward_id,
         ...(reward.description ? { description: reward.description } : {}),
         ...(reward.image_url ? { image_url: reward.image_url } : {}),
-        cost: { unit: "points", amount: reward.points_cost },
+        cost: { unit: this.primaryUnit(), amount: reward.points_cost },
         effect: clone(reward.effect),
         funding: clone(reward.funding),
         ...(reward.available_from ? { available_from: reward.available_from } : {}),
         ...(reward.available_until ? { available_until: reward.available_until } : {}),
         ...(reward.metadata ? { metadata: clone(reward.metadata) } : {})
       })),
-      ...(this.program.metadata ? { metadata: clone(this.program.metadata) } : {})
+      ...(this.program.metadata || this.program.wallet_credit_policy || this.program.membership_policy
+        ? {
+            metadata: {
+              ...clone(this.program.metadata ?? {}),
+              ...(this.program.wallet_credit_policy
+                ? {
+                    wallet_credit: {
+                      liability_classification:
+                        this.program.wallet_credit_policy.liability_classification,
+                      ...(this.program.balance_expiration
+                        ? { expiration: clone(this.program.balance_expiration) }
+                        : {})
+                    }
+                  }
+                : {}),
+              ...(this.program.membership_policy
+                ? { membership: { plans: clone(this.program.membership_policy.plans) } }
+                : {})
+            }
+          }
+        : {})
     };
   }
 
@@ -1295,6 +1444,37 @@ export class LoyaltyEngine {
       ?.earn_multiplier_bps ?? 10_000;
   }
 
+  private earningMultiplierBps(memberId: string): number {
+    const tier = this.tierMultiplierBps(memberId);
+    const plan = this.activeMembershipPlan(memberId);
+    const membership = plan?.earn_multiplier_bps ?? 10_000;
+    return Math.floor(tier * membership / 10_000);
+  }
+
+  private activeMembershipPlan(memberId: string) {
+    const value = this.members.get(memberId)?.attributes?.["membership"];
+    if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+    const membership = value as Record<string, unknown>;
+    if (
+      membership["status"] !== "active" ||
+      typeof membership["plan_id"] !== "string" ||
+      typeof membership["valid_until"] !== "string" ||
+      Date.parse(membership["valid_until"]) <= this.clock.now().getTime()
+    ) {
+      return undefined;
+    }
+    return this.program.membership_policy?.plans.find((plan) =>
+      plan.plan_id === membership["plan_id"]
+    );
+  }
+
+  private membershipUnavailable(reward: RewardDefinition, memberId: string): boolean {
+    const required = reward.metadata?.["membership_plan_ids"];
+    if (!Array.isArray(required) || required.length === 0) return false;
+    const plan = this.activeMembershipPlan(memberId);
+    return !plan || !required.includes(plan.plan_id);
+  }
+
   private matchesLedgerQuery(entry: LedgerEntry, request: LedgerListRequest): boolean {
     return entry.member_id === request.member_id &&
       entry.program_id === request.program_id &&
@@ -1374,15 +1554,79 @@ export class LoyaltyEngine {
     return true;
   }
 
-  private accrualPoints(order: EvaluationRequest["order"], multiplierBps: number): number {
+  private primaryUnit(): "points" | "visits" | "stamps" | "credits" {
+    return (this.program.accounts?.find((account) => account.is_primary)?.unit ?? "points") as
+      "points" | "visits" | "stamps" | "credits";
+  }
+
+  private accrualAmount(order: EvaluationRequest["order"], multiplierBps: number): number {
     const channels = this.program.earning_policy?.eligible_channels ?? allOrderChannels;
     if (!channels.includes(order.channel)) return 0;
     const spend = this.eligibleSpend(order);
     if (spend < (this.program.earning_policy?.minimum_eligible_spend_minor_units ?? 0)) return 0;
+    if (this.program.visit_stamp_policy) {
+      return this.program.visit_stamp_policy.amount_per_order;
+    }
+    if (this.program.wallet_credit_policy) {
+      return this.pointsForSpend(spend);
+    }
     return this.pointsForSpend(spend, multiplierBps);
   }
 
+  private issueThresholdRewards(memberId: string, context: RequestContext): void {
+    const policy = this.program.visit_stamp_policy;
+    if (!policy) return;
+    const prefix = `stamp-${memberId}-`;
+    let issuedCycles = [...this.issuedRewards.keys()].filter((id) => id.startsWith(prefix)).length;
+    const eligibleCycles = policy.reset_on_issue
+      ? Math.floor(this.balance(memberId).amount / policy.threshold) + issuedCycles
+      : Math.floor(
+          [...this.ledger.values()]
+            .filter((entry) => entry.member_id === memberId && entry.operation === "accrual")
+            .reduce((sum, entry) => sum + Math.max(0, entry.amount), 0) / policy.threshold
+        );
+    while (issuedCycles < eligibleCycles) {
+      issuedCycles += 1;
+      const issuedRewardId = `${prefix}${issuedCycles}`;
+      this.issueReward({
+        context: {
+          ...context,
+          request_id: `${context.request_id}:stamp:${issuedCycles}`,
+          idempotency_key: issuedRewardId
+        },
+        issued_reward_id: issuedRewardId,
+        member_id: memberId,
+        program_id: this.program.program_id,
+        reward_id: policy.issue_reward_id,
+        ...(policy.issued_reward_ttl_seconds
+          ? { expires_at: this.futureIso(policy.issued_reward_ttl_seconds) }
+          : {})
+      });
+      if (policy.reset_on_issue) {
+        this.addLedger({
+          member_id: memberId,
+          operation: "adjustment",
+          amount: -policy.threshold,
+          adjustment_id: `${issuedRewardId}-reset`,
+          reason: "Stamp-card threshold reset",
+          qualifies_for_tier: false
+        });
+      }
+    }
+  }
+
   private pointsForSpend(minorUnits: number, multiplierBps = 10_000): number {
+    if (this.program.wallet_credit_policy) {
+      const amount = Number(
+        BigInt(Math.max(0, minorUnits)) *
+        BigInt(this.program.wallet_credit_policy.earn_bps) /
+        10_000n
+      );
+      if (!Number.isSafeInteger(amount)) {
+        throw new EngineError("invalid_state", "Calculated credit exceeds the safe integer range", 422);
+      }
+      return amount;
+    }
     const numerator = BigInt(Math.max(0, minorUnits)) *
       BigInt(this.program.earn_rate.points) *
       BigInt(multiplierBps);
@@ -1406,12 +1650,13 @@ export class LoyaltyEngine {
     }
     const windowReason = this.rewardWindowReason(reward);
     if (windowReason) reasons.push(windowReason);
+    if (this.membershipUnavailable(reward, memberId)) reasons.push("membership_required");
     return {
       reward_id: reward.reward_id,
       ...(reward.name ? { name: reward.name } : {}),
       status: reasons.length === 0 ? "available" : "unavailable",
       ...(reasons.length > 0 ? { unavailable_reasons: reasons } : {}),
-      cost: { unit: "points", amount: reward.points_cost },
+      cost: { unit: this.primaryUnit(), amount: reward.points_cost },
       effect: clone(reward.effect),
       funding: this.fundingAllocations(reward)
     };
@@ -1489,9 +1734,9 @@ export class LoyaltyEngine {
       entry_id: this.ids("ledger"),
       member_id: input.member_id,
       program_id: this.program.program_id,
-      account_id: `points:${input.member_id}`,
+      account_id: `${this.primaryUnit()}:${input.member_id}`,
       operation: input.operation,
-      unit: "points",
+      unit: this.primaryUnit(),
       amount: input.amount,
       occurred_at: this.isoNow(),
       ...(input.expires_at ? { expires_at: input.expires_at } : {}),
@@ -1526,10 +1771,10 @@ export class LoyaltyEngine {
       .filter((reservation) => reservation.member_id === memberId && reservation.status === "reserved")
       .reduce((sum, reservation) => sum + reservation.cost.amount, 0);
     return {
-      account_id: `points:${memberId}`,
+      account_id: `${this.primaryUnit()}:${memberId}`,
       member_id: memberId,
       program_id: this.program.program_id,
-      unit: "points",
+      unit: this.primaryUnit(),
       amount,
       reserved,
       available: amount - reserved,
@@ -1548,8 +1793,8 @@ export class LoyaltyEngine {
     return [...grouped.entries()]
       .sort(([left], [right]) => left.localeCompare(right))
       .map(([expiresAt, amount]) => ({
-        account_id: `points:${memberId}`,
-        unit: "points",
+        account_id: `${this.primaryUnit()}:${memberId}`,
+        unit: this.primaryUnit(),
         amount,
         expires_at: expiresAt
       }));
@@ -1687,9 +1932,13 @@ export class LoyaltyEngine {
   }
 
   private pointExpirationIso(): string {
-    const days = this.program.point_expiration?.days;
-    if (!days) throw new EngineError("invalid_program", "Point expiration is not configured", 500);
+    const days = this.expirationPolicy()?.days;
+    if (!days) throw new EngineError("invalid_program", "Balance expiration is not configured", 500);
     return new Date(this.clock.now().getTime() + days * 86_400_000).toISOString();
+  }
+
+  private expirationPolicy() {
+    return this.program.point_expiration ?? this.program.balance_expiration;
   }
 
   private once<T>(

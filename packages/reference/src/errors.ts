@@ -8,6 +8,7 @@ export type EngineErrorCode =
   | "invalid_cursor"
   | "invalid_program"
   | "invalid_state"
+  | "validation_failed"
   | "member_not_found"
   | "member_not_active"
   | "not_found"

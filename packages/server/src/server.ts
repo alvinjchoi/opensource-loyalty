@@ -30,8 +30,10 @@ import {
   type LoyaltyEngine,
   type LoyaltyEngineState
 } from "@loyalty-interchange/reference";
-import type { WebhookAdminStatus } from "./webhooks.js";
+import type { WebhookAdminStatus, WebhookDispatcher, WebhookSubscription } from "./webhooks.js";
 import type { ProgramManagementService } from "./program-management.js";
+import type { CampaignService } from "./campaigns.js";
+import type { MembershipService } from "./memberships.js";
 
 const MAX_BODY_BYTES = 1_048_576;
 const DEFAULT_LOCAL_API_KEY = "lip-dev-key";
@@ -75,7 +77,10 @@ export interface ServerOptions {
       persistent: boolean;
     };
     webhooks?: () => WebhookAdminStatus;
+    webhookManager?: WebhookDispatcher;
     programs?: ProgramManagementService;
+    campaigns?: CampaignService;
+    memberships?: MembershipService;
   };
 }
 
@@ -102,7 +107,7 @@ interface AdminStorageDescriptor {
 }
 
 interface AdminBootstrapDocument {
-  admin_api_version: "0.2";
+  admin_api_version: "0.3";
   generated_at: string;
   status: true;
   auth: {
@@ -165,7 +170,7 @@ function adminBootstrapDocument(
 ): AdminBootstrapDocument {
   const usesDefaultLocalKey = options.apiKey === DEFAULT_LOCAL_API_KEY;
   return {
-    admin_api_version: "0.2",
+    admin_api_version: "0.3",
     generated_at: new Date().toISOString(),
     status: true,
     auth: {
@@ -566,6 +571,26 @@ export function createReferenceServer(engine: LoyaltyEngine, options: ServerOpti
       allowedMethods.set("/admin/api/v1/program/draft/validate", ["POST"]);
       allowedMethods.set("/admin/api/v1/program/publish", ["POST"]);
       allowedMethods.set("/admin/api/v1/program/rollback", ["POST"]);
+      allowedMethods.set("/admin/api/v1/program/rewards", ["PUT"]);
+      allowedMethods.set("/admin/api/v1/program/rewards/delete", ["POST"]);
+    }
+    if (options.admin?.webhookManager) {
+      allowedMethods.set("/admin/api/v1/webhooks/subscription", ["PUT"]);
+      allowedMethods.set("/admin/api/v1/webhooks/subscription/delete", ["POST"]);
+      allowedMethods.set("/admin/api/v1/webhooks/subscription/rotate-secret", ["POST"]);
+      allowedMethods.set("/admin/api/v1/webhooks/deliveries/retry", ["POST"]);
+      allowedMethods.set("/admin/api/v1/webhooks/deliveries/replay", ["POST"]);
+    }
+    if (options.admin?.campaigns) {
+      allowedMethods.set("/admin/api/v1/segments", ["PUT"]);
+      allowedMethods.set("/admin/api/v1/segments/delete", ["POST"]);
+      allowedMethods.set("/admin/api/v1/campaigns", ["PUT"]);
+      allowedMethods.set("/admin/api/v1/campaigns/delete", ["POST"]);
+      allowedMethods.set("/admin/api/v1/campaigns/run", ["POST"]);
+    }
+    if (options.admin?.memberships) {
+      allowedMethods.set("/admin/api/v1/memberships/grant", ["POST"]);
+      allowedMethods.set("/admin/api/v1/memberships/status", ["POST"]);
     }
   }
 
@@ -722,23 +747,276 @@ export function createReferenceServer(engine: LoyaltyEngine, options: ServerOpti
         const snapshot = engine.inspectAdmin();
         options.persistState?.(engine.exportState());
         sendJson(response, 200, {
-          admin_api_version: "0.2",
+          admin_api_version: "0.3",
           platform: {
             protocol_version: "1.0",
             profile: "foodservice/1.0",
             storage: adminStorage(options)
           },
-          webhooks: options.admin?.webhooks?.() ?? {
+          webhooks: options.admin?.webhookManager?.adminStatus() ?? options.admin?.webhooks?.() ?? {
             enabled: false,
+            subscriptions: [],
             pending: [],
             recent: []
           },
           ...(options.admin?.programs
             ? { program_management: options.admin.programs.snapshot() }
             : {}),
+          campaigns: options.admin?.campaigns?.snapshot() ?? {
+            segments: [],
+            campaigns: [],
+            runs: []
+          },
+          memberships: options.admin?.memberships?.snapshot() ?? {
+            memberships: [],
+            audit: []
+          },
           ...snapshot
         });
         return;
+      }
+
+      const memberships = options.admin?.memberships;
+      if (
+        adminEnabled &&
+        memberships &&
+        ["/admin/api/v1/memberships/grant", "/admin/api/v1/memberships/status"].includes(path) &&
+        method === "POST"
+      ) {
+        if (!isAdminAuthorized(request, options.apiKey, adminSessions)) {
+          sendJson(response, 401, problem(401, "Unauthorized", "unauthorized"), "application/problem+json");
+          return;
+        }
+        if (!isAdminWriteAuthorized(request, options.apiKey, adminSessions)) {
+          sendJson(
+            response,
+            403,
+            problem(403, "Forbidden", "csrf_failed", "Admin writes require a valid CSRF token"),
+            "application/problem+json"
+          );
+          return;
+        }
+        const body = await readBody(request);
+        const values = body && typeof body === "object" && !Array.isArray(body)
+          ? body as Record<string, unknown>
+          : {};
+        const actor = adminActor(request, options.apiKey);
+        if (path === "/admin/api/v1/memberships/grant") {
+          if (
+            typeof values["member_id"] !== "string" ||
+            typeof values["plan_id"] !== "string" ||
+            typeof values["valid_until"] !== "string"
+          ) {
+            throw new TransportError(422, "validation_failed", "Request validation failed", "member_id, plan_id, and valid_until are required");
+          }
+          sendJson(response, 200, memberships.grant({
+            member_id: values["member_id"],
+            plan_id: values["plan_id"],
+            valid_until: values["valid_until"],
+            ...(typeof values["valid_from"] === "string"
+              ? { valid_from: values["valid_from"] }
+              : {}),
+            ...(typeof values["billing_reference"] === "string"
+              ? { billing_reference: values["billing_reference"] }
+              : {})
+          }, actor));
+          return;
+        }
+        if (
+          typeof values["member_id"] !== "string" ||
+          !["lapsed", "cancelled"].includes(String(values["status"]))
+        ) {
+          throw new TransportError(422, "validation_failed", "Request validation failed", "member_id and a lapsed/cancelled status are required");
+        }
+        sendJson(
+          response,
+          200,
+          memberships.changeStatus(
+            values["member_id"],
+            values["status"] as "lapsed" | "cancelled",
+            actor
+          )
+        );
+        return;
+      }
+
+      const campaigns = options.admin?.campaigns;
+      if (
+        adminEnabled &&
+        campaigns &&
+        ["/admin/api/v1/segments", "/admin/api/v1/segments/delete",
+          "/admin/api/v1/campaigns", "/admin/api/v1/campaigns/delete",
+          "/admin/api/v1/campaigns/run"].includes(path) &&
+        ["PUT", "POST"].includes(method)
+      ) {
+        if (!isAdminAuthorized(request, options.apiKey, adminSessions)) {
+          sendJson(response, 401, problem(401, "Unauthorized", "unauthorized"), "application/problem+json");
+          return;
+        }
+        if (!isAdminWriteAuthorized(request, options.apiKey, adminSessions)) {
+          sendJson(
+            response,
+            403,
+            problem(403, "Forbidden", "csrf_failed", "Admin writes require a valid CSRF token"),
+            "application/problem+json"
+          );
+          return;
+        }
+        const body = await readBody(request);
+        const values = body && typeof body === "object" && !Array.isArray(body)
+          ? body as Record<string, unknown>
+          : {};
+        if (method === "PUT" && path === "/admin/api/v1/segments") {
+          if (typeof values["name"] !== "string") {
+            throw new TransportError(422, "validation_failed", "Request validation failed", "name is required");
+          }
+          sendJson(response, 200, campaigns.upsertSegment({
+            ...(typeof values["segment_id"] === "string"
+              ? { segment_id: values["segment_id"] }
+              : {}),
+            name: values["name"],
+            ...(Array.isArray(values["member_ids"])
+              ? {
+                  member_ids: values["member_ids"].filter((value): value is string =>
+                    typeof value === "string"
+                  )
+                }
+              : {}),
+            ...(values["rules"] && typeof values["rules"] === "object"
+              ? { rules: values["rules"] as never }
+              : {})
+          }));
+          return;
+        }
+        if (method === "POST" && path === "/admin/api/v1/segments/delete") {
+          if (typeof values["segment_id"] !== "string") {
+            throw new TransportError(422, "validation_failed", "Request validation failed", "segment_id is required");
+          }
+          campaigns.deleteSegment(values["segment_id"]);
+          sendJson(response, 200, { deleted: true });
+          return;
+        }
+        if (method === "PUT" && path === "/admin/api/v1/campaigns") {
+          if (
+            typeof values["name"] !== "string" ||
+            typeof values["reward_id"] !== "string" ||
+            typeof values["segment_id"] !== "string"
+          ) {
+            throw new TransportError(422, "validation_failed", "Request validation failed", "name, reward_id, and segment_id are required");
+          }
+          sendJson(response, 200, campaigns.upsertCampaign({
+            ...(typeof values["campaign_id"] === "string"
+              ? { campaign_id: values["campaign_id"] }
+              : {}),
+            name: values["name"],
+            reward_id: values["reward_id"],
+            segment_id: values["segment_id"],
+            ...(typeof values["issued_reward_ttl_seconds"] === "number"
+              ? { issued_reward_ttl_seconds: values["issued_reward_ttl_seconds"] }
+              : {}),
+            ...(typeof values["starts_at"] === "string" ? { starts_at: values["starts_at"] } : {}),
+            ...(typeof values["ends_at"] === "string" ? { ends_at: values["ends_at"] } : {})
+          }));
+          return;
+        }
+        if (method === "POST" && path === "/admin/api/v1/campaigns/delete") {
+          if (typeof values["campaign_id"] !== "string") {
+            throw new TransportError(422, "validation_failed", "Request validation failed", "campaign_id is required");
+          }
+          campaigns.deleteCampaign(values["campaign_id"]);
+          sendJson(response, 200, { deleted: true });
+          return;
+        }
+        if (method === "POST" && path === "/admin/api/v1/campaigns/run") {
+          if (typeof values["campaign_id"] !== "string") {
+            throw new TransportError(422, "validation_failed", "Request validation failed", "campaign_id is required");
+          }
+          sendJson(
+            response,
+            200,
+            campaigns.runCampaign(values["campaign_id"], adminActor(request, options.apiKey))
+          );
+          return;
+        }
+      }
+
+      const webhookManager = options.admin?.webhookManager;
+      if (
+        adminEnabled &&
+        webhookManager &&
+        path.startsWith("/admin/api/v1/webhooks/") &&
+        ["PUT", "POST"].includes(method)
+      ) {
+        if (!isAdminAuthorized(request, options.apiKey, adminSessions)) {
+          sendJson(response, 401, problem(401, "Unauthorized", "unauthorized"), "application/problem+json");
+          return;
+        }
+        if (!isAdminWriteAuthorized(request, options.apiKey, adminSessions)) {
+          sendJson(
+            response,
+            403,
+            problem(403, "Forbidden", "csrf_failed", "Admin writes require a valid CSRF token"),
+            "application/problem+json"
+          );
+          return;
+        }
+        const body = await readBody(request);
+        const values = body && typeof body === "object" && !Array.isArray(body)
+          ? body as Record<string, unknown>
+          : {};
+        if (method === "PUT" && path === "/admin/api/v1/webhooks/subscription") {
+          if (typeof values["url"] !== "string" || typeof values["secret"] !== "string") {
+            throw new TransportError(422, "validation_failed", "Request validation failed", "url and secret are required");
+          }
+          const subscription: WebhookSubscription = {
+            url: values["url"],
+            secret: values["secret"],
+            ...(typeof values["subscription_id"] === "string"
+              ? { subscription_id: values["subscription_id"] }
+              : {}),
+            ...(typeof values["active"] === "boolean" ? { active: values["active"] } : {}),
+            ...(Array.isArray(values["events"]) ? { events: values["events"] as never[] } : {}),
+            ...(values["retry_policy"] && typeof values["retry_policy"] === "object"
+              ? { retry_policy: values["retry_policy"] as never }
+              : {})
+          };
+          sendJson(response, 200, webhookManager.upsertSubscription(subscription));
+          return;
+        }
+        if (method === "POST" && path === "/admin/api/v1/webhooks/subscription/delete") {
+          const id = values["subscription_id"];
+          if (typeof id !== "string" || !webhookManager.removeSubscription(id)) {
+            throw new TransportError(404, "not_found", "Not Found", "Webhook subscription was not found");
+          }
+          sendJson(response, 200, { deleted: true });
+          return;
+        }
+        if (method === "POST" && path === "/admin/api/v1/webhooks/subscription/rotate-secret") {
+          const id = values["subscription_id"];
+          const secret = values["secret"];
+          if (typeof id !== "string" || typeof secret !== "string") {
+            throw new TransportError(422, "validation_failed", "Request validation failed", "subscription_id and secret are required");
+          }
+          webhookManager.rotateSecret(id, secret);
+          sendJson(response, 200, { rotated: true });
+          return;
+        }
+        if (method === "POST" && path === "/admin/api/v1/webhooks/deliveries/retry") {
+          const id = values["delivery_id"];
+          if (typeof id !== "string" || !webhookManager.retryDelivery(id)) {
+            throw new TransportError(404, "not_found", "Not Found", "Pending webhook delivery was not found");
+          }
+          sendJson(response, 202, { queued: true });
+          return;
+        }
+        if (method === "POST" && path === "/admin/api/v1/webhooks/deliveries/replay") {
+          const id = values["delivery_id"];
+          if (typeof id !== "string" || !webhookManager.replayDelivery(id)) {
+            throw new TransportError(404, "not_found", "Not Found", "Completed webhook delivery was not found");
+          }
+          sendJson(response, 202, { queued: true });
+          return;
+        }
       }
 
       const programManagement = options.admin?.programs;
@@ -777,6 +1055,22 @@ export function createReferenceServer(engine: LoyaltyEngine, options: ServerOpti
         }
         if (method === "POST" && path === "/admin/api/v1/program/draft/validate") {
           sendJson(response, 200, programManagement.validateDraft());
+          return;
+        }
+        if (method === "PUT" && path === "/admin/api/v1/program/rewards") {
+          sendJson(response, 200, programManagement.upsertReward(values["reward"], actor));
+          return;
+        }
+        if (method === "POST" && path === "/admin/api/v1/program/rewards/delete") {
+          if (typeof values["reward_id"] !== "string") {
+            throw new TransportError(
+              422,
+              "validation_failed",
+              "Request validation failed",
+              "reward_id is required"
+            );
+          }
+          sendJson(response, 200, programManagement.deleteReward(values["reward_id"], actor));
           return;
         }
         if (method === "POST" && path === "/admin/api/v1/program/publish") {

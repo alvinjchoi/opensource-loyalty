@@ -1,14 +1,27 @@
-import { createHash, createHmac } from "node:crypto";
+import { createHash, createHmac, randomUUID } from "node:crypto";
 import type { LoyaltyEvent, LoyaltyEventType } from "@loyalty-interchange/protocol";
 
 export interface WebhookSubscription {
+  subscription_id?: string;
   url: string;
   secret: string;
   /** Optional allowlist of event types. All events are delivered when omitted. */
   events?: readonly LoyaltyEventType[];
+  active?: boolean;
+  retry_policy?: {
+    max_attempts: number;
+    backoff_ms: number;
+    timeout_ms: number;
+  };
+}
+
+export interface ManagedWebhookSubscription extends WebhookSubscription {
+  subscription_id: string;
+  active: boolean;
 }
 
 export interface WebhookDeliveryRecord {
+  delivery_id: string;
   event_id: string;
   event_type: LoyaltyEventType;
   url: string;
@@ -16,6 +29,15 @@ export interface WebhookDeliveryRecord {
   status: "delivered" | "failed";
   completed_at: string;
   last_error?: string;
+}
+
+export interface WebhookDeliveryArchiveEntry extends WebhookDeliveryRecord {
+  event: LoyaltyEvent;
+}
+
+export interface WebhookHistoryStore {
+  list(): WebhookDeliveryArchiveEntry[];
+  save(entries: readonly WebhookDeliveryArchiveEntry[]): void;
 }
 
 export interface WebhookOutboxEntry {
@@ -34,8 +56,17 @@ export interface WebhookOutboxStore {
   remove(deliveryId: string): void;
 }
 
+export interface WebhookSubscriptionSummary {
+  subscription_id: string;
+  url: string;
+  active: boolean;
+  events?: readonly LoyaltyEventType[];
+  retry_policy?: WebhookSubscription["retry_policy"];
+}
+
 export interface WebhookAdminStatus {
   enabled: boolean;
+  subscriptions?: WebhookSubscriptionSummary[];
   pending: Array<{
     delivery_id: string;
     event_id: string;
@@ -62,11 +93,13 @@ export interface WebhookDispatcherOptions {
   fetch?: typeof globalThis.fetch;
   now?: () => Date;
   onError?: (message: string) => void;
+  onSubscriptionsChanged?: (subscriptions: readonly ManagedWebhookSubscription[]) => void;
   /**
    * Durable storage for pending deliveries. Failed deliveries remain in the
    * outbox and are retried when `resumePending()` is called after restart.
    */
   outbox?: WebhookOutboxStore;
+  historyStore?: WebhookHistoryStore;
 }
 
 /**
@@ -111,7 +144,7 @@ class MemoryWebhookOutbox implements WebhookOutboxStore {
  * `flush()` to await the current retry cycle (for tests and graceful shutdown).
  */
 export class WebhookDispatcher {
-  private readonly subscriptions: readonly WebhookSubscription[];
+  private subscriptions: ManagedWebhookSubscription[];
   private readonly maxAttempts: number;
   private readonly backoffMs: number;
   private readonly timeoutMs: number;
@@ -119,13 +152,23 @@ export class WebhookDispatcher {
   private readonly fetchImpl: typeof globalThis.fetch;
   private readonly now: () => Date;
   private readonly onError: ((message: string) => void) | undefined;
+  private readonly onSubscriptionsChanged:
+    ((subscriptions: readonly ManagedWebhookSubscription[]) => void) | undefined;
   private readonly outbox: WebhookOutboxStore;
+  private readonly historyStore: WebhookHistoryStore | undefined;
   private readonly queued = new Map<string, WebhookOutboxEntry>();
-  private readonly history: WebhookDeliveryRecord[] = [];
+  private readonly history: WebhookDeliveryArchiveEntry[] = [];
   private readonly pending = new Map<string, Promise<void>>();
 
   public constructor(options: WebhookDispatcherOptions) {
-    this.subscriptions = [...options.subscriptions];
+    this.subscriptions = options.subscriptions.map((subscription) => ({
+      ...subscription,
+      subscription_id: subscription.subscription_id ?? `webhook_${deliveryId({
+        source: "subscription",
+        id: subscription.url
+      } as LoyaltyEvent, subscription.url).slice(0, 20)}`,
+      active: subscription.active ?? true
+    }));
     this.maxAttempts = options.maxAttempts ?? 3;
     this.backoffMs = options.backoffMs ?? 250;
     this.timeoutMs = options.timeoutMs ?? 5000;
@@ -133,14 +176,19 @@ export class WebhookDispatcher {
     this.fetchImpl = options.fetch ?? globalThis.fetch;
     this.now = options.now ?? (() => new Date());
     this.onError = options.onError;
+    this.onSubscriptionsChanged = options.onSubscriptionsChanged;
     this.outbox = options.outbox ?? new MemoryWebhookOutbox();
+    this.historyStore = options.historyStore;
+    this.history.push(...(this.historyStore?.list() ?? []).slice(-this.historyLimit));
     for (const entry of this.outbox.list()) {
       this.queued.set(entry.delivery_id, entry);
     }
+    this.persistSubscriptions();
   }
 
   public emit(event: LoyaltyEvent): void {
     for (const subscription of this.subscriptions) {
+      if (!subscription.active) continue;
       if (subscription.events && !subscription.events.includes(event.type)) continue;
       const id = deliveryId(event, subscription.url);
       const existing = this.queued.get(id);
@@ -165,7 +213,9 @@ export class WebhookDispatcher {
    */
   public resumePending(): void {
     for (const entry of this.queued.values()) {
-      const subscription = this.subscriptions.find((candidate) => candidate.url === entry.url);
+      const subscription = this.subscriptions.find((candidate) =>
+        candidate.url === entry.url && candidate.active
+      );
       if (!subscription) {
         this.onError?.(`webhook delivery ${entry.delivery_id} has no configured subscription for ${entry.url}`);
         continue;
@@ -192,7 +242,8 @@ export class WebhookDispatcher {
 
   public adminStatus(): WebhookAdminStatus {
     return {
-      enabled: this.subscriptions.length > 0,
+      enabled: this.subscriptions.some((subscription) => subscription.active),
+      subscriptions: this.listSubscriptions(),
       pending: [...this.queued.values()].map((entry) => ({
         delivery_id: entry.delivery_id,
         event_id: entry.event.id,
@@ -209,14 +260,128 @@ export class WebhookDispatcher {
 
   /** Completed delivery records, oldest first. */
   public deliveries(): WebhookDeliveryRecord[] {
-    return [...this.history];
+    return this.history.map(({ event: _event, ...record }) => structuredClone(record));
   }
 
-  private record(record: WebhookDeliveryRecord): void {
+  public listSubscriptions(): WebhookSubscriptionSummary[] {
+    return this.subscriptions.map(({ secret: _secret, ...subscription }) => ({
+      subscription_id: subscription.subscription_id,
+      url: subscription.url,
+      active: subscription.active,
+      ...(subscription.events ? { events: [...subscription.events] } : {}),
+      ...(subscription.retry_policy
+        ? { retry_policy: structuredClone(subscription.retry_policy) }
+        : {})
+    }));
+  }
+
+  public upsertSubscription(input: WebhookSubscription): WebhookSubscriptionSummary {
+    const parsed = new URL(input.url);
+    if (!["http:", "https:"].includes(parsed.protocol) || parsed.username || parsed.password) {
+      throw new Error("Webhook URL must be an HTTP(S) URL without embedded credentials");
+    }
+    if (input.secret.length < 16) throw new Error("Webhook secret must contain at least 16 characters");
+    const subscription: ManagedWebhookSubscription = {
+      subscription_id: input.subscription_id ?? `webhook_${randomUUID()}`,
+      url: parsed.toString(),
+      secret: input.secret,
+      active: input.active ?? true,
+      ...(input.events ? { events: [...new Set(input.events)] } : {}),
+      ...(input.retry_policy ? { retry_policy: structuredClone(input.retry_policy) } : {})
+    };
+    if (
+      subscription.retry_policy &&
+      (!Number.isInteger(subscription.retry_policy.max_attempts) ||
+        subscription.retry_policy.max_attempts < 1 ||
+        subscription.retry_policy.max_attempts > 10 ||
+        !Number.isInteger(subscription.retry_policy.backoff_ms) ||
+        subscription.retry_policy.backoff_ms < 0 ||
+        !Number.isInteger(subscription.retry_policy.timeout_ms) ||
+        subscription.retry_policy.timeout_ms < 100)
+    ) {
+      throw new Error("Webhook retry policy is invalid");
+    }
+    const index = this.subscriptions.findIndex((candidate) =>
+      candidate.subscription_id === subscription.subscription_id
+    );
+    if (index >= 0) this.subscriptions[index] = subscription;
+    else this.subscriptions.push(subscription);
+    this.persistSubscriptions();
+    return this.listSubscriptions().find((candidate) =>
+      candidate.subscription_id === subscription.subscription_id
+    )!;
+  }
+
+  public removeSubscription(subscriptionId: string): boolean {
+    const subscription = this.subscriptions.find((candidate) =>
+      candidate.subscription_id === subscriptionId
+    );
+    if (!subscription) return false;
+    this.subscriptions = this.subscriptions.filter((candidate) =>
+      candidate.subscription_id !== subscriptionId
+    );
+    for (const entry of this.queued.values()) {
+      if (entry.url !== subscription.url) continue;
+      this.queued.delete(entry.delivery_id);
+      this.outbox.remove(entry.delivery_id);
+    }
+    this.persistSubscriptions();
+    return true;
+  }
+
+  public rotateSecret(subscriptionId: string, secret: string): void {
+    const subscription = this.subscriptions.find((candidate) =>
+      candidate.subscription_id === subscriptionId
+    );
+    if (!subscription) throw new Error("Webhook subscription was not found");
+    this.upsertSubscription({ ...subscription, secret });
+  }
+
+  public retryDelivery(deliveryIdValue: string): boolean {
+    const entry = this.queued.get(deliveryIdValue);
+    if (!entry) return false;
+    const subscription = this.subscriptions.find((candidate) =>
+      candidate.url === entry.url && candidate.active
+    );
+    if (!subscription) return false;
+    this.schedule(entry, subscription);
+    return true;
+  }
+
+  public replayDelivery(deliveryIdValue: string): boolean {
+    const archived = [...this.history].reverse().find((entry) =>
+      entry.delivery_id === deliveryIdValue
+    );
+    if (!archived) return false;
+    const subscription = this.subscriptions.find((candidate) =>
+      candidate.url === archived.url && candidate.active
+    );
+    if (!subscription) return false;
+    const timestamp = this.now().toISOString();
+    const entry: WebhookOutboxEntry = {
+      delivery_id: deliveryId(archived.event, archived.url),
+      event: structuredClone(archived.event),
+      url: archived.url,
+      attempts: 0,
+      created_at: timestamp,
+      updated_at: timestamp
+    };
+    this.queued.set(entry.delivery_id, entry);
+    this.outbox.put(entry);
+    this.schedule(entry, subscription);
+    return true;
+  }
+
+  private record(record: WebhookDeliveryArchiveEntry): void {
     this.history.push(record);
     if (this.history.length > this.historyLimit) {
       this.history.splice(0, this.history.length - this.historyLimit);
     }
+    this.historyStore?.save(this.history);
+  }
+
+  private persistSubscriptions(): void {
+    this.onSubscriptionsChanged?.(structuredClone(this.subscriptions));
   }
 
   private schedule(entry: WebhookOutboxEntry, subscription: WebhookSubscription): void {
@@ -233,9 +398,12 @@ export class WebhookDispatcher {
     entry: WebhookOutboxEntry
   ): Promise<void> {
     const body = JSON.stringify(entry.event);
+    const maxAttempts = subscription.retry_policy?.max_attempts ?? this.maxAttempts;
+    const backoffMs = subscription.retry_policy?.backoff_ms ?? this.backoffMs;
+    const timeoutMs = subscription.retry_policy?.timeout_ms ?? this.timeoutMs;
     let lastError = "delivery was not attempted";
-    for (let cycleAttempt = 1; cycleAttempt <= this.maxAttempts; cycleAttempt += 1) {
-      if (cycleAttempt > 1) await sleep(this.backoffMs * 2 ** (cycleAttempt - 2));
+    for (let cycleAttempt = 1; cycleAttempt <= maxAttempts; cycleAttempt += 1) {
+      if (cycleAttempt > 1) await sleep(backoffMs * 2 ** (cycleAttempt - 2));
       entry.attempts += 1;
       entry.updated_at = this.now().toISOString();
       delete entry.last_error;
@@ -250,12 +418,14 @@ export class WebhookDispatcher {
             "lip-webhook-signature": signWebhookPayload(subscription.secret, timestamp, body)
           },
           body,
-          signal: AbortSignal.timeout(this.timeoutMs)
+          signal: AbortSignal.timeout(timeoutMs)
         });
         if (response.ok) {
           this.queued.delete(entry.delivery_id);
           this.outbox.remove(entry.delivery_id);
           this.record({
+            delivery_id: entry.delivery_id,
+            event: structuredClone(entry.event),
             event_id: entry.event.id,
             event_type: entry.event.type,
             url: subscription.url,
@@ -274,6 +444,8 @@ export class WebhookDispatcher {
       this.outbox.put(entry);
     }
     this.record({
+      delivery_id: entry.delivery_id,
+      event: structuredClone(entry.event),
       event_id: entry.event.id,
       event_type: entry.event.type,
       url: subscription.url,
@@ -283,7 +455,7 @@ export class WebhookDispatcher {
       last_error: lastError
     });
     this.onError?.(
-      `webhook delivery to ${subscription.url} failed after ${this.maxAttempts} attempts: ${lastError}`
+      `webhook delivery to ${subscription.url} failed after ${maxAttempts} attempts: ${lastError}`
     );
   }
 }

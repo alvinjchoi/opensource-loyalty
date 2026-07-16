@@ -3,7 +3,14 @@
   "version": "0.1.0",
   "description": "Model Context Protocol server for Loyalty Interchange Protocol docs and validation.",
   "license": "Apache-2.0",
+  "repository": { "type": "git", "url": "git+https://github.com/alvinjchoi/opensource-loyalty.git", "directory": "packages/mcp" },
+  "homepage": "https://github.com/alvinjchoi/opensource-loyalty#readme",
+  "bugs": { "url": "https://github.com/alvinjchoi/opensource-loyalty/issues" },
+  "engines": { "node": ">=22" },
+  "publishConfig": { "access": "public", "provenance": true },
   "type": "module",
+  "main": "./dist/server.js",
+  "types": "./dist/server.d.ts",
   "exports": {
     ".": {
       "types": "./dist/server.d.ts",
@@ -21,9 +28,9 @@
   "bin": {
     "lip-mcp": "./dist/server.js"
   },
-  "files": ["dist"],
+  "files": ["dist", "assets"],
   "scripts": {
-    "build": "tsc -b",
+    "build": "node ../../scripts/build-mcp-assets.mjs && tsc -b",
     "prepack": "npm run build"
   },
   "dependencies": {

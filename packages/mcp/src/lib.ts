@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -5,7 +6,10 @@ import { schemaRegistry, validate } from "@loyalty-interchange/protocol";
 import { parse as parseYaml } from "yaml";
 
 const PACKAGE_DIR = dirname(fileURLToPath(import.meta.url));
-export const REPO_ROOT = resolve(PACKAGE_DIR, "../../..");
+const BUNDLED_ASSET_ROOT = resolve(PACKAGE_DIR, "../assets");
+export const REPO_ROOT = existsSync(resolve(BUNDLED_ASSET_ROOT, "llms.txt"))
+  ? BUNDLED_ASSET_ROOT
+  : resolve(PACKAGE_DIR, "../../..");
 
 const ALLOWED_READ_PREFIXES = [
   "docs/",

@@ -40,7 +40,8 @@ import type {
   LedgerEntry,
   LedgerOperation,
   ProgramModelId,
-  ProgramModelStatus
+  ProgramModelStatus,
+  RewardDefinition
 } from "./types.js";
 
 type View = "overview" | "members" | "ledger" | "program" | "developer";
@@ -235,7 +236,7 @@ function LedgerTable({ entries, members, limit }: {
   return (
     <div className="table-scroll">
       <table className="ledger-table">
-        <thead><tr><th>Operation</th><th>Member</th><th className="reference-column">Reference</th><th className="date-column">Date</th><th className="numeric">Points</th></tr></thead>
+        <thead><tr><th>Operation</th><th>Member</th><th className="reference-column">Reference</th><th className="date-column">Date</th><th className="numeric">Amount</th></tr></thead>
         <tbody>
           {visible.map((entry) => (
             <tr key={entry.entry_id}>
@@ -246,7 +247,7 @@ function LedgerTable({ entries, members, limit }: {
               </td>
               <td className="reference-column"><code>{entry.order_id ?? entry.adjustment_id ?? entry.reservation_id ?? entry.related_entry_id ?? entry.entry_id}</code></td>
               <td className="date-column">{formatDate(entry.occurred_at, true)}</td>
-              <td className={`numeric amount ${entry.amount >= 0 ? "positive" : "negative"}`}>{entry.amount >= 0 ? "+" : ""}{formatNumber(entry.amount)}</td>
+              <td className={`numeric amount ${entry.amount >= 0 ? "positive" : "negative"}`}>{entry.amount >= 0 ? "+" : ""}{formatNumber(entry.amount)} {entry.unit ?? ""}</td>
             </tr>
           ))}
         </tbody>
@@ -256,6 +257,7 @@ function LedgerTable({ entries, members, limit }: {
 }
 
 function Overview({ snapshot, onViewMembers }: { snapshot: AdminSnapshot; onViewMembers: () => void }) {
+  const unit = snapshot.program.earning.rate.unit;
   const tiers = snapshot.program.tiers.map((tier) => ({
     ...tier,
     count: snapshot.members.filter((member) => member.member.tier_id === tier.tier_id).length
@@ -266,9 +268,9 @@ function Overview({ snapshot, onViewMembers }: { snapshot: AdminSnapshot; onView
       <div className="page-heading"><div><p className="eyebrow">Dashboard</p><h2>Loyalty overview</h2></div></div>
       <section className="stats-grid" aria-label="Program totals">
         <Stat label="Active members" value={formatNumber(snapshot.summary.active_members)} detail="Enrolled accounts" icon={Users} />
-        <Stat label="Outstanding" value={formatNumber(snapshot.summary.points_outstanding)} detail="Posted points" icon={WalletCards} />
-        <Stat label="Issued" value={formatNumber(snapshot.summary.points_issued)} detail="Positive ledger value" icon={Activity} />
-        <Stat label="Redeemed" value={formatNumber(snapshot.summary.points_redeemed)} detail={`${formatNumber(snapshot.summary.expiring_points)} still expiring`} icon={Gift} />
+        <Stat label="Outstanding" value={formatNumber(snapshot.summary.primary_balance_outstanding)} detail={`Posted ${unit}`} icon={WalletCards} />
+        <Stat label="Issued" value={formatNumber(snapshot.summary.primary_balance_issued)} detail={`Positive ${unit} ledger value`} icon={Activity} />
+        <Stat label="Redeemed" value={formatNumber(snapshot.summary.primary_balance_redeemed)} detail={`${formatNumber(snapshot.summary.expiring_primary_balance)} ${unit} still expiring`} icon={Gift} />
       </section>
       <div className="overview-grid">
         <Section className="tier-distribution" heading="Tier distribution" description="Current annual qualification">
@@ -281,11 +283,11 @@ function Overview({ snapshot, onViewMembers }: { snapshot: AdminSnapshot; onView
             ))}
           </div>
         </Section>
-        <Section className="expiration-panel" heading="Point expiration" description="Earned-date policy">
+        <Section className="expiration-panel" heading={unit === "points" ? "Point expiration" : `${unit} policy`} description={unit === "points" ? "Earned-date policy" : "No earned-date expiration"}>
           <div className="expiration-value"><strong>{snapshot.program.point_expiration?.days ?? "—"}</strong><span>days</span></div>
           <dl className="compact-definition">
             <div><dt>Warnings</dt><dd>{snapshot.program.point_expiration?.warning_days.join(", ") ?? "None"} days</dd></div>
-            <div><dt>Scheduled</dt><dd>{formatNumber(snapshot.summary.expiring_points)} points</dd></div>
+            <div><dt>Scheduled</dt><dd>{formatNumber(snapshot.summary.expiring_primary_balance)} {unit}</dd></div>
           </dl>
         </Section>
       </div>
@@ -300,7 +302,11 @@ function Overview({ snapshot, onViewMembers }: { snapshot: AdminSnapshot; onView
   );
 }
 
-function MemberDetail({ member, onClose }: { member: AdminMember; onClose: () => void }) {
+function MemberDetail({ member, onClose, unit }: {
+  member: AdminMember;
+  onClose: () => void;
+  unit: string;
+}) {
   const qualifying = metric(member, "tier-qualifying");
   return (
     <aside className="member-detail" aria-label="Member details">
@@ -308,19 +314,19 @@ function MemberDetail({ member, onClose }: { member: AdminMember; onClose: () =>
         <div><p className="eyebrow">Member</p><h3>{memberName(member.member.attributes, member.member.member_id)}</h3><code>{memberSubtitle(member.member)}</code></div>
         <IconButton label="Close member details" onClick={onClose}><X size={18} /></IconButton>
       </div>
-      <div className="detail-balance"><span>Available points</span><strong>{formatNumber(member.balance.available)}</strong><TierBadge tier={member.member.tier_id} /></div>
+      <div className="detail-balance"><span>Available {unit}</span><strong>{formatNumber(member.balance.available)}</strong><TierBadge tier={member.member.tier_id} /></div>
       <dl className="detail-list">
         <div><dt>Status</dt><dd>{member.member.status}</dd></div>
         <div><dt>Joined</dt><dd>{formatDate(member.member.joined_at)}</dd></div>
-        <div><dt>Qualifying</dt><dd>{formatNumber(qualifying)} points</dd></div>
+        {member.tier_progress ? <div><dt>Qualifying</dt><dd>{formatNumber(qualifying)} {unit}</dd></div> : null}
         <div><dt>Last activity</dt><dd>{member.last_activity_at ? formatDate(member.last_activity_at, true) : "No activity"}</dd></div>
         <div><dt>Email</dt><dd>{typeof member.member.attributes?.email === "string" ? member.member.attributes.email : "—"}</dd></div>
       </dl>
-      <div className="progress-block">
+      {member.tier_progress ? <div className="progress-block">
         <div><span>Tier progress</span><strong>{member.tier_progress ? percentage(member.tier_progress.progress_bps) : "—"}</strong></div>
         <div className="progress-track"><span style={{ width: `${(member.tier_progress?.progress_bps ?? 0) / 100}%` }} /></div>
         <small>{member.tier_progress?.is_top_tier ? "Top tier" : `${formatNumber(member.tier_progress?.remaining_to_next ?? 0)} to ${member.tier_progress?.next_tier_id ?? "next tier"}`}</small>
-      </div>
+      </div> : null}
       <div className="expiring-list">
         <h4>Expiring balances</h4>
         {member.expiring_balances.length ? member.expiring_balances.map((balance) => (
@@ -331,7 +337,7 @@ function MemberDetail({ member, onClose }: { member: AdminMember; onClose: () =>
   );
 }
 
-function Members({ members }: { members: AdminMember[] }) {
+function Members({ members, unit }: { members: AdminMember[]; unit: string }) {
   const [query, setQuery] = useState("");
   const [selectedId, setSelectedId] = useState<string>();
   const filtered = useMemo(() => {
@@ -377,7 +383,7 @@ function Members({ members }: { members: AdminMember[] }) {
           </div>
           {filtered.length === 0 ? <EmptyState>No members match “{query}”.</EmptyState> : null}
         </Section>
-        {selected ? <MemberDetail member={selected} onClose={() => setSelectedId(undefined)} /> : null}
+        {selected ? <MemberDetail member={selected} onClose={() => setSelectedId(undefined)} unit={unit} /> : null}
       </div>
     </>
   );
@@ -430,6 +436,15 @@ function Program({ snapshot, onChanged }: {
   const [busy, setBusy] = useState(false);
   const [writeError, setWriteError] = useState("");
   const [writeNotice, setWriteNotice] = useState("");
+  const [segmentName, setSegmentName] = useState("");
+  const [segmentMembers, setSegmentMembers] = useState("");
+  const [campaignName, setCampaignName] = useState("");
+  const [campaignSegment, setCampaignSegment] = useState(
+    snapshot.campaigns.segments[0]?.segment_id ?? ""
+  );
+  const [campaignReward, setCampaignReward] = useState(program.rewards[0]?.reward_id ?? "");
+  const [membershipMember, setMembershipMember] = useState("");
+  const [membershipPlan, setMembershipPlan] = useState("");
   useEffect(() => {
     setSelectedModel(configuration.current_model_id);
   }, [configuration.current_model_id]);
@@ -441,6 +456,18 @@ function Program({ snapshot, onChanged }: {
     ));
     setDirty(false);
   }, [management?.active_revision, management?.draft?.version]);
+  useEffect(() => {
+    if (!campaignSegment && snapshot.campaigns.segments[0]) {
+      setCampaignSegment(snapshot.campaigns.segments[0].segment_id);
+    }
+  }, [campaignSegment, snapshot.campaigns.segments]);
+  useEffect(() => {
+    const value = program.metadata?.membership;
+    const plans = value && typeof value === "object" && !Array.isArray(value)
+      ? (value as { plans?: Array<{ plan_id: string }> }).plans
+      : undefined;
+    if (!membershipPlan && plans?.[0]) setMembershipPlan(plans[0].plan_id);
+  }, [membershipPlan, program.metadata]);
 
   async function runWrite(action: () => Promise<void>, success: string) {
     setBusy(true);
@@ -497,6 +524,96 @@ function Program({ snapshot, onChanged }: {
       await adminWrite("/admin/api/v1/program/rollback", "POST", { revision });
     }, `Program rolled back from revision ${revision}.`);
   }
+
+  async function createSegment() {
+    await runWrite(async () => {
+      await adminWrite("/admin/api/v1/segments", "PUT", {
+        name: segmentName,
+        member_ids: segmentMembers.split(",").map((value) => value.trim()).filter(Boolean)
+      });
+    }, "Static segment saved.");
+  }
+
+  async function createCampaign() {
+    await runWrite(async () => {
+      await adminWrite("/admin/api/v1/campaigns", "PUT", {
+        name: campaignName,
+        segment_id: campaignSegment,
+        reward_id: campaignReward
+      });
+    }, "Campaign saved.");
+  }
+
+  async function runCampaign(campaignId: string) {
+    if (!window.confirm("Issue this reward to every member in the segment?")) return;
+    await runWrite(async () => {
+      await adminWrite("/admin/api/v1/campaigns/run", "POST", { campaign_id: campaignId });
+    }, "Campaign run completed.");
+  }
+
+  async function editReward(reward?: RewardDefinition) {
+    const initial = reward
+      ? {
+          reward_id: reward.reward_id,
+          name: reward.name,
+          ...(reward.description ? { description: reward.description } : {}),
+          points_cost: reward.cost.amount,
+          effect: reward.effect,
+          funding: reward.funding
+        }
+      : {
+          reward_id: "new-reward",
+          name: "New reward",
+          points_cost: 100,
+          effect: {
+            type: "discount",
+            amount: { currency: program.currency, amount: 100 },
+            allocations: [{ target: "order", amount: { currency: program.currency, amount: 100 } }]
+          },
+          funding: [{ party_type: "brand", party_id: "brand", share_bps: 10_000 }]
+        };
+    const value = window.prompt("Edit reward JSON", JSON.stringify(initial, null, 2));
+    if (!value) return;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(value);
+    } catch {
+      setWriteError("Reward must be valid JSON.");
+      return;
+    }
+    await runWrite(async () => {
+      await adminWrite("/admin/api/v1/program/rewards", "PUT", { reward: parsed });
+    }, "Reward saved to the program draft.");
+  }
+
+  async function deleteReward(rewardId: string) {
+    if (!window.confirm(`Remove ${rewardId} from the program draft?`)) return;
+    await runWrite(async () => {
+      await adminWrite("/admin/api/v1/program/rewards/delete", "POST", { reward_id: rewardId });
+    }, "Reward removed from the program draft.");
+  }
+
+  async function grantMembership() {
+    await runWrite(async () => {
+      await adminWrite("/admin/api/v1/memberships/grant", "POST", {
+        member_id: membershipMember,
+        plan_id: membershipPlan,
+        valid_until: new Date(Date.now() + 365 * 86_400_000).toISOString()
+      });
+    }, "Membership granted for one year.");
+  }
+
+  async function changeMembershipStatus(
+    memberId: string,
+    status: "lapsed" | "cancelled"
+  ) {
+    await runWrite(async () => {
+      await adminWrite("/admin/api/v1/memberships/status", "POST", {
+        member_id: memberId,
+        status
+      });
+    }, `Membership ${status}.`);
+  }
   const model = configuration.templates.find((candidate) => candidate.model_id === selectedModel) ??
     configuration.templates.find((candidate) => candidate.model_id === configuration.current_model_id) ??
     configuration.templates[0]!;
@@ -507,6 +624,13 @@ function Program({ snapshot, onChanged }: {
     ...program.earning.exclusions.tags,
     ...program.earning.exclusions.line_kinds
   ];
+  const membershipValue = program.metadata?.membership;
+  const membershipPlans = membershipValue &&
+    typeof membershipValue === "object" &&
+    !Array.isArray(membershipValue) &&
+    Array.isArray((membershipValue as { plans?: unknown }).plans)
+    ? (membershipValue as { plans: Array<{ plan_id: string; name: string }> }).plans
+    : [];
   return (
     <>
       <div className="page-heading">
@@ -669,21 +793,148 @@ function Program({ snapshot, onChanged }: {
         </tbody></table></div>
       </Section>
       <Section heading="Rewards" description={`${program.rewards.length} configured rewards`}>
+        <div className="program-editor-actions">
+          <CommandButton disabled={busy} onClick={() => void editReward()}>Add reward</CommandButton>
+          <span className="record-count">Changes are saved to the current draft and require publish.</span>
+        </div>
         <div className="reward-grid">
           {program.rewards.map((reward) => (
             <article className="reward-card" key={reward.reward_id}>
               <div><span className="reward-icon"><Gift size={17} /></span><div><h4>{reward.name}</h4><p>{reward.description ?? reward.effect.type.replace("_", " ")}</p></div></div>
-              <strong>{formatNumber(reward.cost.amount)} pts</strong>
+              <strong>{formatNumber(reward.cost.amount)} {reward.cost.unit}</strong>
               <small>{reward.funding.map((share) => `${share.party_type} ${percentage(share.share_bps)}`).join(" · ")}</small>
+              <div className="reward-actions">
+                <CommandButton disabled={busy} onClick={() => void editReward(reward)} variant="text">Edit</CommandButton>
+                <CommandButton disabled={busy} onClick={() => void deleteReward(reward.reward_id)} variant="text">Delete</CommandButton>
+              </div>
             </article>
           ))}
         </div>
       </Section>
+      <Section
+        heading="Reward campaigns"
+        description="Create a static member segment, target a catalog reward, and issue it through the portable reward wallet."
+      >
+        <div className="campaign-forms">
+          <div>
+            <h4>1. Static segment</h4>
+            <input onChange={(event) => setSegmentName(event.target.value)} placeholder="Segment name" value={segmentName} />
+            <input onChange={(event) => setSegmentMembers(event.target.value)} placeholder="member-001, member-002" value={segmentMembers} />
+            <CommandButton disabled={busy || !segmentName || !segmentMembers} onClick={() => void createSegment()}>
+              Save segment
+            </CommandButton>
+          </div>
+          <div>
+            <h4>2. Campaign</h4>
+            <input onChange={(event) => setCampaignName(event.target.value)} placeholder="Campaign name" value={campaignName} />
+            <select onChange={(event) => setCampaignSegment(event.target.value)} value={campaignSegment}>
+              <option value="">Choose segment</option>
+              {snapshot.campaigns.segments.map((segment) => (
+                <option key={segment.segment_id} value={segment.segment_id}>{segment.name}</option>
+              ))}
+            </select>
+            <select onChange={(event) => setCampaignReward(event.target.value)} value={campaignReward}>
+              {program.rewards.map((reward) => (
+                <option key={reward.reward_id} value={reward.reward_id}>{reward.name}</option>
+              ))}
+            </select>
+            <CommandButton disabled={busy || !campaignName || !campaignSegment || !campaignReward} onClick={() => void createCampaign()}>
+              Save campaign
+            </CommandButton>
+          </div>
+        </div>
+        <div className="campaign-list">
+          {snapshot.campaigns.campaigns.map((campaign) => {
+            const segment = snapshot.campaigns.segments.find((candidate) =>
+              candidate.segment_id === campaign.segment_id
+            );
+            return (
+              <div key={campaign.campaign_id}>
+                <span>
+                  <strong>{campaign.name}</strong>
+                  {campaign.reward_id} · {segment?.mode === "dynamic"
+                    ? "dynamic segment"
+                    : `${segment?.member_ids.length ?? 0} members`} · {campaign.status}
+                </span>
+                <CommandButton disabled={busy} onClick={() => void runCampaign(campaign.campaign_id)}>
+                  Run campaign
+                </CommandButton>
+              </div>
+            );
+          })}
+          {snapshot.campaigns.campaigns.length === 0 ? <EmptyState>No reward campaigns yet.</EmptyState> : null}
+        </div>
+        <p className="record-count">
+          {snapshot.issued_rewards.length} issued rewards · {snapshot.campaigns.runs.length} campaign runs
+        </p>
+      </Section>
+      {membershipPlans.length > 0 ? (
+        <Section
+          heading="Paid memberships"
+          description="Grant plan entitlements after a billing provider confirms payment, or end them when billing lapses."
+        >
+          <div className="membership-form">
+            <input
+              onChange={(event) => setMembershipMember(event.target.value)}
+              placeholder="Member id"
+              value={membershipMember}
+            />
+            <select onChange={(event) => setMembershipPlan(event.target.value)} value={membershipPlan}>
+              {membershipPlans.map((plan) => (
+                <option key={plan.plan_id} value={plan.plan_id}>{plan.name}</option>
+              ))}
+            </select>
+            <CommandButton
+              disabled={busy || !membershipMember || !membershipPlan}
+              onClick={() => void grantMembership()}
+            >
+              Grant one year
+            </CommandButton>
+          </div>
+          <div className="campaign-list">
+            {snapshot.memberships.memberships.map(({ member_id: memberId, membership }) => (
+              <div key={memberId}>
+                <span>
+                  <strong>{memberId}</strong>
+                  {membership.plan_id} · {membership.status} · through {formatDate(membership.valid_until)}
+                </span>
+                {membership.status === "active" ? (
+                  <div className="reward-actions">
+                    <CommandButton disabled={busy} onClick={() => void changeMembershipStatus(memberId, "lapsed")} variant="text">Lapse</CommandButton>
+                    <CommandButton disabled={busy} onClick={() => void changeMembershipStatus(memberId, "cancelled")} variant="text">Cancel</CommandButton>
+                  </div>
+                ) : null}
+              </div>
+            ))}
+            {snapshot.memberships.memberships.length === 0 ? <EmptyState>No memberships granted.</EmptyState> : null}
+          </div>
+        </Section>
+      ) : null}
     </>
   );
 }
 
-function Developer({ snapshot }: { snapshot: AdminSnapshot }) {
+function Developer({ snapshot, onChanged }: {
+  snapshot: AdminSnapshot;
+  onChanged: () => Promise<void>;
+}) {
+  const [webhookUrl, setWebhookUrl] = useState("");
+  const [webhookSecret, setWebhookSecret] = useState("");
+  const [webhookBusy, setWebhookBusy] = useState(false);
+  const [webhookError, setWebhookError] = useState("");
+  const subscriptions = snapshot.webhooks.subscriptions ?? [];
+  async function webhookWrite(path: string, body: unknown, method: "PUT" | "POST" = "POST") {
+    setWebhookBusy(true);
+    setWebhookError("");
+    try {
+      await adminWrite(path, method, body);
+      await onChanged();
+    } catch (cause) {
+      setWebhookError(cause instanceof Error ? cause.message : "Webhook update failed");
+    } finally {
+      setWebhookBusy(false);
+    }
+  }
   const webhookRows = [
     ...snapshot.webhooks.pending.map((delivery) => ({
       key: delivery.delivery_id,
@@ -695,7 +946,7 @@ function Developer({ snapshot }: { snapshot: AdminSnapshot }) {
       error: delivery.last_error
     })),
     ...snapshot.webhooks.recent.map((delivery, index) => ({
-      key: `${delivery.event_id}-${delivery.url}-${index}`,
+      key: delivery.delivery_id || `${delivery.event_id}-${delivery.url}-${index}`,
       eventType: delivery.event_type,
       url: delivery.url,
       attempts: delivery.attempts,
@@ -730,6 +981,56 @@ function Developer({ snapshot }: { snapshot: AdminSnapshot }) {
         <div><ShieldCheck size={18} /><span>Admin session</span><strong>HttpOnly cookie</strong></div>
         <div><CircleGauge size={18} /><span>Loyalty API</span><strong>15 operations</strong></div>
       </Section>
+      <Section heading="Webhook subscriptions" description="Persisted runtime receivers. Signing secrets are write-only.">
+        <div className="webhook-subscription-form">
+          <input aria-label="Webhook URL" onChange={(event) => setWebhookUrl(event.target.value)} placeholder="https://receiver.example/hooks" type="url" value={webhookUrl} />
+          <input aria-label="Webhook signing secret" onChange={(event) => setWebhookSecret(event.target.value)} placeholder="Signing secret (16+ characters)" type="password" value={webhookSecret} />
+          <CommandButton
+            disabled={webhookBusy || !webhookUrl || webhookSecret.length < 16}
+            onClick={() => void webhookWrite("/admin/api/v1/webhooks/subscription", {
+              url: webhookUrl,
+              secret: webhookSecret,
+              active: true
+            }, "PUT")}
+          >
+            Add receiver
+          </CommandButton>
+        </div>
+        {webhookError ? <div className="error-banner" role="alert">{webhookError}</div> : null}
+        <div className="webhook-subscription-list">
+          {subscriptions.map((subscription) => (
+            <div key={subscription.subscription_id}>
+              <span><strong>{subscription.active ? "Active" : "Paused"}</strong>{subscription.url}</span>
+              <div>
+                <CommandButton
+                  disabled={webhookBusy}
+                  onClick={() => {
+                    const secret = window.prompt("New signing secret (16+ characters)");
+                    if (secret) void webhookWrite(
+                      "/admin/api/v1/webhooks/subscription/rotate-secret",
+                      { subscription_id: subscription.subscription_id, secret }
+                    );
+                  }}
+                  variant="text"
+                >
+                  Rotate secret
+                </CommandButton>
+                <CommandButton
+                  disabled={webhookBusy}
+                  onClick={() => void webhookWrite(
+                    "/admin/api/v1/webhooks/subscription/delete",
+                    { subscription_id: subscription.subscription_id }
+                  )}
+                  variant="text"
+                >
+                  Delete
+                </CommandButton>
+              </div>
+            </div>
+          ))}
+          {subscriptions.length === 0 ? <EmptyState>No webhook receivers configured.</EmptyState> : null}
+        </div>
+      </Section>
       <Section>
         <div className="section-heading">
           <div><p className="eyebrow">Webhooks</p><h3>Delivery activity</h3></div>
@@ -749,7 +1050,32 @@ function Developer({ snapshot }: { snapshot: AdminSnapshot }) {
                     <td><span className="primary-cell">{delivery.status}</span>{delivery.error ? <small>{delivery.error}</small> : null}</td>
                     <td><code>{delivery.eventType}</code></td>
                     <td><code>{delivery.url}</code></td>
-                    <td className="numeric">{formatNumber(delivery.attempts)}</td>
+                    <td className="numeric">
+                      {formatNumber(delivery.attempts)}
+                      {delivery.status === "Pending" ? (
+                        <CommandButton
+                          disabled={webhookBusy}
+                          onClick={() => void webhookWrite(
+                            "/admin/api/v1/webhooks/deliveries/retry",
+                            { delivery_id: delivery.key }
+                          )}
+                          variant="text"
+                        >
+                          Retry
+                        </CommandButton>
+                      ) : (
+                        <CommandButton
+                          disabled={webhookBusy}
+                          onClick={() => void webhookWrite(
+                            "/admin/api/v1/webhooks/deliveries/replay",
+                            { delivery_id: delivery.key }
+                          )}
+                          variant="text"
+                        >
+                          Replay
+                        </CommandButton>
+                      )}
+                    </td>
                     <td>{formatDate(delivery.timestamp, true)}</td>
                   </tr>
                 ))}
@@ -848,10 +1174,10 @@ export function App() {
         {error ? <div className="error-banner" role="alert">{error}</div> : null}
         <main className="main-content">
           {view === "overview" ? <Overview snapshot={snapshot} onViewMembers={() => setView("members")} /> : null}
-          {view === "members" ? <Members members={snapshot.members} /> : null}
+          {view === "members" ? <Members members={snapshot.members} unit={snapshot.program.earning.rate.unit} /> : null}
           {view === "ledger" ? <Ledger snapshot={snapshot} /> : null}
           {view === "program" ? <Program snapshot={snapshot} onChanged={refresh} /> : null}
-          {view === "developer" ? <Developer snapshot={snapshot} /> : null}
+          {view === "developer" ? <Developer snapshot={snapshot} onChanged={refresh} /> : null}
         </main>
       </div>
     </div>

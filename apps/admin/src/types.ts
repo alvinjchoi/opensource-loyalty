@@ -53,6 +53,7 @@ export interface LedgerEntry {
   member_id: string;
   operation: LedgerOperation;
   amount: number;
+  unit?: string;
   occurred_at: string;
   expires_at?: string;
   related_entry_id?: string;
@@ -102,6 +103,7 @@ export interface ProgramCatalog {
     metric_id: string;
     period: { type: string; starts_month: number; starts_day: number; time_zone: string };
   };
+  metadata?: Record<string, unknown>;
 }
 
 export interface ProgramModelTemplate {
@@ -165,6 +167,7 @@ export interface AdminBootstrap {
 }
 
 export interface AdminWebhookDelivery {
+  delivery_id: string;
   event_id: string;
   event_type: string;
   url: string;
@@ -213,6 +216,33 @@ export interface ProgramManagement {
   }>;
 }
 
+export interface CampaignPlatform {
+  segments: Array<{
+    segment_id: string;
+    name: string;
+    mode: "static" | "dynamic";
+    member_ids: string[];
+    updated_at: string;
+  }>;
+  campaigns: Array<{
+    campaign_id: string;
+    name: string;
+    reward_id: string;
+    segment_id: string;
+    status: "draft" | "scheduled" | "completed" | "expired";
+    updated_at: string;
+    last_run_at?: string;
+  }>;
+  runs: Array<{
+    run_id: string;
+    campaign_id: string;
+    completed_at: string;
+    issued: number;
+    skipped: number;
+    failed: number;
+  }>;
+}
+
 export interface AdminSnapshot {
   admin_api_version: string;
   generated_at: string;
@@ -224,8 +254,34 @@ export interface AdminSnapshot {
   program: ProgramCatalog;
   program_configuration: ProgramConfiguration;
   program_management?: ProgramManagement;
+  campaigns: CampaignPlatform;
+  memberships: {
+    memberships: Array<{
+      member_id: string;
+      membership: {
+        plan_id: string;
+        status: "active" | "lapsed" | "cancelled";
+        valid_from: string;
+        valid_until: string;
+      };
+    }>;
+    audit: Array<{
+      audit_id: string;
+      member_id: string;
+      action: string;
+      occurred_at: string;
+      plan_id: string;
+    }>;
+  };
   webhooks: {
     enabled: boolean;
+    subscriptions: Array<{
+      subscription_id: string;
+      url: string;
+      active: boolean;
+      events?: string[];
+      retry_policy?: { max_attempts: number; backoff_ms: number; timeout_ms: number };
+    }>;
     pending: AdminPendingWebhookDelivery[];
     recent: AdminWebhookDelivery[];
   };
@@ -235,8 +291,21 @@ export interface AdminSnapshot {
     points_issued: number;
     points_redeemed: number;
     expiring_points: number;
+    primary_unit: string;
+    primary_balance_outstanding: number;
+    primary_balance_issued: number;
+    primary_balance_redeemed: number;
+    expiring_primary_balance: number;
     ledger_entries: number;
   };
   members: AdminMember[];
   ledger: LedgerEntry[];
+  issued_rewards: Array<{
+    issued_reward_id: string;
+    member_id: string;
+    reward_id: string;
+    status: "issued" | "redeemed" | "cancelled" | "expired";
+    issued_at: string;
+    expires_at?: string;
+  }>;
 }

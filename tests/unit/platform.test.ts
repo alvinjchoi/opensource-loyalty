@@ -17,6 +17,11 @@ describe("seeded reference platform", () => {
         points_issued: 5_940,
         points_redeemed: 1_000,
         expiring_points: 4_910,
+        primary_unit: "points",
+        primary_balance_outstanding: 4_910,
+        primary_balance_issued: 5_940,
+        primary_balance_redeemed: 1_000,
+        expiring_primary_balance: 4_910,
         ledger_entries: 9
       });
       expect(initial.program.tiers.map((tier) => [

@@ -64,14 +64,11 @@ const templateSeeds: ProgramModelTemplateSeed[] = [
     summary: "Count visits or item purchases toward simple unlocks like buy 9, get 1.",
     best_for: "Coffee, bakery, counter service",
     cadence: "Visit count",
-    engine_support: "planned",
-    admin_write_support: "planned",
+    engine_support: "implemented",
+    admin_write_support: "implemented",
     supported_features: ["Visit metrics", "Stamp thresholds", "Issued reward wallet"],
-    blockers: [
-      "Reference engine currently requires one primary points account.",
-      "Visit and stamp ledger units need posting and adjustment rules."
-    ],
-    next_steps: ["Add visits/stamps account support and threshold reward issuance."]
+    blockers: [],
+    next_steps: ["Configure the threshold reward and publish the stamp-card draft."]
   },
   {
     model_id: "wallet_credit",
@@ -79,14 +76,11 @@ const templateSeeds: ProgramModelTemplateSeed[] = [
     summary: "Return a percent of qualifying spend as store credit or house cash.",
     best_for: "High-frequency brands",
     cadence: "Spend-based",
-    engine_support: "planned",
-    admin_write_support: "planned",
+    engine_support: "implemented",
+    admin_write_support: "implemented",
     supported_features: ["Credit units", "Liability reporting", "Expiration and adjustment reasons"],
-    blockers: [
-      "Reference engine currently posts spendable value only as points.",
-      "Credit liability and tender interaction rules are not implemented."
-    ],
-    next_steps: ["Add credit account lots, ledger classifications, and liability summaries."]
+    blockers: [],
+    next_steps: ["Configure earn basis points, liability class, expiration, and rewards."]
   },
   {
     model_id: "paid_membership",
@@ -94,14 +88,11 @@ const templateSeeds: ProgramModelTemplateSeed[] = [
     summary: "Attach perks, multipliers, and exclusive rewards to a subscription or club.",
     best_for: "Premium operators and clubs",
     cadence: "Recurring",
-    engine_support: "planned",
-    admin_write_support: "planned",
+    engine_support: "implemented",
+    admin_write_support: "implemented",
     supported_features: ["Membership status", "Perk eligibility", "Recurring billing hooks"],
-    blockers: [
-      "Membership lifecycle, billing state, and eligibility windows are not modeled.",
-      "Scoped entitlement APIs are not implemented."
-    ],
-    next_steps: ["Add membership state, entitlement checks, and billing-event adapters."]
+    blockers: [],
+    next_steps: ["Configure plans, multipliers, gated rewards, and a billing-event adapter."]
   },
   {
     model_id: "hybrid",
@@ -142,8 +133,8 @@ export function programConfigurationFor(program: ProgramDefinition): ReferencePr
   const currentModelId = inferProgramModel(program);
   return {
     current_model_id: currentModelId,
-    editable: currentModelId === "points",
-    publish_supported: currentModelId === "points",
+    editable: ["points", "visits", "wallet_credit", "paid_membership"].includes(currentModelId),
+    publish_supported: ["points", "visits", "wallet_credit", "paid_membership"].includes(currentModelId),
     templates: templateSeeds.map((template) => ({
       ...template,
       status: template.model_id === currentModelId
@@ -153,7 +144,7 @@ export function programConfigurationFor(program: ProgramDefinition): ReferencePr
           : "planned"
     })),
     next_actions: [
-      "Edit and validate the points program draft in Admin.",
+      "Edit and validate the active program draft in Admin.",
       "Publish compatible changes without restarting the reference server.",
       "Rollback to one of the 20 retained published revisions.",
       "Replace the shared local Admin identity with scoped production users and roles."

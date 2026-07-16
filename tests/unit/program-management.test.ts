@@ -3,9 +3,38 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { createDemoPlatform, ProgramManagementService } from "@loyalty-interchange/server";
-import { makeContext, makeEnroll, makeProgram } from "../fixtures.js";
+import { makeContext, makeEnroll, makeOrder, makeProgram, makeStampProgram } from "../fixtures.js";
 
 describe("program management", () => {
+  it("edits individual rewards through validated program drafts", () => {
+    const directory = mkdtempSync(join(tmpdir(), "lip-reward-manager-"));
+    const service = new ProgramManagementService({
+      path: join(directory, "reference.db"),
+      initialProgram: makeProgram(),
+      reset: true
+    });
+    try {
+      const template = makeProgram().rewards[0]!;
+      const added = service.upsertReward({
+        ...template,
+        reward_id: "birthday-reward",
+        name: "Birthday reward"
+      }, "test-admin");
+      expect(added.draft?.validation.ok).toBe(true);
+      expect((added.draft?.program as ReturnType<typeof makeProgram>).rewards).toContainEqual(
+        expect.objectContaining({ reward_id: "birthday-reward" })
+      );
+      const removed = service.deleteReward("birthday-reward", "test-admin");
+      expect((removed.draft?.program as ReturnType<typeof makeProgram>).rewards).not.toContainEqual(
+        expect.objectContaining({ reward_id: "birthday-reward" })
+      );
+      expect(() => service.deleteReward("missing", "test-admin")).toThrowError(/not found/);
+    } finally {
+      service.close();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it("validates drafts, publishes with optimistic concurrency, and rolls back", () => {
     const directory = mkdtempSync(join(tmpdir(), "lip-program-manager-"));
     const databasePath = join(directory, "reference.db");
@@ -110,6 +139,40 @@ describe("program management", () => {
       }).member?.member_id).toBe("member-001");
       second.close();
     } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("publishes stamp-card policy changes without reinterpreting account units", () => {
+    const directory = mkdtempSync(join(tmpdir(), "lip-stamp-program-"));
+    const platform = createDemoPlatform({
+      databasePath: join(directory, "reference.db"),
+      reset: true,
+      seed: false,
+      program: makeStampProgram()
+    });
+    try {
+      platform.engine.enroll(makeEnroll("stamp-program-enroll"));
+      platform.engine.postAccrual({
+        context: makeContext("stamp-program-accrual"),
+        member_id: "member-001",
+        order: makeOrder({ order_id: "stamp-program-order" })
+      });
+      const changed = makeStampProgram();
+      changed.visit_stamp_policy = { ...changed.visit_stamp_policy!, threshold: 4 };
+      const draft = platform.programs.saveDraft(changed, "test-admin");
+      platform.programs.publish(draft.draft!.version, "test-admin");
+      expect(platform.engine.getAccount({
+        context: makeContext("stamp-program-account"),
+        member_id: "member-001",
+        program_id: "demo-foodservice"
+      }).balances[0]).toMatchObject({ unit: "stamps", amount: 1 });
+
+      const pointsDraft = platform.programs.saveDraft(makeProgram(), "test-admin");
+      expect(() => platform.programs.publish(pointsDraft.draft!.version, "test-admin"))
+        .toThrowError(/primary account unit/);
+    } finally {
+      platform.close();
       rmSync(directory, { recursive: true, force: true });
     }
   });

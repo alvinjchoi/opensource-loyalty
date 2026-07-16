@@ -134,6 +134,74 @@ export function makeProgram(): ProgramDefinition {
   };
 }
 
+export function makeStampProgram(): ProgramDefinition {
+  const program = makeProgram();
+  const {
+    tier_policy: _tierPolicy,
+    point_expiration: _pointExpiration,
+    ...base
+  } = program;
+  return {
+    ...base,
+    name: "Demo stamp card",
+    accounts: [{ unit: "stamps", unit_label: "Stamps", is_primary: true }],
+    metrics: [],
+    tiers: [],
+    earn_rate: { points: 1, spend_minor_units: 1 },
+    visit_stamp_policy: {
+      unit: "stamps",
+      amount_per_order: 1,
+      threshold: 3,
+      reset_on_issue: true,
+      issue_reward_id: "free-entree",
+      issued_reward_ttl_seconds: 86_400
+    },
+    metadata: { program_model: "visits" }
+  };
+}
+
+export function makeWalletCreditProgram(): ProgramDefinition {
+  const program = makeProgram();
+  const {
+    tier_policy: _tierPolicy,
+    point_expiration: _pointExpiration,
+    ...base
+  } = program;
+  return {
+    ...base,
+    name: "Demo wallet credit",
+    accounts: [{ unit: "credits", unit_label: "Credit cents", is_primary: true }],
+    metrics: [],
+    tiers: [],
+    balance_expiration: { type: "after_earned", days: 30, warning_days: [7] },
+    wallet_credit_policy: {
+      earn_bps: 500,
+      liability_classification: "promotional"
+    },
+    rewards: base.rewards.map((reward) =>
+      reward.reward_id === "one-dollar-off" ? { ...reward, points_cost: 50 } : reward
+    ),
+    metadata: { program_model: "wallet_credit" }
+  };
+}
+
+export function makeMembershipProgram(): ProgramDefinition {
+  const program = makeProgram();
+  return {
+    ...program,
+    name: "Demo membership",
+    membership_policy: {
+      plans: [{ plan_id: "premium", name: "Premium", earn_multiplier_bps: 15_000 }]
+    },
+    rewards: program.rewards.map((reward) =>
+      reward.reward_id === "one-dollar-off"
+        ? { ...reward, metadata: { membership_plan_ids: ["premium"] } }
+        : reward
+    ),
+    metadata: { program_model: "paid_membership" }
+  };
+}
+
 export function makeAnnualTierProgram(): ProgramDefinition {
   const program = makeProgram();
   program.program_id = "annual-tier-foodservice";

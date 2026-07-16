@@ -51,15 +51,26 @@ portable LIP contract focused on interoperability.
 
 ### Phase 2: platform APIs OpenLoyalty already has
 
-- [ ] Reward CRUD, reward categories, and reusable campaign authoring.
+- [x] Persisted static segments and reusable manual campaign runs that issue
+  portable reward-wallet entries idempotently.
+- [x] Reward-level draft CRUD integrated with validation and publish.
+- [x] Dynamic member segments and scheduled campaign activation.
+- [ ] Reward categories and category-level merchandising.
 - [x] Issued reward wallet with code/QR artifacts, claim through redemption,
   cancellation, expiration, reversal restoration, and restart persistence.
 - [ ] Manual point adjustments, bonus/gift/migration classifications, transfer
   rules, and expiration job controls.
-- [ ] Wallet credit account units, liability summaries, and credit adjustment
-  reasons.
-- [ ] Webhook subscription CRUD, event filters, signing-secret rotation,
-  delivery logs, retry policy, and replay tooling.
+- [x] Wallet credit account units, basis-point earning, promotional/stored-value
+  classification, liability summaries, FIFO redemption, and expiration.
+- [x] Executable visits/stamps accounts with per-order accrual, threshold
+  reward issuance, card reset, ledger units, Admin publish, and persistence.
+- [x] Paid membership plans with durable member entitlements, validity windows,
+  earn multipliers, gated rewards, scheduler-driven lapse, and Admin controls.
+- [x] Persistent webhook subscription CRUD, event filters, signing-secret
+  rotation, delivery visibility, and immediate retry for pending deliveries.
+- [x] Persist completed webhook delivery history and support completed-event
+  replay.
+- [x] Add per-subscription timeout, backoff, and retry policies.
 - [ ] Scoped Admin users, roles, permissions, tenant/location scoping, and audit
   log entries for every write.
 - [ ] Import/export contracts for members, transactions, rewards, and ledger
@@ -133,6 +144,8 @@ Goal: application developers call domain methods rather than construct protocol
 envelopes.
 
 - [ ] Publish the idiomatic TypeScript SDK package
+- [x] Add public-package metadata, package dry runs, provenance, and trusted
+  GitHub Actions publishing in dependency order
 - [x] Automatically add versions, request ids, timestamps, and idempotency keys
 - [x] Implement bounded retries for safe operations
 - [x] Expose typed problem details and stable error classes
@@ -156,7 +169,7 @@ home screen without weakening the transaction core.
 - [x] Filtered, cursor-based immutable ledger history
 - [x] Reference engine, HTTP routes, generated client, idiomatic SDK, and conformance tests
 - [x] Punchh compatibility boundary and migration notes
-- [ ] Issued reward wallet with issue, cancel, and redemption artifacts
+- [x] Issued reward wallet with issue, cancel, and redemption artifacts
 - [ ] Referral artifacts and missed-purchase claim workflow
 - [ ] Versioned authentication, engagement, and ordering-platform adapter profiles
 
@@ -204,7 +217,7 @@ turning implementation-specific operations into normative LIP requirements.
 - [x] Docker volume persistence and package-level storage verification
 - [ ] Tenant-aware Postgres adapter and migration tooling
 - [ ] Scoped Admin users, roles, and audit log
-- [ ] Program configuration editor with validation and publish workflow
+- [x] Program configuration editor with validation and publish workflow
 - [ ] Extension API for adapters, workflows, and custom Admin modules
 
 Exit criteria: `npm run quickstart` starts a seeded, persistent loyalty engine and

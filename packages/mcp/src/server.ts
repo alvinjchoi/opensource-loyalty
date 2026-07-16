@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { schemaRegistry } from "@loyalty-interchange/protocol";

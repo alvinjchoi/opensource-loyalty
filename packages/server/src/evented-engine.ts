@@ -11,6 +11,10 @@ import type {
   LedgerResponse,
   LoyaltyEvent,
   LoyaltyEventType,
+  IssuedReward,
+  IssuedRewardCancelRequest,
+  IssuedRewardIssueRequest,
+  IssuedRewardResponse,
   ManualAdjustmentRequest,
   Member,
   MemberEnrollRequest,
@@ -75,6 +79,26 @@ export class EventedLoyaltyEngine extends LoyaltyEngine {
     return response;
   }
 
+  public override issueReward(request: IssuedRewardIssueRequest): IssuedRewardResponse {
+    const response = super.issueReward(request);
+    this.publishIssuedReward(
+      "org.loyalty-interchange.issued-reward.issued.v1",
+      "issued",
+      response.issued_reward
+    );
+    return response;
+  }
+
+  public override cancelIssuedReward(request: IssuedRewardCancelRequest): IssuedRewardResponse {
+    const response = super.cancelIssuedReward(request);
+    this.publishIssuedReward(
+      "org.loyalty-interchange.issued-reward.cancelled.v1",
+      "cancelled",
+      response.issued_reward
+    );
+    return response;
+  }
+
   public override reserve(request: RedemptionReserveRequest): RedemptionReservationResponse {
     const response = super.reserve(request);
     this.publishReservation("org.loyalty-interchange.redemption.reserved.v1", "reserved", response.reservation);
@@ -84,12 +108,14 @@ export class EventedLoyaltyEngine extends LoyaltyEngine {
   public override capture(request: RedemptionCaptureRequest): RedemptionReservationResponse {
     const response = super.capture(request);
     this.publishReservation("org.loyalty-interchange.redemption.captured.v1", "captured", response.reservation);
+    this.publishReservationIssuedReward(response.reservation, "redeemed");
     return response;
   }
 
   public override reverse(request: RedemptionReverseRequest): RedemptionReservationResponse {
     const response = super.reverse(request);
     this.publishReservation("org.loyalty-interchange.redemption.reversed.v1", "reversed", response.reservation);
+    this.publishReservationIssuedReward(response.reservation, "restored");
     return response;
   }
 
@@ -109,6 +135,34 @@ export class EventedLoyaltyEngine extends LoyaltyEngine {
     this.publish(type, `evt-${action}-${reservation.reservation_id}`, reservation.member_id, {
       reservation
     });
+  }
+
+  private publishReservationIssuedReward(
+    reservation: RedemptionReservation,
+    action: "redeemed" | "restored"
+  ): void {
+    if (!reservation.issued_reward_id) return;
+    const issuedReward = this.inspectAdmin().issued_rewards.find((candidate) =>
+      candidate.issued_reward_id === reservation.issued_reward_id
+    );
+    if (!issuedReward) return;
+    const type: LoyaltyEventType = action === "redeemed"
+      ? "org.loyalty-interchange.issued-reward.redeemed.v1"
+      : "org.loyalty-interchange.issued-reward.restored.v1";
+    this.publishIssuedReward(type, action, issuedReward);
+  }
+
+  private publishIssuedReward(
+    type: LoyaltyEventType,
+    action: string,
+    issuedReward: IssuedReward
+  ): void {
+    this.publish(
+      type,
+      `evt-${action}-${issuedReward.issued_reward_id}`,
+      issuedReward.member_id,
+      { issued_reward: issuedReward }
+    );
   }
 
   private publish(

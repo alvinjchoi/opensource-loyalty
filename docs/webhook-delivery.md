@@ -12,6 +12,10 @@ are emitted after successful mutations:
 | Redemption reserved    | `org.loyalty-interchange.redemption.reserved.v1`    |
 | Redemption captured    | `org.loyalty-interchange.redemption.captured.v1`    |
 | Redemption reversed    | `org.loyalty-interchange.redemption.reversed.v1`    |
+| Issued reward created  | `org.loyalty-interchange.issued-reward.issued.v1`   |
+| Issued reward redeemed | `org.loyalty-interchange.issued-reward.redeemed.v1` |
+| Issued reward restored | `org.loyalty-interchange.issued-reward.restored.v1` |
+| Issued reward cancelled| `org.loyalty-interchange.issued-reward.cancelled.v1`|
 
 Event ids are derived from the underlying resource ids (ledger entry,
 reservation, member), so idempotent request replays re-deliver events with the
@@ -46,6 +50,13 @@ const platform = createDemoPlatform({
 });
 ```
 
+Subscriptions can also be added, deleted, and rotated at runtime from the
+Admin **API** view. Runtime subscriptions persist in SQLite and take precedence
+over boot-time environment configuration after their first write. Signing
+secrets are write-only in Admin responses. The local reference runtime stores
+them in its protected SQLite database; production adapters should use envelope
+encryption or an external secret manager.
+
 `platform.webhooks` exposes the dispatcher, including `flush()` to await the
 current retry cycle, `pendingDeliveries()` for the durable queue, and
 `deliveries()` for recent process-local delivery results.
@@ -66,7 +77,11 @@ current retry cycle, `pendingDeliveries()` for the durable queue, and
 
 ## Operator visibility
 
-The Admin dashboard's **Developer** view shows whether delivery is enabled,
-the number of pending outbox entries, retry attempts, last errors, and recent
-process-local outcomes. Pending entries survive restart; completed history is
-currently limited to the running process.
+The Admin dashboard's **Developer** view manages persisted receivers and secret
+rotation, shows pending outbox entries, retry attempts, last errors, and durable
+completed outcomes, and can immediately retry pending deliveries or replay a
+completed event. Deleting a receiver also removes its pending deliveries.
+Completed history and event payloads are retained in SQLite up to the configured
+history limit. Programmatic and Admin API subscription writes may set
+`retry_policy` with `max_attempts`, `backoff_ms`, and `timeout_ms`; omitted
+values use the server defaults.

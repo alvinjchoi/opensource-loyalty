@@ -125,6 +125,33 @@ An authenticated `GET /metrics` endpoint exports low-cardinality request
 counters and duration sums/counts in Prometheus text format. Unknown URLs and
 Admin assets are normalized to bounded labels to avoid cardinality growth.
 
+## Segments and reward campaigns
+
+Campaign authoring remains a non-normative platform feature under
+`/admin/api/v1`; it does not add campaign concepts to `/lip/v1`. Operators can
+persist static member segments, target a catalog reward, run the campaign
+manually, and inspect durable run summaries in Admin.
+
+Platform API clients can also define dynamic segments over member status, tier,
+available balance, and exact-match attributes. Campaigns with `starts_at` are
+picked up by the embedded scheduler; `ends_at` prevents late issuance.
+
+Reward cards can be added, edited, or removed as validated program-draft
+changes before they are published. Publishing rejects removal of a reward that
+still backs an active issued reward or a saved campaign.
+
+The runner creates deterministic `{campaign_id}:{member_id}` issued reward ids,
+so repeated runs skip members already targeted. Customer BFFs consume the
+result through the portable issued-reward list and redemption operations.
+
+## Paid membership
+
+Membership plans are program configuration. The non-normative Admin API grants
+or ends a member entitlement after an external billing system reports payment
+state. Active plans can multiply earning and gate rewards through
+`reward.metadata.membership_plan_ids`; expired memberships are lapsed by the
+embedded scheduler. Billing and customer authentication remain outside LIP.
+
 ## Extension path
 
 Database adapters implement `StateStore<LoyaltyEngineState>`. A future hosted

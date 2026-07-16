@@ -148,6 +148,22 @@
           {
             "const": "org.loyalty-interchange.redemption.reversed.v1",
             "type": "string"
+          },
+          {
+            "const": "org.loyalty-interchange.issued-reward.issued.v1",
+            "type": "string"
+          },
+          {
+            "const": "org.loyalty-interchange.issued-reward.redeemed.v1",
+            "type": "string"
+          },
+          {
+            "const": "org.loyalty-interchange.issued-reward.restored.v1",
+            "type": "string"
+          },
+          {
+            "const": "org.loyalty-interchange.issued-reward.cancelled.v1",
+            "type": "string"
           }
         ]
       }

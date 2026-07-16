@@ -467,10 +467,29 @@ td code { display: block; margin-top: 3px; max-width: 260px; overflow: hidden; t
 .capability-grid svg { color: #171717; }
 .capability-grid span { color: var(--muted); font-size: 10px; margin-top: 9px; }
 .capability-grid strong { font-size: 13px; }
+.webhook-subscription-form { display: grid; gap: 10px; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) auto; padding: 16px; }
+.webhook-subscription-form input { border: 1px solid var(--border); border-radius: 8px; font: inherit; min-height: 40px; padding: 0 11px; }
+.webhook-subscription-list { border-top: 1px solid var(--border); padding: 8px 16px 14px; }
+.webhook-subscription-list > div:not(.empty-state) { align-items: center; display: flex; gap: 12px; justify-content: space-between; min-height: 44px; }
+.webhook-subscription-list span { display: grid; font-size: 11px; gap: 3px; overflow-wrap: anywhere; }
+.webhook-subscription-list span strong { color: var(--green); font-size: 9px; text-transform: uppercase; }
+.campaign-forms { display: grid; gap: 16px; grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 16px; }
+.campaign-forms > div { align-items: stretch; background: var(--surface-subtle); border: 1px solid var(--border); border-radius: 10px; display: grid; gap: 9px; padding: 14px; }
+.campaign-forms h4 { margin: 0 0 2px; }
+.campaign-forms input, .campaign-forms select { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; color: inherit; font: inherit; min-height: 40px; padding: 0 11px; }
+.campaign-list { border-top: 1px solid var(--border); padding: 8px 16px; }
+.campaign-list > div:not(.empty-state) { align-items: center; display: flex; gap: 12px; justify-content: space-between; min-height: 54px; }
+.campaign-list span { display: grid; font-size: 11px; gap: 3px; }
+.reward-actions { display: flex; gap: 6px; justify-content: flex-end; }
+.membership-form { align-items: center; display: grid; gap: 10px; grid-template-columns: minmax(180px, 1fr) minmax(160px, .6fr) auto; padding: 16px; }
+.membership-form input, .membership-form select { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; color: inherit; font: inherit; min-height: 40px; padding: 0 11px; }
 
 @media (max-width: 1050px) {
   .stats-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .config-layout { grid-template-columns: 1fr; }
+  .webhook-subscription-form { grid-template-columns: 1fr; }
+  .campaign-forms { grid-template-columns: 1fr; }
+  .membership-form { grid-template-columns: 1fr; }
   .members-layout.has-detail { grid-template-columns: minmax(0, 1fr); }
   .member-detail { position: static; }
 }

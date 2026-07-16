@@ -40,6 +40,30 @@ export interface EarningPolicyDefinition {
   excluded_line_kinds?: Array<"item" | "modifier" | "fee">;
 }
 
+export interface VisitStampPolicy {
+  unit: "visits" | "stamps";
+  amount_per_order: number;
+  threshold: number;
+  reset_on_issue: boolean;
+  issue_reward_id: string;
+  issued_reward_ttl_seconds?: number;
+}
+
+export interface WalletCreditPolicy {
+  earn_bps: number;
+  liability_classification: "promotional" | "stored_value";
+}
+
+export interface MembershipPlanDefinition {
+  plan_id: string;
+  name: string;
+  earn_multiplier_bps?: number;
+}
+
+export interface MembershipPolicy {
+  plans: MembershipPlanDefinition[];
+}
+
 export interface ProgramDefinition {
   program_id: string;
   name?: string;
@@ -50,7 +74,11 @@ export interface ProgramDefinition {
   tiers?: TierDefinition[];
   tier_policy?: TierQualificationPolicy;
   point_expiration?: PointExpirationPolicy;
+  balance_expiration?: PointExpirationPolicy;
   earning_policy?: EarningPolicyDefinition;
+  visit_stamp_policy?: VisitStampPolicy;
+  wallet_credit_policy?: WalletCreditPolicy;
+  membership_policy?: MembershipPolicy;
   earn_rate: EarnRate;
   evaluation_ttl_seconds: number;
   reservation_ttl_seconds: number;

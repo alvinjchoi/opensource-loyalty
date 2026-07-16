@@ -7,29 +7,49 @@ interface PackResult {
 }
 
 const exec = promisify(execFile);
-const workspaces = [
-  "@loyalty-interchange/protocol",
-  "@loyalty-interchange/reference",
-  "@loyalty-interchange/storage",
-  "@loyalty-interchange/storage-sqlite",
-  "@loyalty-interchange/server",
-  "@loyalty-interchange/cli",
-  "@loyalty-interchange/sdk"
+const workspaces: Array<{ name: string; entry: string; required?: string[] }> = [
+  { name: "@loyalty-interchange/protocol", entry: "dist/index" },
+  { name: "@loyalty-interchange/reference", entry: "dist/index" },
+  { name: "@loyalty-interchange/storage", entry: "dist/index" },
+  { name: "@loyalty-interchange/storage-sqlite", entry: "dist/index" },
+  {
+    name: "@loyalty-interchange/server",
+    entry: "dist/index",
+    required: ["dist/admin/index.html"]
+  },
+  { name: "@loyalty-interchange/cli", entry: "dist/index" },
+  { name: "@loyalty-interchange/sdk", entry: "dist/index" },
+  {
+    name: "@loyalty-interchange/mcp",
+    entry: "dist/server",
+    required: ["assets/llms.txt", "assets/spec/openapi.yaml", "assets/skills/lip/SKILL.md"]
+  }
 ];
 
 for (const workspace of workspaces) {
+  const runPrepack = [
+    "@loyalty-interchange/server",
+    "@loyalty-interchange/mcp"
+  ].includes(workspace.name);
   const { stdout } = await exec("npm", [
     "pack",
     "--dry-run",
     "--workspace",
-    workspace,
+    workspace.name,
     "--json",
-    "--ignore-scripts"
+    ...(runPrepack ? [] : ["--ignore-scripts"])
   ]);
-  const result = (JSON.parse(stdout) as PackResult[])[0];
-  if (!result) throw new Error(`npm pack returned no result for ${workspace}`);
+  const jsonStart = stdout.lastIndexOf("\n[");
+  const json = jsonStart >= 0 ? stdout.slice(jsonStart + 1) : stdout;
+  const result = (JSON.parse(json) as PackResult[])[0];
+  if (!result) throw new Error(`npm pack returned no result for ${workspace.name}`);
   const files = result.files.map((file) => file.path);
-  for (const required of ["package.json", "dist/index.js", "dist/index.d.ts"]) {
+  for (const required of [
+    "package.json",
+    `${workspace.entry}.js`,
+    `${workspace.entry}.d.ts`,
+    ...(workspace.required ?? [])
+  ]) {
     if (!files.includes(required)) {
       throw new Error(`${result.id} package is missing ${required}`);
     }

@@ -10,9 +10,13 @@ import {
 } from "@loyalty-interchange/reference";
 import { SqliteStateStore } from "@loyalty-interchange/storage-sqlite";
 import { createDemoProgram, seedDemoData } from "./demo.js";
+import { CampaignService } from "./campaigns.js";
+import { MembershipService } from "./memberships.js";
 import { EventedLoyaltyEngine } from "./evented-engine.js";
 import { ProgramManagementService } from "./program-management.js";
 import { SqliteWebhookOutbox } from "./webhook-outbox.js";
+import { SqliteWebhookHistoryStore } from "./webhook-history.js";
+import { SqliteWebhookSubscriptionStore } from "./webhook-subscriptions.js";
 import { WebhookDispatcher, type WebhookSubscription } from "./webhooks.js";
 
 export interface DemoPlatformOptions {
@@ -38,8 +42,10 @@ export interface DemoPlatform {
   engine: LoyaltyEngine;
   store: SqliteStateStore<LoyaltyEngineState>;
   adminAssetRoot?: string;
-  webhooks?: WebhookDispatcher;
+  webhooks: WebhookDispatcher;
   programs: ProgramManagementService;
+  campaigns: CampaignService;
+  memberships: MembershipService;
   close(): void;
 }
 
@@ -81,6 +87,10 @@ export function createDemoPlatform(options: DemoPlatformOptions): DemoPlatform {
     key: program.program_id
   });
   let webhookOutbox: SqliteWebhookOutbox | undefined;
+  let webhookHistory: SqliteWebhookHistoryStore | undefined;
+  let webhookSubscriptionStore: SqliteWebhookSubscriptionStore | undefined;
+  let campaigns: CampaignService | undefined;
+  let memberships: MembershipService | undefined;
   try {
     if (options.reset) store.clear();
     let state = store.load();
@@ -91,38 +101,63 @@ export function createDemoPlatform(options: DemoPlatformOptions): DemoPlatform {
         store.save(state);
       }
     }
-    const subscriptions = options.webhooks ?? webhookSubscriptionsFromEnv();
-    webhookOutbox =
-      subscriptions.length > 0
-        ? new SqliteWebhookOutbox({
-            path: options.databasePath,
-            key: `${program.program_id}:webhook-outbox`
-          })
-        : undefined;
-    if (options.reset) webhookOutbox?.clear();
-    const dispatcher =
-      subscriptions.length > 0
-        ? new WebhookDispatcher({
-            subscriptions,
-            ...(webhookOutbox ? { outbox: webhookOutbox } : {}),
-            onError: (message) => console.error(`[lip] ${message}`)
-          })
-        : undefined;
+    webhookSubscriptionStore = new SqliteWebhookSubscriptionStore({
+      path: options.databasePath,
+      key: `${program.program_id}:webhook-subscriptions`
+    });
+    if (options.reset) webhookSubscriptionStore.clear();
+    const subscriptions =
+      webhookSubscriptionStore.load() ??
+      options.webhooks ??
+      webhookSubscriptionsFromEnv();
+    webhookOutbox = new SqliteWebhookOutbox({
+      path: options.databasePath,
+      key: `${program.program_id}:webhook-outbox`
+    });
+    if (options.reset) webhookOutbox.clear();
+    webhookHistory = new SqliteWebhookHistoryStore({
+      path: options.databasePath,
+      key: `${program.program_id}:webhook-history`
+    });
+    if (options.reset) webhookHistory.clear();
+    const dispatcher = new WebhookDispatcher({
+      subscriptions,
+      outbox: webhookOutbox,
+      historyStore: webhookHistory,
+      onSubscriptionsChanged: (next) => webhookSubscriptionStore!.save(next),
+      onError: (message) => console.error(`[lip] ${message}`)
+    });
     // Demo seeding replays synthetic history; suppress emissions until it is done.
     let armed = false;
-    const engine = dispatcher
-      ? new EventedLoyaltyEngine(program, {
-          ...(state ? { state } : {}),
-          emit: (event) => {
-            if (armed) dispatcher.emit(event);
-          }
-        })
-      : new LoyaltyEngine(program, state ? { state } : {});
+    const engine = new EventedLoyaltyEngine(program, {
+      ...(state ? { state } : {}),
+      emit: (event) => {
+        if (armed) dispatcher.emit(event);
+      }
+    });
     if (!state && options.seed !== false && !options.program) seedDemoData(engine);
     armed = true;
+    campaigns = new CampaignService({
+      path: options.databasePath,
+      engine,
+      persistEngine: (nextState) => store.save(nextState),
+      schedulerIntervalMs: 30_000,
+      ...(options.reset ? { reset: true } : {})
+    });
+    memberships = new MembershipService({
+      path: options.databasePath,
+      engine,
+      persistEngine: (nextState) => store.save(nextState),
+      schedulerIntervalMs: 30_000,
+      ...(options.reset ? { reset: true } : {})
+    });
     programs.bindPublisher((nextProgram) => {
       const previousProgram = engine.getProgramDefinition();
       try {
+        campaigns?.assertCompatibleProgram(nextProgram);
+        memberships?.assertCompatibleProgram(
+          nextProgram.membership_policy?.plans.map((plan) => plan.plan_id) ?? []
+        );
         engine.reconfigureProgram(nextProgram);
         store.save(engine.exportState());
       } catch (error) {
@@ -130,21 +165,27 @@ export function createDemoPlatform(options: DemoPlatformOptions): DemoPlatform {
         throw error;
       }
     });
-    dispatcher?.resumePending();
+    dispatcher.resumePending();
     store.save(engine.exportState());
     const adminAssetRoot = options.adminAssetRoot ?? discoverAdminAssetRoot();
     return {
       engine,
       store,
       ...(adminAssetRoot ? { adminAssetRoot } : {}),
-      ...(dispatcher ? { webhooks: dispatcher } : {}),
+      webhooks: dispatcher,
       programs,
+      campaigns,
+      memberships,
       close: () => {
-        store.close();
+        campaigns?.close();
+        memberships?.close();
         programs.close();
+        store.close();
+        webhookSubscriptionStore?.close();
+        webhookHistory?.close();
         if (!webhookOutbox) return;
         const outboxToClose = webhookOutbox;
-        if (!dispatcher || dispatcher.inFlightDeliveries() === 0) {
+        if (dispatcher.inFlightDeliveries() === 0) {
           outboxToClose.close();
           return;
         }
@@ -153,6 +194,10 @@ export function createDemoPlatform(options: DemoPlatformOptions): DemoPlatform {
     };
   } catch (error) {
     webhookOutbox?.close();
+    webhookHistory?.close();
+    webhookSubscriptionStore?.close();
+    campaigns?.close();
+    memberships?.close();
     programs.close();
     store.close();
     throw error;

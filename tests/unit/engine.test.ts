@@ -7,6 +7,8 @@ import {
   makeEnroll,
   makeOrder,
   makeProgram,
+  makeStampProgram,
+  makeWalletCreditProgram,
   sequentialIds
 } from "../fixtures.js";
 
@@ -114,8 +116,8 @@ describe("LoyaltyEngine members and evaluation", () => {
           }),
           expect.objectContaining({
             model_id: "wallet_credit",
-            status: "planned",
-            engine_support: "planned"
+            status: "available",
+            engine_support: "implemented"
           })
         ])
       },
@@ -684,6 +686,13 @@ describe("LoyaltyEngine financial lifecycle", () => {
       status: "issued",
       artifact: { type: "qr_code", value: "SAKURA-REWARD-001" }
     });
+    const withoutIssuedReward = makeProgram();
+    withoutIssuedReward.rewards = withoutIssuedReward.rewards.filter((reward) =>
+      reward.reward_id !== "one-dollar-off"
+    );
+    expect(() => engine.reconfigureProgram(withoutIssuedReward)).toThrowError(
+      /active issued rewards/
+    );
 
     const held = engine.reserve({
       context: makeContext("reserve-wallet-reward"),
@@ -724,6 +733,97 @@ describe("LoyaltyEngine financial lifecycle", () => {
       cancellation_reason: "Campaign ended"
     });
     expect(engine.getLedger()).toHaveLength(0);
+  });
+
+  it("runs a stamp card and auto-issues its threshold reward", () => {
+    const engine = new LoyaltyEngine(makeStampProgram(), { ids: sequentialIds() });
+    engine.enroll(makeEnroll("stamp-enroll"));
+    const preview = engine.evaluate({
+      context: makeContext("stamp-preview"),
+      member_id: "member-001",
+      order: makeOrder({ order_id: "stamp-order-preview" })
+    });
+    expect(preview.estimated_accrual).toEqual({ unit: "stamps", amount: 1 });
+
+    for (let index = 1; index <= 3; index += 1) {
+      engine.postAccrual({
+        context: makeContext(`stamp-accrual-${index}`),
+        member_id: "member-001",
+        order: makeOrder({ order_id: `stamp-order-${index}` })
+      });
+    }
+    expect(engine.getAccount({
+      context: makeContext("stamp-account"),
+      member_id: "member-001",
+      program_id: "demo-foodservice"
+    }).balances[0]).toMatchObject({ unit: "stamps", amount: 0, available: 0 });
+    const wallet = engine.listIssuedRewards({
+      context: makeContext("stamp-wallet"),
+      member_id: "member-001",
+      program_id: "demo-foodservice"
+    });
+    expect(wallet.issued_rewards).toEqual([
+      expect.objectContaining({
+        issued_reward_id: "stamp-member-001-1",
+        reward_id: "free-entree",
+        status: "issued"
+      })
+    ]);
+    expect(engine.getLedger().map((entry) => entry.amount)).toEqual([1, 1, 1, -3]);
+    expect(engine.inspectAdmin().program_configuration).toMatchObject({
+      current_model_id: "visits",
+      editable: true,
+      publish_supported: true
+    });
+  });
+
+  it("earns, redeems, reports, and expires promotional wallet credit", () => {
+    const clock = new MutableClock();
+    const engine = new LoyaltyEngine(makeWalletCreditProgram(), {
+      clock,
+      ids: sequentialIds()
+    });
+    engine.enroll(makeEnroll("credit-enroll"));
+    engine.postAccrual({
+      context: makeContext("credit-accrual"),
+      member_id: "member-001",
+      order: makeOrder({ order_id: "credit-order" })
+    });
+    expect(engine.getAccount({
+      context: makeContext("credit-account"),
+      member_id: "member-001",
+      program_id: "demo-foodservice"
+    }).balances[0]).toMatchObject({ unit: "credits", amount: 55, available: 55 });
+
+    const held = engine.reserve({
+      context: makeContext("credit-reserve"),
+      redemption_id: "credit-redemption",
+      member_id: "member-001",
+      reward_id: "one-dollar-off",
+      order: makeOrder({ order_id: "credit-redemption-order" })
+    });
+    expect(held.reservation.cost).toEqual({ unit: "credits", amount: 50 });
+    engine.capture({
+      context: makeContext("credit-capture"),
+      reservation_id: held.reservation.reservation_id,
+      order_id: "credit-redemption-order"
+    });
+    expect(engine.inspectAdmin().summary).toMatchObject({
+      primary_unit: "credits",
+      primary_balance_outstanding: 5,
+      primary_balance_issued: 55,
+      primary_balance_redeemed: 50
+    });
+
+    clock.advance(31 * 86_400);
+    expect(engine.getAccount({
+      context: makeContext("credit-expired-account"),
+      member_id: "member-001",
+      program_id: "demo-foodservice"
+    }).balances[0]).toMatchObject({ unit: "credits", amount: 0 });
+    expect(engine.getLedger()).toContainEqual(
+      expect.objectContaining({ operation: "expiration", unit: "credits", amount: -5 })
+    );
   });
 
   it("posts signed refund adjustments once", () => {
@@ -846,7 +946,7 @@ describe("LoyaltyEngine financial lifecycle", () => {
       order: foreign
     })).toThrowError(/currency/);
 
-    expect(() => reserve(engine, "reserve-without-points")).toThrowError(/enough available points/);
+    expect(() => reserve(engine, "reserve-without-points")).toThrowError(/enough available balance/);
   });
 
   it("rejects malformed program configuration", () => {

@@ -52,6 +52,32 @@ expired immediately. `warning_days` declares dates at which an implementation
 may notify a member; notification transport and delivery are outside this
 version of the protocol.
 
+### Visit and stamp accounts
+
+A provider MAY expose one primary `visits` or `stamps` account instead of a
+points account. The normal transaction lifecycle is unchanged:
+`orders.evaluate` estimates the count, `accruals.post` posts it, and
+`ledger.list` returns entries in that unit.
+
+Threshold rules are provider-owned program configuration in this version. When
+a threshold is reached, a provider MAY issue the configured catalog reward
+through the issued-reward wallet and post a balancing adjustment when the card
+resets. The issued reward is claimed through the standard reserve/capture
+lifecycle. Providers MUST make threshold issuance idempotent for an accrued
+order.
+
+### Wallet credit accounts
+
+A provider MAY expose a primary `credits` account whose integer amount is a
+provider-defined liability unit such as promotional currency minor units.
+Evaluation, accrual, ledger, reservation, capture, reversal, adjustment, and
+expiration use the same operations as points while retaining `unit: "credits"`.
+
+Providers MUST state whether credit is promotional or stored value in program
+metadata or an implementation profile. Regulatory treatment and payment-tender
+interaction are outside LIP core. Credit expiration and redemption MUST retain
+lot-level auditability so a reversal restores the originally consumed value.
+
 ## Member account
 
 `account.get` returns one consistent snapshot containing the member, posted and

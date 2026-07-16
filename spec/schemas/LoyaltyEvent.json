@@ -59,6 +59,22 @@
         {
           "const": "org.loyalty-interchange.redemption.reversed.v1",
           "type": "string"
+        },
+        {
+          "const": "org.loyalty-interchange.issued-reward.issued.v1",
+          "type": "string"
+        },
+        {
+          "const": "org.loyalty-interchange.issued-reward.redeemed.v1",
+          "type": "string"
+        },
+        {
+          "const": "org.loyalty-interchange.issued-reward.restored.v1",
+          "type": "string"
+        },
+        {
+          "const": "org.loyalty-interchange.issued-reward.cancelled.v1",
+          "type": "string"
         }
       ]
     },
@@ -762,6 +778,125 @@
                 "reversed_at": {
                   "format": "date-time",
                   "type": "string"
+                }
+              }
+            }
+          }
+        },
+        {
+          "additionalProperties": false,
+          "type": "object",
+          "required": [
+            "issued_reward"
+          ],
+          "properties": {
+            "issued_reward": {
+              "additionalProperties": false,
+              "type": "object",
+              "required": [
+                "issued_reward_id",
+                "member_id",
+                "program_id",
+                "reward_id",
+                "status",
+                "issued_at"
+              ],
+              "properties": {
+                "issued_reward_id": {
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+                  "description": "Opaque, stable identifier within the owning system.",
+                  "type": "string"
+                },
+                "member_id": {
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+                  "description": "Opaque, stable identifier within the owning system.",
+                  "type": "string"
+                },
+                "program_id": {
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+                  "description": "Opaque, stable identifier within the owning system.",
+                  "type": "string"
+                },
+                "reward_id": {
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+                  "description": "Opaque, stable identifier within the owning system.",
+                  "type": "string"
+                },
+                "status": {
+                  "anyOf": [
+                    {
+                      "const": "issued",
+                      "type": "string"
+                    },
+                    {
+                      "const": "redeemed",
+                      "type": "string"
+                    },
+                    {
+                      "const": "cancelled",
+                      "type": "string"
+                    },
+                    {
+                      "const": "expired",
+                      "type": "string"
+                    }
+                  ]
+                },
+                "issued_at": {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                "expires_at": {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                "redeemed_at": {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                "cancelled_at": {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                "cancellation_reason": {
+                  "minLength": 1,
+                  "maxLength": 255,
+                  "type": "string"
+                },
+                "artifact": {
+                  "additionalProperties": false,
+                  "type": "object",
+                  "required": [
+                    "type",
+                    "value"
+                  ],
+                  "properties": {
+                    "type": {
+                      "anyOf": [
+                        {
+                          "const": "code",
+                          "type": "string"
+                        },
+                        {
+                          "const": "qr_code",
+                          "type": "string"
+                        }
+                      ]
+                    },
+                    "value": {
+                      "minLength": 1,
+                      "maxLength": 512,
+                      "type": "string"
+                    }
+                  }
                 }
               }
             }

@@ -54,7 +54,9 @@ export async function startMockServer(options: MockOptions): Promise<RunningServ
       ...(platform.adminAssetRoot ? { assetRoot: platform.adminAssetRoot } : {}),
       storage: platform.store.status,
       programs: platform.programs,
-      ...(platform.webhooks ? { webhooks: () => platform.webhooks!.adminStatus() } : {})
+      campaigns: platform.campaigns,
+      memberships: platform.memberships,
+      webhookManager: platform.webhooks
     }
   });
   return {

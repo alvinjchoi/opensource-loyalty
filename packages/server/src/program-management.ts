@@ -65,8 +65,12 @@ const allowedProgramFields = new Set([
   "tiers",
   "tier_policy",
   "point_expiration",
+  "balance_expiration",
   "earning_policy",
   "earn_rate",
+  "visit_stamp_policy",
+  "wallet_credit_policy",
+  "membership_policy",
   "evaluation_ttl_seconds",
   "reservation_ttl_seconds",
   "rewards",
@@ -224,6 +228,44 @@ export class ProgramManagementService {
     return this.snapshot();
   }
 
+  public upsertReward(reward: unknown, actor: string): ProgramManagementSnapshot {
+    if (!reward || typeof reward !== "object" || Array.isArray(reward)) {
+      throw new EngineError("validation_failed", "Reward must be an object", 422);
+    }
+    const rewardId = (reward as Record<string, unknown>)["reward_id"];
+    if (typeof rewardId !== "string" || rewardId.trim().length === 0) {
+      throw new EngineError("validation_failed", "reward_id is required", 422);
+    }
+    const program = this.draftProgramObject();
+    const rewards = Array.isArray(program["rewards"])
+      ? structuredClone(program["rewards"]) as unknown[]
+      : [];
+    const index = rewards.findIndex((candidate) =>
+      candidate !== null &&
+      typeof candidate === "object" &&
+      !Array.isArray(candidate) &&
+      (candidate as Record<string, unknown>)["reward_id"] === rewardId
+    );
+    if (index >= 0) rewards[index] = clone(reward);
+    else rewards.push(clone(reward));
+    return this.saveDraft({ ...program, rewards }, actor);
+  }
+
+  public deleteReward(rewardId: string, actor: string): ProgramManagementSnapshot {
+    const program = this.draftProgramObject();
+    const rewards = Array.isArray(program["rewards"]) ? program["rewards"] : [];
+    const nextRewards = rewards.filter((candidate) =>
+      candidate === null ||
+      typeof candidate !== "object" ||
+      Array.isArray(candidate) ||
+      (candidate as Record<string, unknown>)["reward_id"] !== rewardId
+    );
+    if (nextRewards.length === rewards.length) {
+      throw new EngineError("not_found", "Reward was not found", 404);
+    }
+    return this.saveDraft({ ...program, rewards: nextRewards }, actor);
+  }
+
   public validateDraft(): ProgramValidationResult {
     const draft = this.state.draft;
     if (!draft) {
@@ -336,6 +378,14 @@ export class ProgramManagementService {
   private recordAudit(entry: ProgramAuditEntry): void {
     this.state.audit.unshift(entry);
     this.state.audit = this.state.audit.slice(0, 100);
+  }
+
+  private draftProgramObject(): Record<string, unknown> {
+    const value = this.state.draft?.program ?? this.state.active_program;
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      throw new EngineError("invalid_program", "Program draft must be an object", 422);
+    }
+    return clone(value as Record<string, unknown>);
   }
 
   private save(): void {

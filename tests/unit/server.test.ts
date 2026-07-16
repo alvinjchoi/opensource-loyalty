@@ -184,7 +184,7 @@ describe("reference HTTP server", () => {
       const bootstrapBody = await bootstrap.text();
       expect(bootstrapBody).not.toContain("admin-test-key");
       expect(JSON.parse(bootstrapBody)).toMatchObject({
-        admin_api_version: "0.2",
+        admin_api_version: "0.3",
         auth: {
           mode: "api_key",
           requires_login: true,
@@ -276,7 +276,7 @@ describe("reference HTTP server", () => {
       });
       expect(snapshot.status).toBe(200);
       expect(await snapshot.json()).toMatchObject({
-        admin_api_version: "0.2",
+        admin_api_version: "0.3",
         platform: { storage: { driver: "sqlite", persistent: true } },
         webhooks: {
           enabled: true,
@@ -291,7 +291,8 @@ describe("reference HTTP server", () => {
           current_model_id: "points",
           templates: expect.arrayContaining([
             expect.objectContaining({ model_id: "points", status: "active" }),
-            expect.objectContaining({ model_id: "visits", status: "planned" })
+            expect.objectContaining({ model_id: "visits", status: "available" }),
+            expect.objectContaining({ model_id: "wallet_credit", status: "available" })
           ])
         },
         summary: { active_members: 1 },
@@ -313,11 +314,14 @@ describe("reference HTTP server", () => {
       seed: false,
       program: makeProgram()
     });
+    platform.engine.enroll(makeEnroll("campaign-admin-enroll"));
     const running = await startReferenceServer(platform.engine, {
       apiKey: "program-admin-key",
       persistState: (state) => platform.store.save(state),
       admin: {
         programs: platform.programs,
+        campaigns: platform.campaigns,
+        webhookManager: platform.webhooks,
         storage: platform.store.status
       }
     });
@@ -341,6 +345,66 @@ describe("reference HTTP server", () => {
         name: "Admin-published program",
         earn_rate: { points: 4, spend_minor_units: 100 }
       };
+
+      const webhook = await fetch(`${running.url}/admin/api/v1/webhooks/subscription`, {
+        method: "PUT",
+        headers: {
+          cookie,
+          "content-type": "application/json",
+          "x-lip-csrf": csrf
+        },
+        body: JSON.stringify({
+          url: "https://receiver.example/hooks",
+          secret: "server-test-secret-value"
+        })
+      });
+      expect(webhook.status).toBe(200);
+      const webhookBody = await webhook.json() as { subscription_id: string };
+      expect(platform.webhooks.listSubscriptions()).toEqual([
+        expect.objectContaining({ subscription_id: webhookBody.subscription_id })
+      ]);
+
+      const segmentResponse = await fetch(`${running.url}/admin/api/v1/segments`, {
+        method: "PUT",
+        headers: { cookie, "content-type": "application/json", "x-lip-csrf": csrf },
+        body: JSON.stringify({ name: "Admin segment", member_ids: ["member-001"] })
+      });
+      expect(segmentResponse.status).toBe(200);
+      const segment = await segmentResponse.json() as { segment_id: string };
+      const campaignResponse = await fetch(`${running.url}/admin/api/v1/campaigns`, {
+        method: "PUT",
+        headers: { cookie, "content-type": "application/json", "x-lip-csrf": csrf },
+        body: JSON.stringify({
+          name: "Admin campaign",
+          reward_id: "one-dollar-off",
+          segment_id: segment.segment_id
+        })
+      });
+      expect(campaignResponse.status).toBe(200);
+      const campaign = await campaignResponse.json() as { campaign_id: string };
+      const runCampaign = await fetch(`${running.url}/admin/api/v1/campaigns/run`, {
+        method: "POST",
+        headers: { cookie, "content-type": "application/json", "x-lip-csrf": csrf },
+        body: JSON.stringify({ campaign_id: campaign.campaign_id })
+      });
+      expect(runCampaign.status).toBe(200);
+      expect(await runCampaign.json()).toMatchObject({ issued: 1, failed: 0 });
+
+      const rewardDraft = await fetch(`${running.url}/admin/api/v1/program/rewards`, {
+        method: "PUT",
+        headers: { cookie, "content-type": "application/json", "x-lip-csrf": csrf },
+        body: JSON.stringify({
+          reward: {
+            ...makeProgram().rewards[0],
+            reward_id: "admin-created-reward",
+            name: "Admin created reward"
+          }
+        })
+      });
+      expect(rewardDraft.status).toBe(200);
+      expect(await rewardDraft.json()).toMatchObject({
+        draft: { validation: { ok: true } }
+      });
 
       const rejected = await fetch(`${running.url}/admin/api/v1/program/draft`, {
         method: "PUT",
@@ -394,6 +458,21 @@ describe("reference HTTP server", () => {
       expect(platform.engine.inspectAdmin().program.earning.rate.amount).toBe(
         makeProgram().earn_rate.points
       );
+
+      const deletedWebhook = await fetch(
+        `${running.url}/admin/api/v1/webhooks/subscription/delete`,
+        {
+          method: "POST",
+          headers: {
+            cookie,
+            "content-type": "application/json",
+            "x-lip-csrf": csrf
+          },
+          body: JSON.stringify({ subscription_id: webhookBody.subscription_id })
+        }
+      );
+      expect(deletedWebhook.status).toBe(200);
+      expect(platform.webhooks.listSubscriptions()).toEqual([]);
     } finally {
       await running.close();
       platform.close();
