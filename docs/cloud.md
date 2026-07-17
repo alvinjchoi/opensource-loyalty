@@ -51,16 +51,17 @@ environment inside the control-plane process. Each `create` job:
 2. starts an isolated runtime — per-environment SQLite under
    `LIP_CLOUD_DATA_DIR` (default `.lip-cloud`), or tenant-scoped Postgres when
    `LIP_CLOUD_DATA_PLANE_DATABASE_URL` is set;
-3. generates a merchant API key and writes it to a `0600` credentials file
-   (`<data-dir>/<environment_id>.credentials.json`); and
-4. marks the environment `ready` with its reachable `api_url` and `admin_url`.
+3. allocates a **stable port** from `LIP_CLOUD_DATA_PLANE_BASE_PORT` (default
+   `13210`) recorded in `<data-dir>/ports.json`;
+4. generates (or reuses) a merchant API key and writes a `0600` credentials
+   file (`<data-dir>/<environment_id>.credentials.json`); and
+5. marks the environment `ready` with its reachable `api_url` and `admin_url`.
 
-A BFF can then point `LIP_URL` at the provisioned `api_url` with the generated
-key — the full managed path (`/cloud/v1` environment → live `/lip/v1` tenant)
-works end to end locally. Spike boundaries: runtimes live and die with the
-control-plane process, ports are ephemeral across restarts, only `create`
-operations are supported, and credentials are files rather than an encrypted
-store.
+On control-plane startup the provisioner calls `restore()` and relaunches every
+credentialed environment on the same port and API key so BFF `LIP_URL` values
+survive restarts. Only `create` operations are supported; credentials remain
+files rather than an encrypted secret store. Regional adapters still replace
+this for production.
 
 ## Start locally
 

@@ -104,9 +104,13 @@ change the customer id, member id, balances, or ledger history.
 
 ## Deletion
 
-`markCustomerDeleted` creates a tombstone and prevents the external identity
-from silently creating a new loyalty account. The application remains
-responsible for:
+`deleteCustomer` / `markCustomerDeleted` creates a tombstone and prevents the
+external identity from silently creating a new loyalty account. When the
+resolver is constructed with `cancelMember` (or `cancelLipMember` against the
+reference Admin API), each linked LIP member is closed so accruals and
+redemptions fail while the immutable ledger remains.
+
+The application remains responsible for:
 
 - deleting or disabling the account at Clerk/Auth0;
 - erasing profile PII and consent data according to policy;

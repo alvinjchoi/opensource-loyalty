@@ -279,9 +279,11 @@ describe("customer-to-member resolution", () => {
   it("retains identity linkage while preventing deleted customers from resolving", async () => {
     const repository = new MemoryCustomerDirectoryRepository();
     const { lip } = lipFixture();
+    const cancelMember = vi.fn(async () => undefined);
     const resolver = new CustomerLoyaltyResolver({
       repository,
       lip,
+      cancelMember,
       clock: () => new Date(NOW),
       customerId: () => "customer-001"
     });
@@ -292,6 +294,7 @@ describe("customer-to-member resolution", () => {
     });
     await resolver.deleteCustomer("sakura", "customer-001");
 
+    expect(cancelMember).toHaveBeenCalledWith("member-001");
     await expect(
       resolver.resolve({
         tenantId: "sakura",
