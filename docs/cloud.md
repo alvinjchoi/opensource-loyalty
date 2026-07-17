@@ -36,9 +36,31 @@ The `@loyalty-interchange/cloud` workspace includes:
 - an authenticated management API with direct OIDC or trusted-gateway modes;
 - a provider boundary for Stripe or another billing system.
 
-The control plane does not yet create infrastructure or collect payment. New
-environments remain `pending` until a provisioning adapter processes their job,
-and new organizations use the `manual` billing provider on the Free plan.
+The control plane does not yet collect payment; new organizations use the
+`manual` billing provider on the Free plan. New environments remain `pending`
+until a provisioning adapter processes their job. A local adapter ships today
+(see below); regional infrastructure adapters remain future work.
+
+## Local data-plane provisioner
+
+Setting `LIP_CLOUD_PROGRAM_DIR` starts a provisioning worker with
+`LocalDataPlaneProvisioner`, which runs one LIP data-plane runtime per
+environment inside the control-plane process. Each `create` job:
+
+1. loads `<program_id>.json` from the program directory;
+2. starts an isolated runtime — per-environment SQLite under
+   `LIP_CLOUD_DATA_DIR` (default `.lip-cloud`), or tenant-scoped Postgres when
+   `LIP_CLOUD_DATA_PLANE_DATABASE_URL` is set;
+3. generates a merchant API key and writes it to a `0600` credentials file
+   (`<data-dir>/<environment_id>.credentials.json`); and
+4. marks the environment `ready` with its reachable `api_url` and `admin_url`.
+
+A BFF can then point `LIP_URL` at the provisioned `api_url` with the generated
+key — the full managed path (`/cloud/v1` environment → live `/lip/v1` tenant)
+works end to end locally. Spike boundaries: runtimes live and die with the
+control-plane process, ports are ephemeral across restarts, only `create`
+operations are supported, and credentials are files rather than an encrypted
+store.
 
 ## Start locally
 
@@ -133,7 +155,8 @@ points issued are not a billing metric.
 
 ## Next production steps
 
-1. Implement regional provisioning adapters that create data-plane runtimes
+1. Replace the local provisioner with regional adapters that create durable
+   data-plane runtimes (stable hosts, restarts, suspend/delete/upgrade jobs)
    through the existing claim-safe worker.
 2. Implement the Stripe adapter behind `CloudBillingProvider`, including signed
    webhook handling.

@@ -1,7 +1,10 @@
 #!/usr/bin/env node
 
+import { hostname } from "node:os";
 import { OidcAuthenticator } from "./auth.js";
+import { LocalDataPlaneProvisioner } from "./data-plane-provisioner.js";
 import { PostgresCloudRepository } from "./postgres-repository.js";
+import { CloudProvisioningWorker } from "./provisioning.js";
 import { CloudControlPlane } from "./service.js";
 import { startCloudServer } from "./server.js";
 
@@ -40,6 +43,39 @@ const controlPlane = new CloudControlPlane({
   defaultPlanId: process.env["LIP_CLOUD_DEFAULT_PLAN"] ?? "free"
 });
 await controlPlane.migrate();
+
+const programDirectory = process.env["LIP_CLOUD_PROGRAM_DIR"];
+let provisioner: LocalDataPlaneProvisioner | undefined;
+let worker: CloudProvisioningWorker | undefined;
+if (programDirectory) {
+  provisioner = new LocalDataPlaneProvisioner({
+    programDirectory,
+    dataDirectory: process.env["LIP_CLOUD_DATA_DIR"] ?? ".lip-cloud",
+    ...(process.env["LIP_CLOUD_DATA_PLANE_DATABASE_URL"]
+      ? { connectionString: process.env["LIP_CLOUD_DATA_PLANE_DATABASE_URL"] }
+      : {}),
+    ...(process.env["LIP_CLOUD_DATA_PLANE_HOST"]
+      ? { host: process.env["LIP_CLOUD_DATA_PLANE_HOST"] }
+      : {}),
+    onProvisioned: (runtime) => {
+      console.log(JSON.stringify({
+        event: "cloud_environment_provisioned",
+        environment_id: runtime.environment_id,
+        tenant_id: runtime.tenant_id,
+        program_id: runtime.program_id,
+        api_url: runtime.api_url,
+        credentials_path: runtime.credentials_path
+      }));
+    }
+  });
+  worker = new CloudProvisioningWorker({
+    repository,
+    provisioner,
+    workerId: `local-${hostname()}-${process.pid}`
+  });
+  worker.start();
+}
+
 const running = await startCloudServer(controlPlane, {
   ...(authenticator ? { authenticator } : { apiKey: apiKey! }),
   host: process.env["LIP_CLOUD_HOST"] ?? "0.0.0.0",
@@ -57,12 +93,15 @@ const running = await startCloudServer(controlPlane, {
 console.log(JSON.stringify({
   event: "cloud_control_plane_ready",
   url: running.url,
-  regions
+  regions,
+  local_provisioner: Boolean(provisioner)
 }));
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.once(signal, () => {
-    void running.close()
+    worker?.close();
+    void (provisioner?.close() ?? Promise.resolve())
+      .then(() => running.close())
       .then(() => controlPlane.close())
       .then(() => process.exit(0));
   });
