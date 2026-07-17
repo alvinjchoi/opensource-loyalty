@@ -20,26 +20,28 @@ tree.
 
 ## Shared priority: customer identity contract
 
-Implement the provider-neutral contract before replacing Sakura authentication.
-The boundary should support Clerk first while remaining compatible with Auth0
-or another standards-compliant OIDC provider.
+Use Clerk directly for Sakura customer authentication. The shared loyalty
+boundary supports Clerk, Auth0, or another standards-compliant OIDC provider
+without wrapping the provider's sign-up, sign-in, recovery, or session APIs.
 
 The contract must define:
 
-1. JWT issuer, audience, subject, tenant, expiry, and verified-contact claims.
+1. JWT issuer, audience, subject, expiry, authorized party, and
+   verified-contact claims. Tenant scope comes from trusted BFF configuration,
+   not an untrusted token choice.
 2. Stable CraveUp customer ids independent of the identity provider.
 3. Mapping from `{tenant_id, issuer, subject}` to one customer and one or more
    program-scoped LIP member ids.
-4. Session introspection, profile, consent, export, and account-deletion APIs.
-5. Identity linking, duplicate resolution, provider outages, token rejection,
+4. Identity linking, duplicate resolution, provider outages, token rejection,
    and partial-failure behavior.
-6. Loyalty enrollment and deletion semantics without deleting financially
+5. Loyalty enrollment and deletion semantics without deleting financially
    retained ledger history.
-7. A provider-neutral server adapter plus Clerk implementation.
-8. Contract tests shared by every provider implementation.
+6. Contract tests for OIDC validation and identity-to-member mapping.
 
-Sakura should consume the resulting SDK instead of extending its current local
-password and JSON-session implementation.
+`@loyalty-interchange/identity` now supplies this thin server-side contract.
+Sakura should use Clerk's native Expo SDK, pass its access token to the BFF, and
+use this package there instead of extending the current password and
+JSON-session implementation.
 
 ## Requested Sakura demo: ten locations
 
@@ -68,12 +70,13 @@ storefront readiness check.
 
 ## Cross-repository release gate
 
-After the loyalty contract and SDK exist:
+After the identity package is published or linked into Sakura:
 
 1. Sakura integrates Clerk using a separate consumer instance.
 2. Sakura removes custom password/session endpoints and stores native tokens in
    secure storage.
-3. Both repositories run the same identity-to-member contract tests.
+3. Sakura adds BFF tests proving Clerk tokens resolve to the expected stable
+   customer and member ids.
 4. Sakura runs mobile E2E for sign-in, enrollment, wallet, location selection,
    checkout, logout/login, and deletion.
 5. Stripe and Crave storefront sandbox tests pass before live payments.

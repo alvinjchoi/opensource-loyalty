@@ -44,6 +44,10 @@ For more information, be sure to check out the **[LIP Documentation](docs/README
   provisioning jobs, idempotent usage metering, and quotas. The open protocol
   and self-hosted runtime remain independent of this non-normative service.
 
+- 🔐 **External Identity Bridge**: Validate Clerk, Auth0, or generic OIDC access
+  tokens in your BFF and map provider identities to stable customer and LIP
+  member ids without moving credentials or sessions into the loyalty platform.
+
 - 🧪 **Specs and Conformance**: OpenAPI 3.1 contract, JSON Schema Draft 2020-12 payload schemas, normative lifecycle, account, webhook, and foodservice profile documents, and black-box HTTP conformance tests you can run against any implementation.
 
 - 🔧 **Batteries-Included CLI**: Validation, diagnostics (`doctor`), local serving, schema listing, and baseline conformance checks.
@@ -238,6 +242,7 @@ first registry release is completed.
 |   `-- typescript/         # Runnable SDK lifecycle examples
 |-- packages/
 |   |-- cli/                # CLI: serve, quickstart, validation, doctor, conformance
+|   |-- identity/           # External OIDC validation and customer/member mapping
 |   |-- protocol/           # TypeScript types, schemas, validation, protocol contracts
 |   |-- reference/          # Deterministic loyalty engine and Admin snapshot model
 |   |-- sdk/                # Domain SDK and generated low-level OpenAPI client

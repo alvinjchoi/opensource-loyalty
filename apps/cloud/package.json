@@ -14,7 +14,7 @@
     "start": "node dist/cli.js"
   },
   "dependencies": {
-    "jose": "^6.2.3",
+    "@loyalty-interchange/identity": "0.1.0",
     "pg": "^8.22.0",
     "stripe": "^22.3.2"
   },

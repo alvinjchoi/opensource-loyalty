@@ -94,6 +94,8 @@ Enable MCP: [`mcp.json`](mcp.json) · Skills: [`skills/README.md`](skills/README
   migrations, transaction locks, multi-instance serving, and scheduler leases.
 - [Cloud control plane](cloud.md): organizations, projects, environments,
   plans, subscriptions, provisioning jobs, and usage metering.
+- [Customer identity integration](customer-identity.md): use Clerk, Auth0, or
+  another OIDC provider while mapping stable customers to LIP members.
 - [Engagement integrations](engagement.md): analytics, consent-safe CRM
   exports, signed messaging connectors, jobs, retry, and adapter contracts.
 - [Punchh compatibility](punchh-compatibility.md): map a restaurant loyalty

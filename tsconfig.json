@@ -1,6 +1,7 @@
 {
   "files": [],
   "references": [
+    { "path": "./packages/identity" },
     { "path": "./apps/cloud" },
     { "path": "./packages/protocol" },
     { "path": "./packages/reference" },
