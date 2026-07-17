@@ -22,6 +22,7 @@ ENV LIP_DATABASE_PATH=/data/reference.db
 
 COPY package.json package-lock.json ./
 COPY --from=build /app/node_modules ./node_modules
+COPY --from=build /app/apps/cloud ./apps/cloud
 COPY --from=build /app/packages ./packages
 RUN mkdir -p /data && chown -R node:node /app /data
 
@@ -30,6 +31,6 @@ USER node
 EXPOSE 3210
 
 HEALTHCHECK --interval=5s --timeout=2s --start-period=5s --retries=5 \
-  CMD wget -qO- http://127.0.0.1:3210/health >/dev/null || exit 1
+  CMD wget -qO- "http://127.0.0.1:${HEALTH_PORT:-3210}/health" >/dev/null || exit 1
 
 CMD ["node", "packages/server/dist/cli.js"]

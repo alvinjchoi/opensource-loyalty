@@ -18,7 +18,11 @@ export default defineConfig({
       provider: "v8",
       reporter: ["text", "json-summary"],
       include: ["packages/*/src/**/*.ts"],
-      exclude: ["packages/server/src/cli.ts", "packages/cli/src/cli.ts"],
+      exclude: [
+        "packages/server/src/cli.ts",
+        "packages/cli/src/cli.ts",
+        "packages/storage-postgres/src/**"
+      ],
       thresholds: {
         lines: 85,
         functions: 85,

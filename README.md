@@ -39,6 +39,11 @@ For more information, be sure to check out the **[LIP Documentation](docs/README
   tenant-scoped Postgres tables, migrations, optimistic revisions, advisory
   transaction locks, and scheduler leases for multi-instance protocol serving.
 
+- ☁️ **Cloud Control Plane**: A separate Postgres-backed management service for
+  organizations, projects, regional environments, plans, subscriptions,
+  provisioning jobs, idempotent usage metering, and quotas. The open protocol
+  and self-hosted runtime remain independent of this non-normative service.
+
 - 🧪 **Specs and Conformance**: OpenAPI 3.1 contract, JSON Schema Draft 2020-12 payload schemas, normative lifecycle, account, webhook, and foodservice profile documents, and black-box HTTP conformance tests you can run against any implementation.
 
 - 🔧 **Batteries-Included CLI**: Validation, diagnostics (`doctor`), local serving, schema listing, and baseline conformance checks.
@@ -193,6 +198,10 @@ For the Postgres-backed profile, run `docker compose --profile postgres up
 --build`; its API defaults to port `3211`. See
 [PostgreSQL production storage](docs/postgres.md).
 
+To run the managed-service control-plane foundation on port `3220`, set a
+`LIP_CLOUD_API_KEY` of at least 16 characters and run `docker compose --profile
+cloud up --build`. See [Cloud control plane](docs/cloud.md).
+
 Authenticated protocol requests are limited per remote client. Responses
 include `RateLimit-*` headers and return RFC 9457 problem details with HTTP 429
 when exhausted. The CLI and container emit one JSON `http_request` record per
@@ -222,7 +231,8 @@ first registry release is completed.
 
 ```text
 |-- apps/
-|   `-- admin/              # Browser Admin dashboard
+|   |-- admin/              # Browser Admin dashboard
+|   `-- cloud/              # Managed Cloud control plane and management API
 |-- docs/                   # Developer guides and API documentation
 |-- examples/
 |   `-- typescript/         # Runnable SDK lifecycle examples
@@ -245,6 +255,7 @@ first registry release is completed.
 - **Language:** TypeScript on Node.js 20.19+
 - **Frontend:** React, Vite, Tailwind CSS, lucide-react
 - **API:** Node HTTP server with OpenAPI 3.1 contract
+- **Cloud:** Separate Node management API with PostgreSQL control-plane state
 - **Validation:** JSON Schema Draft 2020-12 via TypeBox
 - **SDK:** Handwritten domain client plus generated low-level OpenAPI client
 - **Storage:** SQLite sandbox or normalized, tenant-scoped PostgreSQL
@@ -300,6 +311,7 @@ Current priorities are tracked in [PLAN.md](PLAN.md). Near-term focus:
 - Reward wallet and reward management APIs
 - Webhook subscription management
 - Async Postgres stores for the remaining Admin extension services
+- Cloud provisioning worker, direct OIDC validation, and Stripe billing adapter
 - More SDK examples and machine-readable docs
 
 ## Contributing 🤝
