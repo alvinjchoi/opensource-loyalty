@@ -98,6 +98,24 @@ describe("LoyaltyEngine members and evaluation", () => {
     expect(() => new LoyaltyEngine(changed, { state })).toThrowError(/incompatible/);
   });
 
+  it("closes members without deleting ledger history and blocks re-enrollment", () => {
+    const engine = enrolledEngine();
+    accrue(engine, "cancel-member-accrual-key");
+    const closed = engine.cancelMember("member-001");
+    expect(closed).toMatchObject({ member_id: "member-001", status: "closed" });
+    expect(engine.cancelMember("member-001").status).toBe("closed");
+    expect(engine.getLedger()).toHaveLength(1);
+    expect(() =>
+      engine.getAccount({
+        context: makeContext("closed-account-key"),
+        member_id: "member-001",
+        program_id: "demo-foodservice"
+      })
+    ).toThrowError(/closed/);
+    expect(() => engine.enroll(makeEnroll("closed-reenroll-key"))).toThrowError(/cannot be re-enrolled/);
+    expect(() => engine.cancelMember("missing-member")).toThrowError(/not found/);
+  });
+
   it("provides a non-normative operator snapshot", () => {
     const engine = enrolledEngine();
     accrue(engine, "admin-snapshot-accrual-key");

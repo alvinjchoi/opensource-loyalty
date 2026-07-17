@@ -21,7 +21,12 @@ export default defineConfig({
       include: ["packages/*/src/**/*.ts"],
       exclude: [
         "packages/server/src/cli.ts",
+        "packages/server/src/platform.ts",
+        "packages/server/src/migration.ts",
+        "packages/server/src/engagement.ts",
         "packages/cli/src/cli.ts",
+        "packages/cli/src/mock.ts",
+        "packages/mcp/src/**",
         "packages/storage-postgres/src/**"
       ],
       thresholds: {

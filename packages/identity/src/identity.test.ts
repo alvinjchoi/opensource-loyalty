@@ -13,6 +13,7 @@ import {
   MemoryCustomerDirectoryRepository,
   OidcTokenVerifier,
   bearerToken,
+  cancelLipMember,
   type IdentityProviderPrincipal
 } from "./index.js";
 
@@ -302,6 +303,75 @@ describe("customer-to-member resolution", () => {
         principal: principal("clerk-user")
       })
     ).rejects.toMatchObject({ code: "customer_deleted" });
+  });
+
+  it("cancels LIP members through the admin API helper", async () => {
+    const fetchMock = vi.fn(async () =>
+      new Response(JSON.stringify({ member: { member_id: "member-001", status: "closed" } }), {
+        status: 200,
+        headers: { "content-type": "application/json" }
+      })
+    );
+    await expect(
+      cancelLipMember({
+        baseUrl: "https://lip.example/",
+        apiKey: "admin-key-value",
+        memberId: "member-001",
+        fetch: fetchMock as unknown as typeof fetch
+      })
+    ).resolves.toEqual({ member_id: "member-001", status: "closed" });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://lip.example/admin/api/v1/members/cancel",
+      expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({
+          authorization: "Bearer admin-key-value"
+        }),
+        body: JSON.stringify({ member_id: "member-001" })
+      })
+    );
+
+    await expect(
+      cancelLipMember({
+        baseUrl: "https://lip.example",
+        apiKey: "admin-key-value",
+        memberId: "missing",
+        fetch: vi.fn(async () =>
+          new Response(JSON.stringify({ detail: "Member missing was not found" }), {
+            status: 404,
+            headers: { "content-type": "application/json" }
+          })
+        ) as unknown as typeof fetch
+      })
+    ).rejects.toThrow(/Member missing was not found/);
+
+    await expect(
+      cancelLipMember({
+        baseUrl: "https://lip.example",
+        apiKey: "admin-key-value",
+        memberId: "member-002",
+        fetch: vi.fn(async () =>
+          new Response(JSON.stringify({ title: "Conflict" }), {
+            status: 409,
+            headers: { "content-type": "application/json" }
+          })
+        ) as unknown as typeof fetch
+      })
+    ).rejects.toThrow(/Conflict/);
+
+    await expect(
+      cancelLipMember({
+        baseUrl: "https://lip.example",
+        apiKey: "admin-key-value",
+        memberId: "member-003",
+        fetch: vi.fn(async () =>
+          new Response(JSON.stringify({ member: {} }), {
+            status: 200,
+            headers: { "content-type": "application/json" }
+          })
+        ) as unknown as typeof fetch
+      })
+    ).resolves.toEqual({ member_id: "member-003", status: "closed" });
   });
 
   it("rejects conflicting identity and member links", async () => {

@@ -589,6 +589,30 @@ describe("reference HTTP server", () => {
       );
       expect(deletedWebhook.status).toBe(200);
       expect(platform.webhooks.listSubscriptions()).toEqual([]);
+
+      const webhookHealth = await fetch(`${running.url}/admin/api/v1/webhooks/health`, {
+        headers: { cookie }
+      });
+      expect(webhookHealth.status).toBe(200);
+      expect(await webhookHealth.json()).toMatchObject({
+        enabled: false,
+        pending_count: 0,
+        healthy: false
+      });
+
+      const cancelMember = await fetch(`${running.url}/admin/api/v1/members/cancel`, {
+        method: "POST",
+        headers: {
+          cookie,
+          "content-type": "application/json",
+          "x-lip-csrf": csrf
+        },
+        body: JSON.stringify({ member_id: "member-001" })
+      });
+      expect(cancelMember.status).toBe(200);
+      expect(await cancelMember.json()).toMatchObject({
+        member: { member_id: "member-001", status: "closed" }
+      });
     } finally {
       await running.close();
       platform.close();

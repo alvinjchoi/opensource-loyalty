@@ -170,6 +170,41 @@ describe("WebhookDispatcher", () => {
         attempts: 1
       })
     ]);
+    expect(dispatcher.deliveryHealth(() => new Date("2026-07-17T00:00:00.000Z"))).toMatchObject({
+      enabled: true,
+      pending_count: 0,
+      recent_total: 1,
+      recent_succeeded: 1,
+      recent_failed: 0,
+      success_rate: 1,
+      healthy: true,
+      checked_at: "2026-07-17T00:00:00.000Z"
+    });
+  });
+
+  it("reports unhealthy delivery when recent deliveries failed", async () => {
+    const dispatcher = new WebhookDispatcher({
+      subscriptions: [{ url: "https://receiver.example/hooks", secret: "hook-secret" }],
+      fetch: capturingFetch([], [500, 500, 500]),
+      retry: { maxAttempts: 1, backoffMs: 1, timeoutMs: 1000 }
+    });
+    dispatcher.emit(makeEvent({ id: "evt-fail-001" }));
+    await dispatcher.flush();
+    expect(dispatcher.deliveryHealth()).toMatchObject({
+      enabled: true,
+      recent_failed: 1,
+      success_rate: 0,
+      healthy: false
+    });
+    expect(
+      new WebhookDispatcher({ subscriptions: [] }).deliveryHealth()
+    ).toMatchObject({
+      enabled: false,
+      pending_count: 0,
+      recent_total: 0,
+      success_rate: null,
+      healthy: false
+    });
   });
 
   it("retries failed deliveries with backoff and gives up after max attempts", async () => {
