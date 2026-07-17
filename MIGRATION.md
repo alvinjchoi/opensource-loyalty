@@ -163,3 +163,32 @@ Copy the archive through an encrypted operator channel, import it into the
 provisioned Crave Cloud tenant, verify counts, then update the BFF connection.
 See `docs/sakura-render-audit.md` for the configuration snapshot taken before
 this migration tooling was added.
+
+Render access prerequisite: `render ssh` requires an SSH public key registered
+in the Render Dashboard account settings (there is no API for this), and the
+loyalty disk is reachable only from the service instance itself — one-off jobs
+cannot mount it. Register the operator key before scheduling the cutover
+window.
+
+## Rehearsal record (2026-07-17)
+
+A full dry run of this runbook passed locally against the exact Sakura program
+(`sakura-program.json`, Sakura-shaped ids from the deployed BFF):
+
+1. Seeded a source LIP with two members: one with two 8-point accruals plus a
+   deterministic third accrual (`order-…-cart-k3` / `…-k3-accrue`), and one
+   with 60 points and an **open** `five-off` reservation (50 points held).
+2. Froze the source and exported: 2 members, 2 balances, 4 ledger entries,
+   1 open reservation, 11 idempotency records; archive written mode `0600`.
+3. Imported into an empty target; the import reported identical counts.
+4. `lip doctor` and `lip test` passed against the served target.
+5. Balances and ledgers matched the source exactly, including the reservation
+   hold (60 total / 10 available while unexpired).
+6. Replaying the byte-identical pre-cutover accrual against the target
+   returned the original imported entry id and amount with no balance change —
+   the double-accrual guard survives migration.
+
+Open reservations keep their original `expires_at` and expire naturally on the
+target; the rehearsal reservation (300-second TTL) did so mid-verification,
+which is the documented behavior — finish cutover within the reservation TTL
+or reverse open reservations before freezing.
