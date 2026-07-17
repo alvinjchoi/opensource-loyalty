@@ -67,6 +67,8 @@ Guides for building with Cursor, Claude Code, Codex, and other coding agents:
   webhooks, BFF integration pattern, MCP notes, and agent pitfalls.
 - [AI prompts](ai-prompts.md): copy/paste prompts for enroll, checkout preview,
   webhooks, refunds, validation, and e2e tests.
+- [Sakura Japan agent handoff](sakura-agent-handoff.md): cross-repository
+  ownership, customer identity boundary, and ten-location demo requirements.
 - [`llms.txt`](../llms.txt): compact repo index — point agents here first.
 
 ## Agent setup
@@ -90,6 +92,10 @@ Enable MCP: [`mcp.json`](mcp.json) · Skills: [`skills/README.md`](skills/README
   durable SQLite state, Admin dashboard, and non-normative boundaries.
 - [PostgreSQL production storage](postgres.md): normalized tenant tables,
   migrations, transaction locks, multi-instance serving, and scheduler leases.
+- [Cloud control plane](cloud.md): organizations, projects, environments,
+  plans, subscriptions, provisioning jobs, and usage metering.
+- [Customer identity integration](customer-identity.md): use Clerk, Auth0, or
+  another OIDC provider while mapping stable customers to LIP members.
 - [Self-hosted migration](../MIGRATION.md): freeze, checksummed full-state
   export/import, BFF cutover, idempotency, verification, and rollback.
 - [Sakura → Cloud path](sakura-cloud-path.md): BFF surface map vs managed LIP,
