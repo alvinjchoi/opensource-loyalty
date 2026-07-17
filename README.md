@@ -9,6 +9,14 @@
 
 **LIP is an open, vendor-neutral loyalty protocol and reference platform for developers building restaurant, QSR, coffee, convenience, and franchise ordering systems.** It ships everything needed to go from zero to a working loyalty integration: a normative protocol spec, a **deterministic reference engine**, an **HTTP API**, a **TypeScript SDK**, a local **Admin dashboard**, a SQLite sandbox, Docker runtime, runnable examples, and black-box conformance tests.
 
+> [!IMPORTANT]
+> Customer authentication is intentionally outside the LIP transaction
+> boundary. The app BFF integrates Clerk, Auth0, or another identity provider,
+> keeps the merchant API key server-side, and maps authenticated customers to
+> opaque LIP `member_id` values. A LIP member is not automatically a Crave
+> platform customer. For example, Sakura demo guests currently exist in the
+> Sakura BFF/customer-data layer, not in Crave Customer Identity.
+
 For more information, be sure to check out the **[LIP Documentation](docs/README.md)**. Building with an AI coding agent? Start with **[Getting started with AI](#getting-started-with-ai-)**.
 
 ## Key Features of LIP ⭐
@@ -41,7 +49,7 @@ For more information, be sure to check out the **[LIP Documentation](docs/README
 
 - 🧪 **Specs and Conformance**: OpenAPI 3.1 contract, JSON Schema Draft 2020-12 payload schemas, normative lifecycle, account, webhook, and foodservice profile documents, and black-box HTTP conformance tests you can run against any implementation.
 
-- 🔧 **Batteries-Included CLI**: Validation, diagnostics (`doctor`), local serving, schema listing, and baseline conformance checks.
+- 🔧 **Batteries-Included CLI**: Validation, diagnostics (`doctor`), local serving, schema listing, baseline conformance checks, and checksummed full-state export/import for cloud migration.
 
 - 🤖 **AI-Ready**: Installable agent Skills, an official MCP server, [`llms.txt`](llms.txt), and curated prompts so Cursor, Claude Code, Codex, and similar tools implement LIP correctly.
 
@@ -192,6 +200,10 @@ docker compose up --build
 For the Postgres-backed profile, run `docker compose --profile postgres up
 --build`; its API defaults to port `3211`. See
 [PostgreSQL production storage](docs/postgres.md).
+
+Moving a self-hosted program to another LIP host? Follow
+[MIGRATION.md](MIGRATION.md). The migration archive preserves members,
+balances, immutable ledger history, open reservations, and idempotency records.
 
 Authenticated protocol requests are limited per remote client. Responses
 include `RateLimit-*` headers and return RFC 9457 problem details with HTTP 429

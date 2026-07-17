@@ -7,6 +7,7 @@
     "tsBuildInfoFile": "../../dist/.tsbuildinfo/cli.tsbuildinfo"
   },
   "include": ["src/**/*.ts"],
+  "exclude": ["src/**/*.test.ts"],
   "references": [
     { "path": "../protocol" },
     { "path": "../reference" },
