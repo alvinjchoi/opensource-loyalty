@@ -94,7 +94,8 @@ Enable MCP: [`mcp.json`](mcp.json) · Skills: [`skills/README.md`](skills/README
   migrations, transaction locks, multi-instance serving, and scheduler leases.
 - [Cloud control plane](cloud.md): organizations, projects, environments,
   plans, subscriptions, provisioning jobs, and usage metering.
-- [Customer identity integration](customer-identity.md): use Clerk, Auth0, or
+- [Customer identity integration](customer-identity.md)
+- [Cloud customer identity contract](cloud-customer-identity.md): managed Cloud CIAM boundary, consent, and LIP member linking: use Clerk, Auth0, or
   another OIDC provider while mapping stable customers to LIP members.
 - [Self-hosted migration](../MIGRATION.md): freeze, checksummed full-state
   export/import, BFF cutover, idempotency, verification, and rollback.

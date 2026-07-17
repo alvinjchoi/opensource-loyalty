@@ -35,6 +35,11 @@ const migrations = [
     version: 2,
     name: "identity_memberships",
     url: new URL("../migrations/002_identity_memberships.sql", import.meta.url)
+  },
+  {
+    version: 3,
+    name: "customer_identity",
+    url: new URL("../migrations/003_customer_identity.sql", import.meta.url)
   }
 ] as const;
 
