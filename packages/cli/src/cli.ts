@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import { Command, InvalidArgumentError } from "commander";
 import { defaultConfig, initializeConfig, readConfig } from "./config.js";
 import { formatReport, runBaselineConformance, runDoctor } from "./diagnostics.js";
+import { runStateExport, runStateImport, type StateExportOptions, type StateImportOptions } from "./migration.js";
 import { runMockServer } from "./mock.js";
 import { schemaNames, validateFile } from "./validate.js";
 
@@ -129,6 +130,36 @@ function addMockCommand(name: "mock" | "quickstart" | "serve", description: stri
 addMockCommand("mock", "Start the stateful LIP reference server");
 addMockCommand("quickstart", "Start the local environment and print connection details");
 addMockCommand("serve", "Start the local reference API and Admin dashboard");
+
+const state = program
+  .command("state")
+  .description("Export or import complete loyalty engine state for migration");
+
+state
+  .command("export")
+  .description("Export members, balances, ledger, reservations, and idempotency records")
+  .requiredOption("--program <path>", "active JSON program definition")
+  .requiredOption("-o, --output <path>", "destination archive path")
+  .option("-d, --database <path>", "SQLite state path (defaults to LIP_DATABASE_PATH)")
+  .option("--database-url <url>", "Postgres URL (defaults to LIP_DATABASE_URL)")
+  .option("--tenant-id <id>", "Postgres tenant id (defaults to LIP_TENANT_ID or program id)")
+  .option("--force", "replace an existing archive file")
+  .action(async (options: StateExportOptions) => {
+    await runStateExport(options);
+  });
+
+state
+  .command("import")
+  .description("Import a complete state archive into an offline or frozen target")
+  .requiredOption("--program <path>", "target JSON program definition")
+  .requiredOption("-i, --input <path>", "source archive path")
+  .option("-d, --database <path>", "SQLite state path (defaults to LIP_DATABASE_PATH)")
+  .option("--database-url <url>", "Postgres URL (defaults to LIP_DATABASE_URL)")
+  .option("--tenant-id <id>", "Postgres tenant id (defaults to LIP_TENANT_ID or program id)")
+  .option("--force", "replace existing target engine state")
+  .action(async (options: StateImportOptions) => {
+    await runStateImport(options);
+  });
 
 program
   .command("doctor [url]")

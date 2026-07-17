@@ -4,6 +4,7 @@ export * from "./campaigns.js";
 export * from "./evented-engine.js";
 export * from "./engagement.js";
 export * from "./memberships.js";
+export * from "./migration.js";
 export * from "./platform.js";
 export * from "./program-management.js";
 export * from "./server.js";

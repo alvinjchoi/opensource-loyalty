@@ -96,6 +96,12 @@ Enable MCP: [`mcp.json`](mcp.json) · Skills: [`skills/README.md`](skills/README
   plans, subscriptions, provisioning jobs, and usage metering.
 - [Customer identity integration](customer-identity.md): use Clerk, Auth0, or
   another OIDC provider while mapping stable customers to LIP members.
+- [Self-hosted migration](../MIGRATION.md): freeze, checksummed full-state
+  export/import, BFF cutover, idempotency, verification, and rollback.
+- [Sakura → Cloud path](sakura-cloud-path.md): BFF surface map vs managed LIP,
+  franchise wallet gaps, idempotent cutover, and later PR checklist.
+- [Sakura Render audit](sakura-render-audit.md): dated deployment parity,
+  webhook, idempotency, and drift findings for the Sakura demo.
 - [Engagement integrations](engagement.md): analytics, consent-safe CRM
   exports, signed messaging connectors, jobs, retry, and adapter contracts.
 - [Punchh compatibility](punchh-compatibility.md): map a restaurant loyalty
