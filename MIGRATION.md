@@ -192,3 +192,28 @@ Open reservations keep their original `expires_at` and expire naturally on the
 target; the rehearsal reservation (300-second TTL) did so mid-verification,
 which is the documented behavior — finish cutover within the reservation TTL
 or reverse open reservations before freezing.
+
+## Live Render rehearsal (2026-07-17)
+
+After SSH access was restored, a **read-only** rehearsal used the live
+`sakura-asian-grill-loyalty` disk (service was not restarted or frozen):
+
+1. On the instance: `VACUUM INTO '/tmp/reference-backup.db'` against
+   `/data/reference.db` (consistent snapshot without stopping writes).
+2. Copied the backup locally and exported with the checked-in
+   `sakura-program.json`.
+3. Export/import counts matched:
+   **11 members, 11 balances, 9 ledger entries, 0 open reservations,
+   635 idempotency records** (archive mode `0600`,
+   sha256 `89bfd195bcf85aec3b8975011e00cae05c3b1a5c2df7c04e6ceb839c9d500702`).
+4. `lip doctor` and `lip test` passed against the served import.
+5. **Kenji Watanabe** (`member-12ba39e1-131c-4c6b-b0c5-f6e7a8302b57`):
+   balance **16**, ledger two accruals of **+8**
+   (`order-demo-southridge-…`, `order-demo-northgate-…`).
+6. Double-accrual guards after import:
+   - same `${orderId}-accrue` key with different body → `409 idempotency_conflict`;
+   - new key + same `order_id` with different facts → `409 conflict`
+     ("Order id was already accrued with different facts");
+   - Kenji balance stayed **16**.
+
+This was not a production cutover. The live Render LIP remained the pilot host.
