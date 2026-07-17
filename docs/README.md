@@ -90,6 +90,12 @@ Enable MCP: [`mcp.json`](mcp.json) · Skills: [`skills/README.md`](skills/README
   durable SQLite state, Admin dashboard, and non-normative boundaries.
 - [PostgreSQL production storage](postgres.md): normalized tenant tables,
   migrations, transaction locks, multi-instance serving, and scheduler leases.
+- [Self-hosted migration](../MIGRATION.md): freeze, checksummed full-state
+  export/import, BFF cutover, idempotency, verification, and rollback.
+- [Sakura → Cloud path](sakura-cloud-path.md): BFF surface map vs managed LIP,
+  franchise wallet gaps, idempotent cutover, and later PR checklist.
+- [Sakura Render audit](sakura-render-audit.md): dated deployment parity,
+  webhook, idempotency, and drift findings for the Sakura demo.
 - [Engagement integrations](engagement.md): analytics, consent-safe CRM
   exports, signed messaging connectors, jobs, retry, and adapter contracts.
 - [Punchh compatibility](punchh-compatibility.md): map a restaurant loyalty
