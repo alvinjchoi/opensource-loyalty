@@ -72,6 +72,10 @@ export interface CustomerDirectoryRepository {
     customerId: string,
     programId: string
   ): Promise<CustomerMemberLink | undefined>;
+  memberLinksForCustomer(
+    tenantId: string,
+    customerId: string
+  ): Promise<CustomerMemberLink[]>;
   linkMember(input: LinkCustomerMemberInput): Promise<CustomerMemberLink>;
   markCustomerDeleted(
     tenantId: string,

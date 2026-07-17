@@ -85,3 +85,17 @@ Completed history and event payloads are retained in SQLite up to the configured
 history limit. Programmatic and Admin API subscription writes may set
 `retry_policy` with `max_attempts`, `backoff_ms`, and `timeout_ms`; omitted
 values use the server defaults.
+
+### Cutover health probe
+
+Authenticated Admin clients can poll a secret-free summary before unfreezing a
+BFF cutover:
+
+```bash
+curl -s http://127.0.0.1:3210/admin/api/v1/webhooks/health \
+  -H "Authorization: Bearer $LIP_API_KEY"
+```
+
+The response includes `enabled`, pending outbox count, recent delivered/failed
+counts, `success_rate`, and `healthy` (`true` when webhooks are enabled, the
+outbox is empty, and no retained recent delivery failed).

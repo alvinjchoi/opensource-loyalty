@@ -180,4 +180,58 @@ describe("LocalDataPlaneProvisioner", () => {
     await expect(fetch(`${ready!.api_url}/health`)).rejects.toThrow();
     expect(provisioned).toHaveLength(1);
   });
+
+  it("restores the same port and API key after close", async () => {
+    const programDirectory = mkdtempSync(join(tmpdir(), "lip-cloud-programs-"));
+    const dataDirectory = mkdtempSync(join(tmpdir(), "lip-cloud-data-"));
+    writeFileSync(join(programDirectory, "sakura-rewards.json"), JSON.stringify(program));
+    const first = new LocalDataPlaneProvisioner({
+      programDirectory,
+      dataDirectory,
+      basePort: 18_210
+    });
+    const repository = new MemoryCloudRepository();
+    const cloud = new CloudControlPlane({ repository });
+    const dashboard = await cloud.createOrganization(owner, {
+      name: "Sakura Restaurants",
+      slug: "sakura-restaurants"
+    });
+    const project = await cloud.createProject(
+      owner,
+      dashboard.organization.organization_id,
+      { name: "Sakura Loyalty", slug: "sakura-loyalty" }
+    );
+    const environment = await cloud.createEnvironment(owner, project.project_id, {
+      name: "Staging",
+      slug: "staging",
+      kind: "staging",
+      region: "us-east-1",
+      program_id: "sakura-rewards"
+    });
+    const worker = new CloudProvisioningWorker({
+      repository,
+      provisioner: first,
+      workerId: "worker-restore",
+      onError: () => {}
+    });
+    expect(await worker.runOnce()).toBe("succeeded");
+    const original = first.runtimes()[0]!;
+    await first.close();
+
+    const second = new LocalDataPlaneProvisioner({
+      programDirectory,
+      dataDirectory,
+      basePort: 18_210
+    });
+    close = () => second.close();
+    const restored = await second.restore();
+    expect(restored).toHaveLength(1);
+    expect(restored[0]).toMatchObject({
+      environment_id: environment.environment_id,
+      api_url: original.api_url,
+      api_key: original.api_key,
+      port: original.port
+    });
+    expect(await fetch(`${original.api_url}/health`).then((r) => r.status)).toBe(200);
+  });
 });

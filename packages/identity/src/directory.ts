@@ -166,6 +166,17 @@ export class MemoryCustomerDirectoryRepository implements CustomerDirectoryRepos
     return link ? copyMember(link) : undefined;
   }
 
+  public async memberLinksForCustomer(
+    tenantIdInput: string,
+    customerIdInput: string
+  ): Promise<CustomerMemberLink[]> {
+    const tenantId = assertId(tenantIdInput, "tenantId");
+    const customerId = assertId(customerIdInput, "customerId");
+    return [...this.members.values()]
+      .filter((link) => link.tenantId === tenantId && link.customerId === customerId)
+      .map(copyMember);
+  }
+
   public async linkMember(input: LinkCustomerMemberInput): Promise<CustomerMemberLink> {
     const tenantId = assertId(input.tenantId, "tenantId");
     const customerId = assertId(input.customerId, "customerId");
@@ -226,6 +237,11 @@ export interface CustomerLoyaltyResolution {
 export interface CustomerLoyaltyResolverOptions {
   repository: CustomerDirectoryRepository;
   lip: Pick<LipClient, "members">;
+  /**
+   * Optional LIP wallet deactivation. When set, deleteCustomer cancels each
+   * linked member so accruals/redemptions fail while ledger history remains.
+   */
+  cancelMember?: (memberId: string) => Promise<void>;
   clock?: () => Date;
   customerId?: () => string;
 }
@@ -237,12 +253,14 @@ export interface CustomerLoyaltyResolverOptions {
 export class CustomerLoyaltyResolver {
   private readonly repository: CustomerDirectoryRepository;
   private readonly lip: Pick<LipClient, "members">;
+  private readonly cancelMember: ((memberId: string) => Promise<void>) | undefined;
   private readonly clock: () => Date;
   private readonly customerId: () => string;
 
   public constructor(options: CustomerLoyaltyResolverOptions) {
     this.repository = options.repository;
     this.lip = options.lip;
+    this.cancelMember = options.cancelMember;
     this.clock = options.clock ?? (() => new Date());
     this.customerId = options.customerId ?? (() => `customer_${randomUUID()}`);
   }
@@ -311,12 +329,22 @@ export class CustomerLoyaltyResolver {
     });
   }
 
-  public deleteCustomer(tenantId: string, customerId: string): Promise<CustomerRecord> {
-    return this.repository.markCustomerDeleted(
+  public async deleteCustomer(
+    tenantId: string,
+    customerId: string
+  ): Promise<CustomerRecord> {
+    const links = await this.repository.memberLinksForCustomer(tenantId, customerId);
+    const deleted = await this.repository.markCustomerDeleted(
       tenantId,
       customerId,
       this.clock().toISOString()
     );
+    if (this.cancelMember) {
+      for (const link of links) {
+        await this.cancelMember(link.memberId);
+      }
+    }
+    return deleted;
   }
 
   private memberIdempotencyKey(

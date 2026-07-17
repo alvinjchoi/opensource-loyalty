@@ -354,6 +354,13 @@ export class LoyaltyEngine {
         if (!existing) {
           throw new EngineError("not_found", "Identity index references a missing member", 500);
         }
+        if (existing.status !== "active") {
+          throw new EngineError(
+            "member_not_active",
+            `Member ${existing.member_id} is ${existing.status} and cannot be re-enrolled`,
+            409
+          );
+        } // closed/suspended identities keep their ledger; no silent re-open
         return {
           context: this.responseContext(request.context),
           member: this.memberSnapshot(existing),
@@ -394,6 +401,21 @@ export class LoyaltyEngine {
       context: this.responseContext(request.context),
       program: this.programCatalog()
     }));
+  }
+
+  /**
+   * Marks a member closed so protocol writes fail while ledger history is
+   * retained. Idempotent when the member is already closed.
+   */
+  public cancelMember(memberId: string): Member {
+    const member = this.members.get(memberId);
+    if (!member) {
+      throw new EngineError("member_not_found", `Member ${memberId} was not found`, 404);
+    }
+    if (member.status !== "closed") {
+      member.status = "closed";
+    }
+    return this.memberSnapshot(member);
   }
 
   public setMemberMembership(memberId: string, membership?: ReferenceMembership): Member {

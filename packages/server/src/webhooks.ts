@@ -80,6 +80,18 @@ export interface WebhookAdminStatus {
   recent: WebhookDeliveryRecord[];
 }
 
+export interface WebhookDeliveryHealth {
+  enabled: boolean;
+  subscription_count: number;
+  pending_count: number;
+  recent_total: number;
+  recent_succeeded: number;
+  recent_failed: number;
+  success_rate: number | null;
+  healthy: boolean;
+  checked_at: string;
+}
+
 export interface WebhookDispatcherOptions {
   subscriptions: readonly WebhookSubscription[];
   /** Total attempts per delivery including the first one. Defaults to 3. */
@@ -255,6 +267,33 @@ export class WebhookDispatcher {
         ...(entry.last_error ? { last_error: entry.last_error } : {})
       })),
       recent: this.deliveries()
+    };
+  }
+
+  /**
+   * Secret-free cutover/ops probe: recent delivery success vs failure plus
+   * pending backlog. `healthy` is true when webhooks are enabled, the outbox
+   * is empty, and every retained recent delivery succeeded (or there is no
+   * recent history yet).
+   */
+  public deliveryHealth(now: () => Date = () => new Date()): WebhookDeliveryHealth {
+    const recent = this.deliveries();
+    const recentSucceeded = recent.filter((entry) => entry.status === "delivered").length;
+    const recentFailed = recent.filter((entry) => entry.status === "failed").length
+    const pendingCount = this.queued.size;
+    const enabled = this.subscriptions.some((subscription) => subscription.active);
+    const recentTotal = recent.length;
+    const successRate = recentTotal === 0 ? null : recentSucceeded / recentTotal;
+    return {
+      enabled,
+      subscription_count: this.subscriptions.filter((subscription) => subscription.active).length,
+      pending_count: pendingCount,
+      recent_total: recentTotal,
+      recent_succeeded: recentSucceeded,
+      recent_failed: recentFailed,
+      success_rate: successRate,
+      healthy: enabled && pendingCount === 0 && recentFailed === 0,
+      checked_at: now().toISOString()
     };
   }
 

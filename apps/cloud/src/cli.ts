@@ -57,6 +57,9 @@ if (programDirectory) {
     ...(process.env["LIP_CLOUD_DATA_PLANE_HOST"]
       ? { host: process.env["LIP_CLOUD_DATA_PLANE_HOST"] }
       : {}),
+    ...(process.env["LIP_CLOUD_DATA_PLANE_BASE_PORT"]
+      ? { basePort: Number.parseInt(process.env["LIP_CLOUD_DATA_PLANE_BASE_PORT"], 10) }
+      : {}),
     onProvisioned: (runtime) => {
       console.log(JSON.stringify({
         event: "cloud_environment_provisioned",
@@ -64,10 +67,20 @@ if (programDirectory) {
         tenant_id: runtime.tenant_id,
         program_id: runtime.program_id,
         api_url: runtime.api_url,
+        port: runtime.port,
         credentials_path: runtime.credentials_path
       }));
     }
   });
+  const restored = await provisioner.restore();
+  for (const runtime of restored) {
+    console.log(JSON.stringify({
+      event: "cloud_environment_restored",
+      environment_id: runtime.environment_id,
+      api_url: runtime.api_url,
+      port: runtime.port
+    }));
+  }
   worker = new CloudProvisioningWorker({
     repository,
     provisioner,

@@ -684,6 +684,8 @@ export function createReferenceServer(engine: LoyaltyEngine, options: ServerOpti
       allowedMethods.set("/admin/api/v1/program/rewards/delete", ["POST"]);
     }
     if (options.admin?.webhookManager) {
+      allowedMethods.set("/admin/api/v1/members/cancel", ["POST"]);
+      allowedMethods.set("/admin/api/v1/webhooks/health", ["GET"]);
       allowedMethods.set("/admin/api/v1/webhooks/subscription", ["PUT"]);
       allowedMethods.set("/admin/api/v1/webhooks/subscription/delete", ["POST"]);
       allowedMethods.set("/admin/api/v1/webhooks/subscription/rotate-secret", ["POST"]);
@@ -1319,7 +1321,54 @@ export function createReferenceServer(engine: LoyaltyEngine, options: ServerOpti
         }
       }
 
+      if (
+        adminEnabled &&
+        method === "POST" &&
+        path === "/admin/api/v1/members/cancel"
+      ) {
+        if (!isAdminAuthorized(request, options, adminSessions)) {
+          sendJson(response, 401, problem(401, "Unauthorized", "unauthorized"), "application/problem+json");
+          return;
+        }
+        if (!isAdminWriteAuthorized(request, options, adminSessions)) {
+          sendJson(
+            response,
+            403,
+            problem(403, "Forbidden", "csrf_failed", "Admin writes require a valid CSRF token"),
+            "application/problem+json"
+          );
+          return;
+        }
+        const body = await readBody(request);
+        const values = body && typeof body === "object" && !Array.isArray(body)
+          ? body as Record<string, unknown>
+          : {};
+        if (typeof values["member_id"] !== "string") {
+          throw new TransportError(
+            422,
+            "validation_failed",
+            "Request validation failed",
+            "member_id is required"
+          );
+        }
+        sendJson(response, 200, { member: engine.cancelMember(values["member_id"]) });
+        return;
+      }
+
       const webhookManager = options.admin?.webhookManager;
+      if (
+        adminEnabled &&
+        webhookManager &&
+        method === "GET" &&
+        path === "/admin/api/v1/webhooks/health"
+      ) {
+        if (!isAdminAuthorized(request, options, adminSessions)) {
+          sendJson(response, 401, problem(401, "Unauthorized", "unauthorized"), "application/problem+json");
+          return;
+        }
+        sendJson(response, 200, webhookManager.deliveryHealth());
+        return;
+      }
       if (
         adminEnabled &&
         webhookManager &&
