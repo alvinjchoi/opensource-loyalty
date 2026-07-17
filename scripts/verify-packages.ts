@@ -24,6 +24,7 @@ const workspaces: Array<{ name: string; entry: string; required?: string[] }> = 
   },
   { name: "@loyalty-interchange/cli", entry: "dist/index" },
   { name: "@loyalty-interchange/sdk", entry: "dist/index" },
+  { name: "@loyalty-interchange/identity", entry: "dist/index" },
   {
     name: "@loyalty-interchange/mcp",
     entry: "dist/server",

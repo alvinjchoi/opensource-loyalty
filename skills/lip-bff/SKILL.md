@@ -12,17 +12,24 @@ Customer apps **must not** hold `LIP_API_KEY`. Add a thin backend that:
 
 | Concern | Owner |
 | --- | --- |
-| Sign-in, sessions, profile | BFF (not LIP today) |
+| Sign-in, sessions, recovery | Clerk/Auth0/OIDC provider |
+| Token validation + customer mapping | BFF |
 | Merchant API key | BFF only |
 | `member_id` mapping | BFF store |
 | Order pricing (minor units) | BFF |
 | `orders/evaluate` preview | BFF → LIP |
 | Checkout lifecycle | BFF orchestrates LIP |
 
-## Signup
+## Identity and enrollment
 
-On account creation, call `members/enroll` with a stable identity (`email_hash`,
-`token`, etc.) and store `member_id` on the user record.
+Use the provider's native SDK for sign-up and sign-in. The BFF validates the
+provider access token and maps `{tenant_id, issuer, subject}` to a stable
+internal customer id. Enroll that customer id as an opaque `external` LIP
+identity and store the returned `member_id`. Do not send raw JWTs, email
+addresses, phone numbers, or provider subjects to `/lip/v1`.
+
+`@loyalty-interchange/identity` supplies the OIDC verifier, mapping contract,
+and resolver. It intentionally does not wrap provider authentication APIs.
 
 ## Cart preview
 

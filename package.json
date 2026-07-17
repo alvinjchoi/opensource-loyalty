@@ -16,6 +16,8 @@
     "build": "npm run build:ts && npm run build:admin",
     "build:ts": "tsc -b",
     "build:admin": "npm run build --workspace @loyalty-interchange/admin",
+    "cloud": "npm run build --workspace @loyalty-interchange/cloud && node apps/cloud/dist/cli.js",
+    "cloud:dev": "tsx apps/cloud/src/cli.ts",
     "clean": "tsc -b --clean && rm -rf coverage spec/schemas",
     "conformance": "vitest run tests/conformance",
     "dev": "tsx packages/server/src/cli.ts",

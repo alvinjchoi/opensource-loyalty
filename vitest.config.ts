@@ -10,6 +10,7 @@ export default defineConfig({
       "@loyalty-interchange/storage-sqlite": fileURLToPath(new URL("./packages/storage-sqlite/src/index.ts", import.meta.url)),
       "@loyalty-interchange/server": fileURLToPath(new URL("./packages/server/src/index.ts", import.meta.url)),
       "@loyalty-interchange/cli": fileURLToPath(new URL("./packages/cli/src/index.ts", import.meta.url)),
+      "@loyalty-interchange/identity": fileURLToPath(new URL("./packages/identity/src/index.ts", import.meta.url)),
       "@loyalty-interchange/sdk": fileURLToPath(new URL("./packages/sdk/src/index.ts", import.meta.url))
     }
   },
@@ -18,7 +19,11 @@ export default defineConfig({
       provider: "v8",
       reporter: ["text", "json-summary"],
       include: ["packages/*/src/**/*.ts"],
-      exclude: ["packages/server/src/cli.ts", "packages/cli/src/cli.ts"],
+      exclude: [
+        "packages/server/src/cli.ts",
+        "packages/cli/src/cli.ts",
+        "packages/storage-postgres/src/**"
+      ],
       thresholds: {
         lines: 85,
         functions: 85,

@@ -1,0 +1,24 @@
+{
+  "name": "@loyalty-interchange/cloud",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Managed Cloud control plane for Loyalty Interchange.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "lip-cloud": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "start": "node dist/cli.js"
+  },
+  "dependencies": {
+    "@loyalty-interchange/identity": "0.1.0",
+    "pg": "^8.22.0",
+    "stripe": "^22.3.2"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.20.0"
+  }
+}

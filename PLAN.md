@@ -1,7 +1,7 @@
 # LIP Developer Experience Plan
 
-Status: active; local implementation has reached Milestone 2.7; package
-publication and listed follow-ups remain pending
+Status: active; local implementation has reached the managed Cloud foundation
+in Milestone 2.8; package publication and listed follow-ups remain pending
 
 ## Current implementation focus: minimal developer onboarding
 
@@ -58,8 +58,9 @@ portable LIP contract focused on interoperability.
 - [ ] Reward categories and category-level merchandising.
 - [x] Issued reward wallet with code/QR artifacts, claim through redemption,
   cancellation, expiration, reversal restoration, and restart persistence.
-- [ ] Manual point adjustments, bonus/gift/migration classifications, transfer
-  rules, and expiration job controls.
+- [x] Manual point adjustments with bonus, gift, migration, service-recovery,
+  and correction classifications.
+- [ ] Point transfer rules and operator-facing expiration job controls.
 - [x] Wallet credit account units, basis-point earning, promotional/stored-value
   classification, liability summaries, FIFO redemption, and expiration.
 - [x] Executable visits/stamps accounts with per-order accrual, threshold
@@ -231,6 +232,128 @@ turning implementation-specific operations into normative LIP requirements.
 Exit criteria: `npm run quickstart` starts a seeded, persistent loyalty engine and
 Admin application; restart preserves activity; reset is explicit; and all
 implementation-specific surfaces remain outside the normative protocol routes.
+
+## Milestone 2.8: managed Cloud control plane
+
+Goal: operate the open protocol and engine as a managed service without making
+Cloud-specific lifecycle or billing concepts part of `/lip/v1`.
+
+- [x] Separate Cloud workspace and authenticated management API
+- [x] Organizations, external-identity memberships, projects, and environments
+- [x] Regional environment scopes with queued provisioning jobs
+- [x] Plans, subscriptions, monthly usage events, counters, and hard quotas
+- [x] Idempotent, transaction-locked usage metering
+- [x] Claim-safe provisioning worker, retries, and provider interface
+- [x] Docker Compose Cloud profile and operating guide
+- [ ] Regional data-plane provisioning adapter
+- [x] Direct OIDC validation, invitations, and membership management
+- [ ] Stripe billing adapter and signed subscription webhooks
+- [ ] Encrypted environment credentials, API-key rotation, and suspension
+- [ ] Automated runtime metering, backup, restore, and region migration
+
+Exit criteria: a customer can create an organization, project, and environment;
+the control plane provisions an isolated regional runtime, meters usage, applies
+the subscribed plan, and supports safe upgrades, suspension, backup, and restore.
+
+## Milestone 2.9: managed customer identity and loyalty
+
+Goal: let restaurant applications use Clerk, Auth0, or another OIDC provider
+for customer authentication while keeping stable customer and loyalty history
+independent from that provider.
+
+Active cross-repository ownership (July 16, 2026):
+
+- `craveup-loyalty` owns standards-based OIDC token validation, stable
+  customer/member mapping, the server-side integration package, and contract
+  tests on `feat/customer-identity-contract`.
+- `sakura-japan` owns Expo integration, removal of its custom password/session
+  implementation, secure native token storage, mobile E2E, demo locations, and
+  Stripe/storefront readiness.
+- Agents must not edit both dirty repositories concurrently. See
+  [Sakura Japan cross-repository handoff](docs/sakura-agent-handoff.md).
+
+Product positioning: **open-source loyalty infrastructure for Clerk, Auth0, or
+any OIDC provider**. The selected provider owns all authentication UX,
+credentials, sessions, verification, recovery, MFA, passkeys, social login,
+and token issuance. CraveUp validates access tokens and owns only the stable
+customer-to-loyalty mapping.
+
+### Product and protocol boundary
+
+- [x] Keep passwords, sessions, social connections, passkeys, and token issuance
+  outside `/lip/v1` and the reference loyalty engine.
+- [x] Use provider-native application SDKs instead of wrapping sign-up,
+  sign-in, refresh, recovery, or account-management APIs.
+- [x] Add a standards-based OIDC verifier outside the normative protocol that
+  supports Clerk, Auth0, and other compatible issuers.
+- [x] Select Clerk as Sakura's initial consumer CIAM while preserving the OIDC
+  boundary for other applications.
+- [x] Keep restaurant staff/admin identity isolated from consumer identity;
+  never share customer and merchant sessions or authorization policies.
+- [x] Use `{tenant_id, issuer, subject}` as the immutable external identity key.
+  Email and phone are verified profile attributes, not account primary keys.
+- [x] Map each external identity to one stable CraveUp customer id and one or
+  more program-scoped LIP member ids.
+- [x] Send only the stable internal customer id across the LIP boundary, never
+  raw JWTs, provider subjects, email addresses, or phone numbers.
+
+### Application integration
+
+- [x] Add a server-side identity package with OIDC validation,
+  `CustomerDirectoryRepository`, and customer-to-member resolution.
+- [ ] Add a transaction-safe production repository implementation for customer,
+  external-identity, and member-link records.
+- [ ] Integrate Clerk's native Expo SDK in Sakura and remove its custom
+  password/session endpoints.
+- [ ] Store customer tokens using platform-secure native storage and provider
+  refresh/session handling.
+- [ ] Add BFF middleware that derives tenant scope from trusted routing or
+  deployment configuration and resolves the authenticated customer.
+- [ ] Keep profile, consent, export, and provider-account deletion in the
+  application/customer-data layer rather than the loyalty transaction API.
+- [ ] Emit documented identity-to-loyalty lifecycle events for account created,
+  identity linked, consent changed, member enrolled, and account deleted.
+
+### Tenant isolation and account lifecycle
+
+- [x] Enforce per-restaurant identity isolation so the same provider subject
+  resolves independently for each tenant and email cannot become a lookup key.
+- [ ] Enforce the same isolation in the production repository so identities,
+  account existence, profile data, and loyalty state cannot leak across brands.
+- [ ] Define optional cross-brand identity federation as an explicit product
+  capability, never an accidental consequence of a shared CIAM tenant.
+- [x] Define explicit external-identity linking without changing customer or
+  LIP member ids.
+- [ ] Make linking, unlinking, duplicate resolution, and deletion workflows
+  atomic and auditable in the production repository.
+- [ ] Implement account deletion across CIAM, CraveUp profiles, LIP identity
+  references, consent records, and legally retained financial ledger entries.
+- [ ] Support import and account-linking flows for Punchh, Paytronix, and other
+  existing loyalty identities without forcing password migration.
+
+### Security, operations, and portability
+
+- [x] Validate issuer, audience, signature, expiry, signing algorithm, subject,
+  and optional authorized party on every accepted customer access token.
+- [x] Expose email and phone claims only when provider verification claims allow
+  them by policy.
+- [x] Keep tenant selection outside untrusted customer token input.
+- [ ] Configure provider-side bot protection, session/device revocation, and
+  suspicious-login monitoring; add BFF rate limits and security events.
+- [ ] Encrypt application profile PII and document retention, redaction, export,
+  deletion, and incident-response behavior.
+- [x] Guarantee that switching or linking Clerk/Auth0 identities does not change
+  the stable CraveUp customer id or LIP member history.
+- [x] Add contract tests for OIDC rejection, tenant isolation, identity linking,
+  deletion tombstones, and idempotent loyalty enrollment.
+- [ ] Add deployed Clerk integration tests and synthetic monitoring for token
+  validation, customer mapping, loyalty balance, and provider outage behavior.
+
+Exit criteria: an Expo or web application can use its provider's native SDK,
+send an access token to its BFF, resolve one stable tenant-scoped customer and
+program member, and display wallet/rewards/activity. Linking or replacing the
+OIDC provider preserves loyalty history, deletion is auditable, and no customer
+credential or provider-specific subject is stored in the LIP transaction core.
 
 ## Milestone 3: hosted documentation and sandbox
 

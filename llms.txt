@@ -115,13 +115,17 @@ Failed deliveries persist in the SQLite outbox and resume after restart.
 - packages/server/src/server.ts — HTTP routes
 - packages/server/src/program-management.ts — non-normative draft/publish/rollback
 - packages/sdk/src/client.ts — idiomatic TypeScript client
+- packages/identity/src — external OIDC validation + stable customer/member mapping
 - packages/cli/src/cli.ts — lip CLI (serve, doctor, test, validate)
 - apps/admin/src/App.tsx — reference Admin dashboard
 
 ## BFF integration pattern (customer apps)
 
-App holds session token only. BFF holds LIP_API_KEY.
-BFF enrolls on signup, calls evaluate for cart preview, runs reserve→pay→accrue→capture.
+App uses Clerk/Auth0/OIDC and holds that provider's session token only. BFF
+validates it, maps `{tenant_id, issuer, subject}` to a stable customer/member,
+and holds LIP_API_KEY. BFF calls evaluate for cart preview and runs
+reserve→pay→accrue→capture. `@loyalty-interchange/identity` supplies the thin
+server-side verifier and mapping contract; it does not own sign-in or sessions.
 Reference: sakura-japan repo (Expo app + server/index.mjs BFF).
 
 ## Not in LIP (build in your app or wait for platform)
