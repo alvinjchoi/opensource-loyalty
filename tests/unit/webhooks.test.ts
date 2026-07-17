@@ -186,7 +186,9 @@ describe("WebhookDispatcher", () => {
     const dispatcher = new WebhookDispatcher({
       subscriptions: [{ url: "https://receiver.example/hooks", secret: "hook-secret" }],
       fetch: capturingFetch([], [500, 500, 500]),
-      retry: { maxAttempts: 1, backoffMs: 1, timeoutMs: 1000 }
+      maxAttempts: 1,
+      backoffMs: 1,
+      timeoutMs: 1000
     });
     dispatcher.emit(makeEvent({ id: "evt-fail-001" }));
     await dispatcher.flush();
