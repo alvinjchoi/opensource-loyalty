@@ -1,0 +1,42 @@
+{
+  "program_id": "sakura-rewards",
+  "name": "Sakura Rewards",
+  "description": "Earn 1 point per $1. 50 points = $5 off.",
+  "currency": "USD",
+  "accounts": [{ "unit": "points", "unit_label": "points", "is_primary": true }],
+  "metrics": [
+    {
+      "metric_id": "lifetime-earned",
+      "name": "Lifetime points",
+      "unit": "points",
+      "source": "lifetime_earned"
+    }
+  ],
+  "point_expiration": {
+    "type": "after_earned",
+    "days": 365,
+    "warning_days": [30, 7]
+  },
+  "earning_policy": {
+    "minimum_eligible_spend_minor_units": 100,
+    "eligible_channels": ["counter", "web", "mobile", "pickup"]
+  },
+  "earn_rate": { "points": 1, "spend_minor_units": 100 },
+  "evaluation_ttl_seconds": 300,
+  "reservation_ttl_seconds": 300,
+  "rewards": [
+    {
+      "reward_id": "five-off",
+      "name": "$5 off your order",
+      "description": "Redeem 50 points for $5 off any order.",
+      "points_cost": 50,
+      "effect": {
+        "type": "discount",
+        "target": "order",
+        "amount": { "amount": 500, "currency": "USD" },
+        "allocations": [{ "amount": { "amount": 500, "currency": "USD" } }]
+      },
+      "funding": [{ "party_id": "sakura-brand", "party_type": "brand", "share_bps": 10000 }]
+    }
+  ]
+}
