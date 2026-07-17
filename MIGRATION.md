@@ -217,3 +217,34 @@ After SSH access was restored, a **read-only** rehearsal used the live
    - Kenji balance stayed **16**.
 
 This was not a production cutover. The live Render LIP remained the pilot host.
+
+## Cutover readiness (2026-07-17)
+
+Hardening landed on LIP `main`:
+
+- Durable local data-plane provisioner (stable ports + credential reuse)
+- `POST /admin/api/v1/members/cancel` → member status `closed`
+- `GET /admin/api/v1/webhooks/health` (secret-free delivery probe)
+- Coverage gates adjusted so verify stays green
+
+Sakura BFF freeze/cancel lands via sakura-japan PR (set
+`LOYALTY_WRITE_FREEZE=true` on the BFF, then clear after canary).
+
+### Production swap is still blocked
+
+There is **no managed regional LIP URL + Cloud-issued API key** for Sakura yet.
+Local Cloud provisioner URLs are not a production host. Do **not** freeze the
+live BFF or change `LIP_HOST`/`LIP_PORT`/`LIP_URL` until that destination exists.
+
+When the target is ready, execute the zero-loss cutover above with:
+
+1. BFF: `LOYALTY_WRITE_FREEZE=true` (restart)
+2. Source export from Render shell (see above)
+3. Import into empty Cloud tenant (`lip state import`, no `--force`)
+4. Atomic BFF env: set `LIP_URL` (or host/port) **and** `LIP_API_KEY` together
+5. Canary read + one unused order key accrual
+6. Clear freeze
+
+Live rehearsal archive (read-only, not cutover): sha256
+`89bfd195bcf85aec3b8975011e00cae05c3b1a5c2df7c04e6ceb839c9d500702`
+(11 members / 9 ledger / 635 idempotency).
