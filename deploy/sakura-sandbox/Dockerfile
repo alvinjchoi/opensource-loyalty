@@ -28,7 +28,8 @@ RUN mkdir -p /data \
 USER node
 EXPOSE 3210
 
+# Render injects PORT (10000 for web services); the fallback matches local runs.
 HEALTHCHECK --interval=10s --timeout=3s --start-period=10s --retries=5 \
-  CMD wget -qO- http://127.0.0.1:3210/health >/dev/null || exit 1
+  CMD wget -qO- "http://127.0.0.1:${PORT:-3210}/health" >/dev/null || exit 1
 
 CMD ["/usr/local/bin/start-loyalty"]
