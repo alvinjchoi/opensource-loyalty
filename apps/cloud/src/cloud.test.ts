@@ -51,7 +51,8 @@ describe("Cloud control plane", () => {
   it("ships a tenant-scoped control-plane migration", () => {
     const sql = [
       "001_control_plane.sql",
-      "002_identity_memberships.sql"
+      "002_identity_memberships.sql",
+      "003_customer_identity.sql"
     ].map((name) => readFileSync(
       new URL(`../migrations/${name}`, import.meta.url),
       "utf8"
@@ -67,7 +68,11 @@ describe("Cloud control plane", () => {
       "lip_cloud_audit_log",
       "lip_cloud_usage_events",
       "lip_cloud_usage_counters",
-      "lip_cloud_provisioning_jobs"
+      "lip_cloud_provisioning_jobs",
+      "lip_cloud_customers",
+      "lip_cloud_customer_identities",
+      "lip_cloud_customer_consents",
+      "lip_cloud_customer_loyalty_memberships"
     ]) {
       expect(sql).toContain(`CREATE TABLE IF NOT EXISTS ${table}`);
     }
