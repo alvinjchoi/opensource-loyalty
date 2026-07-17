@@ -9,6 +9,14 @@
 
 **LIP is an open, vendor-neutral loyalty protocol and reference platform for developers building restaurant, QSR, coffee, convenience, and franchise ordering systems.** It ships everything needed to go from zero to a working loyalty integration: a normative protocol spec, a **deterministic reference engine**, an **HTTP API**, a **TypeScript SDK**, a local **Admin dashboard**, a SQLite sandbox, Docker runtime, runnable examples, and black-box conformance tests.
 
+> [!IMPORTANT]
+> Customer authentication is intentionally outside the LIP transaction
+> boundary. The app BFF integrates Clerk, Auth0, or another identity provider,
+> keeps the merchant API key server-side, and maps authenticated customers to
+> opaque LIP `member_id` values. A LIP member is not automatically a Crave
+> platform customer. For example, Sakura demo guests currently exist in the
+> Sakura BFF/customer-data layer, not in Crave Customer Identity.
+
 For more information, be sure to check out the **[LIP Documentation](docs/README.md)**. Building with an AI coding agent? Start with **[Getting started with AI](#getting-started-with-ai-)**.
 
 ## Key Features of LIP ⭐
@@ -39,18 +47,9 @@ For more information, be sure to check out the **[LIP Documentation](docs/README
   tenant-scoped Postgres tables, migrations, optimistic revisions, advisory
   transaction locks, and scheduler leases for multi-instance protocol serving.
 
-- ☁️ **Cloud Control Plane**: A separate Postgres-backed management service for
-  organizations, projects, regional environments, plans, subscriptions,
-  provisioning jobs, idempotent usage metering, and quotas. The open protocol
-  and self-hosted runtime remain independent of this non-normative service.
-
-- 🔐 **External Identity Bridge**: Validate Clerk, Auth0, or generic OIDC access
-  tokens in your BFF and map provider identities to stable customer and LIP
-  member ids without moving credentials or sessions into the loyalty platform.
-
 - 🧪 **Specs and Conformance**: OpenAPI 3.1 contract, JSON Schema Draft 2020-12 payload schemas, normative lifecycle, account, webhook, and foodservice profile documents, and black-box HTTP conformance tests you can run against any implementation.
 
-- 🔧 **Batteries-Included CLI**: Validation, diagnostics (`doctor`), local serving, schema listing, and baseline conformance checks.
+- 🔧 **Batteries-Included CLI**: Validation, diagnostics (`doctor`), local serving, schema listing, baseline conformance checks, and checksummed full-state export/import for cloud migration.
 
 - 🤖 **AI-Ready**: Installable agent Skills, an official MCP server, [`llms.txt`](llms.txt), and curated prompts so Cursor, Claude Code, Codex, and similar tools implement LIP correctly.
 
@@ -202,9 +201,9 @@ For the Postgres-backed profile, run `docker compose --profile postgres up
 --build`; its API defaults to port `3211`. See
 [PostgreSQL production storage](docs/postgres.md).
 
-To run the managed-service control-plane foundation on port `3220`, set a
-`LIP_CLOUD_API_KEY` of at least 16 characters and run `docker compose --profile
-cloud up --build`. See [Cloud control plane](docs/cloud.md).
+Moving a self-hosted program to another LIP host? Follow
+[MIGRATION.md](MIGRATION.md). The migration archive preserves members,
+balances, immutable ledger history, open reservations, and idempotency records.
 
 Authenticated protocol requests are limited per remote client. Responses
 include `RateLimit-*` headers and return RFC 9457 problem details with HTTP 429
@@ -235,14 +234,12 @@ first registry release is completed.
 
 ```text
 |-- apps/
-|   |-- admin/              # Browser Admin dashboard
-|   `-- cloud/              # Managed Cloud control plane and management API
+|   `-- admin/              # Browser Admin dashboard
 |-- docs/                   # Developer guides and API documentation
 |-- examples/
 |   `-- typescript/         # Runnable SDK lifecycle examples
 |-- packages/
 |   |-- cli/                # CLI: serve, quickstart, validation, doctor, conformance
-|   |-- identity/           # External OIDC validation and customer/member mapping
 |   |-- protocol/           # TypeScript types, schemas, validation, protocol contracts
 |   |-- reference/          # Deterministic loyalty engine and Admin snapshot model
 |   |-- sdk/                # Domain SDK and generated low-level OpenAPI client
@@ -260,7 +257,6 @@ first registry release is completed.
 - **Language:** TypeScript on Node.js 20.19+
 - **Frontend:** React, Vite, Tailwind CSS, lucide-react
 - **API:** Node HTTP server with OpenAPI 3.1 contract
-- **Cloud:** Separate Node management API with PostgreSQL control-plane state
 - **Validation:** JSON Schema Draft 2020-12 via TypeBox
 - **SDK:** Handwritten domain client plus generated low-level OpenAPI client
 - **Storage:** SQLite sandbox or normalized, tenant-scoped PostgreSQL
@@ -316,7 +312,6 @@ Current priorities are tracked in [PLAN.md](PLAN.md). Near-term focus:
 - Reward wallet and reward management APIs
 - Webhook subscription management
 - Async Postgres stores for the remaining Admin extension services
-- Cloud provisioning worker, direct OIDC validation, and Stripe billing adapter
 - More SDK examples and machine-readable docs
 
 ## Contributing 🤝
