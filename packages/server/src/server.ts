@@ -385,6 +385,24 @@ function cookieValue(request: IncomingMessage, name: string): string | undefined
   return undefined;
 }
 
+/**
+ * True when the request reached us over TLS: either a direct HTTPS socket or a
+ * proxied request whose edge terminated TLS (Render/most PaaS set
+ * X-Forwarded-Proto=https). Used to mark admin cookies Secure without breaking
+ * plain-HTTP local development, where neither signal is present.
+ */
+function isSecureRequest(request: IncomingMessage): boolean {
+  if ((request.socket as { encrypted?: boolean }).encrypted) return true;
+  const header = request.headers["x-forwarded-proto"];
+  const proto = Array.isArray(header) ? header[0] : header;
+  return proto?.split(",")[0]?.trim().toLowerCase() === "https";
+}
+
+/** Cookie attributes shared by the admin session and CSRF cookies. */
+function adminCookieAttributes(request: IncomingMessage): string {
+  return isSecureRequest(request) ? "; SameSite=Strict; Secure" : "; SameSite=Strict";
+}
+
 function isAdminAuthorized(
   request: IncomingMessage,
   options: ServerOptions,
@@ -878,10 +896,11 @@ export function createReferenceServer(engine: LoyaltyEngine, options: ServerOpti
         const session = randomUUID();
         const csrf = randomUUID();
         adminSessions.set(session, { csrf, principal });
+        const cookieAttrs = adminCookieAttributes(request);
         response.writeHead(204, {
           "set-cookie": [
-            `lip_admin_session=${encodeURIComponent(session)}; Path=/admin; HttpOnly; SameSite=Strict; Max-Age=28800`,
-            `lip_admin_csrf=${encodeURIComponent(csrf)}; Path=/admin; SameSite=Strict; Max-Age=28800`
+            `lip_admin_session=${encodeURIComponent(session)}; Path=/admin; HttpOnly${cookieAttrs}; Max-Age=28800`,
+            `lip_admin_csrf=${encodeURIComponent(csrf)}; Path=/admin${cookieAttrs}; Max-Age=28800`
           ],
           "x-lip-csrf-token": csrf,
           "cache-control": "no-store"
@@ -893,10 +912,11 @@ export function createReferenceServer(engine: LoyaltyEngine, options: ServerOpti
       if (adminEnabled && method === "POST" && path === "/admin/api/v1/logout") {
         const session = cookieValue(request, "lip_admin_session");
         if (session) adminSessions.delete(session);
+        const cookieAttrs = adminCookieAttributes(request);
         response.writeHead(204, {
           "set-cookie": [
-            "lip_admin_session=; Path=/admin; HttpOnly; SameSite=Strict; Max-Age=0",
-            "lip_admin_csrf=; Path=/admin; SameSite=Strict; Max-Age=0"
+            `lip_admin_session=; Path=/admin; HttpOnly${cookieAttrs}; Max-Age=0`,
+            `lip_admin_csrf=; Path=/admin${cookieAttrs}; Max-Age=0`
           ],
           "cache-control": "no-store"
         });
