@@ -269,8 +269,9 @@ Active cross-repository ownership (July 16, 2026):
 - `sakura-japan` owns Expo integration, removal of its custom password/session
   implementation, secure native token storage, mobile E2E, demo locations, and
   Stripe/storefront readiness.
-- Agents must not edit both dirty repositories concurrently. See
-  [Sakura Japan cross-repository handoff](docs/sakura-agent-handoff.md).
+- Agents must not edit both dirty repositories concurrently. The
+  cross-repository handoff lives in the private `sakura-japan` repository
+  (`docs/operations/sakura-agent-handoff.md`).
 
 Product positioning: **open-source loyalty infrastructure for Clerk, Auth0, or
 any OIDC provider**. The selected provider owns all authentication UX,

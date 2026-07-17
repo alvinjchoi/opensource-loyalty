@@ -139,8 +139,8 @@ repoint traffic.
 ## Sakura on Render
 
 For the BFF → Cloud surface map, franchise wallet gaps, and the deferred PR
-checklist (no live cutover), see
-[`docs/sakura-cloud-path.md`](docs/sakura-cloud-path.md).
+checklist (no live cutover), see the Sakura operations docs in the private
+`sakura-japan` repository (`docs/operations/sakura-cloud-path.md`).
 
 For the current Sakura deployment:
 
@@ -161,8 +161,9 @@ node packages/cli/dist/cli.js state export \
 
 Copy the archive through an encrypted operator channel, import it into the
 provisioned Crave Cloud tenant, verify counts, then update the BFF connection.
-See `docs/sakura-render-audit.md` for the configuration snapshot taken before
-this migration tooling was added.
+The configuration snapshot taken before this migration tooling was added lives
+in the private `sakura-japan` repository
+(`docs/operations/sakura-render-audit.md`).
 
 Render access prerequisite: `render ssh` requires an SSH public key registered
 in the Render Dashboard account settings (there is no API for this), and the
