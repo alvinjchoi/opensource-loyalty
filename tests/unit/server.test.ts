@@ -256,6 +256,10 @@ describe("reference HTTP server", () => {
       const cookie = login.headers.get("set-cookie");
       expect(cookie).toContain("lip_admin_session=");
       expect(cookie).toContain("HttpOnly");
+      expect(cookie).toContain("SameSite=Strict");
+      // Plain-HTTP request (no TLS, no forwarded proto): Secure would make the
+      // cookie undeliverable, so it must be omitted for local development.
+      expect(cookie).not.toContain("Secure");
 
       const authenticatedBootstrap = await fetch(`${running.url}/admin/api/v1/bootstrap`, {
         headers: { cookie: cookie! }
@@ -333,6 +337,39 @@ describe("reference HTTP server", () => {
     } finally {
       await running.close();
       rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("marks admin cookies Secure when the edge terminates TLS", async () => {
+    const running = await startReferenceServer(new LoyaltyEngine(makeProgram()), {
+      apiKey: "admin-test-key",
+      admin: { storage: { driver: "sqlite", location: ":memory:", persistent: false } }
+    });
+    try {
+      const login = await fetch(`${running.url}/admin/api/v1/session`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-forwarded-proto": "https"
+        },
+        body: JSON.stringify({ api_key: "admin-test-key" })
+      });
+      expect(login.status).toBe(204);
+      const cookie = login.headers.get("set-cookie");
+      expect(cookie).toContain("lip_admin_session=");
+      expect(cookie).toContain("HttpOnly");
+      expect(cookie).toContain("SameSite=Strict");
+      expect(cookie).toContain("Secure");
+
+      const logout = await fetch(`${running.url}/admin/api/v1/logout`, {
+        method: "POST",
+        headers: { "x-forwarded-proto": "https, http" }
+      });
+      expect(logout.status).toBe(204);
+      // Deletion cookie must carry matching attributes so the browser evicts it.
+      expect(logout.headers.get("set-cookie")).toContain("Secure");
+    } finally {
+      await running.close();
     }
   });
 
