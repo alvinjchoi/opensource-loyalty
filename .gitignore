@@ -10,3 +10,6 @@ coverage/
 .lip/
 .agents/
 packages/mcp/assets/
+
+# Local security reports (gstack /cso)
+.gstack/
