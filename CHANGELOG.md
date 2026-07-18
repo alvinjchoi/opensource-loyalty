@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.0 - Unreleased
+## 0.1.0 - 2026-07-18
 
 - Initial LIP core and foodservice profile.
 - TypeScript schema package and deterministic reference engine.
