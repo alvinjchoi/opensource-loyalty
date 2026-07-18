@@ -32,6 +32,12 @@ jobs:
         run: npm run test:packages
       - name: Publish packages in dependency order
         if: github.event_name == 'release' || inputs.dry_run == false
+        env:
+          # First publish of these packages authenticates with a granular npm
+          # token; setup-node's .npmrc reads it from NODE_AUTH_TOKEN. Once each
+          # package exists, configure OIDC trusted publishing and drop this.
+          # Provenance still attaches (id-token: write above + public repo).
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           npm publish --workspace @loyalty-interchange/protocol
           npm publish --workspace @loyalty-interchange/storage
