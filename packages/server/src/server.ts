@@ -71,6 +71,7 @@ class TransportError extends Error {
 
 export interface ServerOptions {
   apiKey: string;
+  writeFrozen?: boolean;
   reservationTtlSeconds?: number;
   persistState?: (state: LoyaltyEngineState) => void;
   /**
@@ -664,6 +665,7 @@ export function createReferenceServer(engine: LoyaltyEngine, options: ServerOpti
   }
   const routes = routeTable(engine);
   const adminSessions = new Map<string, AdminSession>();
+  let writeFrozen = options.writeFrozen ?? false;
   const adminEnabled = options.admin?.enabled ?? true;
   const rateLimiter = options.rateLimit === false ? undefined : createRateLimiter(options.rateLimit);
   const metrics = options.metrics === false ? undefined : new HttpMetrics();
@@ -827,7 +829,8 @@ export function createReferenceServer(engine: LoyaltyEngine, options: ServerOpti
         sendJson(response, 200, {
           status: "ok",
           protocol_version: "1.0",
-          profile: "foodservice/1.0"
+          profile: "foodservice/1.0",
+          write_frozen: writeFrozen
         });
         return;
       }
@@ -1578,6 +1581,17 @@ export function createReferenceServer(engine: LoyaltyEngine, options: ServerOpti
       if (!protocolAuthorized(request, options, protocolPermission(path))) {
         response.setHeader("www-authenticate", "Bearer");
         sendJson(response, 401, problem(401, "Unauthorized", "unauthorized"), "application/problem+json");
+        return;
+      }
+      if (writeFrozen && protocolPermission(path) === "protocol:write") {
+        response.setHeader("retry-after", "30");
+        sendJson(
+          response,
+          503,
+          problem(503, "Write operations are temporarily frozen", "write_frozen",
+            "The provider is in a maintenance window; retry after it closes"),
+          "application/problem+json"
+        );
         return;
       }
       if (!enforceRateLimit()) return;

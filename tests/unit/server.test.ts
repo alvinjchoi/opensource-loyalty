@@ -48,6 +48,55 @@ describe("reference HTTP server", () => {
     }
   });
 
+  it("freezes protocol writes at startup while allowing reads and health", async () => {
+    const running = await startReferenceServer(new LoyaltyEngine(makeProgram()), {
+      apiKey: "freeze-test-key",
+      writeFrozen: true
+    });
+    try {
+      // a write is rejected with a stable 503 problem + Retry-After
+      const enroll = await fetch(`${running.url}/lip/v1/members/enroll`, {
+        method: "POST",
+        headers: { authorization: "Bearer freeze-test-key", "content-type": "application/json" },
+        body: JSON.stringify(makeEnroll("freeze-write-key"))
+      });
+      expect(enroll.status).toBe(503);
+      expect(enroll.headers.get("content-type")).toContain("application/problem+json");
+      expect(enroll.headers.get("retry-after")).toBeTruthy();
+      expect((await enroll.json()).code).toBe("write_frozen");
+
+      // a read still works
+      const program = await fetch(`${running.url}/lip/v1/programs/get`, {
+        method: "POST",
+        headers: { authorization: "Bearer freeze-test-key", "content-type": "application/json" },
+        body: JSON.stringify({ context: makeContext("freeze-read-key"), program_id: "demo-foodservice" })
+      });
+      expect(program.status).toBe(200);
+
+      // health reflects the freeze
+      const health = await (await fetch(`${running.url}/health`)).json();
+      expect(health).toMatchObject({ status: "ok", write_frozen: true });
+    } finally {
+      await running.close();
+    }
+  });
+
+  it("defaults to unfrozen (writes allowed, health write_frozen false)", async () => {
+    const running = await startReferenceServer(new LoyaltyEngine(makeProgram()), { apiKey: "unfrozen-key" });
+    try {
+      const health = await (await fetch(`${running.url}/health`)).json();
+      expect(health.write_frozen).toBe(false);
+      const enroll = await fetch(`${running.url}/lip/v1/members/enroll`, {
+        method: "POST",
+        headers: { authorization: "Bearer unfrozen-key", "content-type": "application/json" },
+        body: JSON.stringify(makeEnroll("unfrozen-write-key"))
+      });
+      expect(enroll.status).toBe(201);
+    } finally {
+      await running.close();
+    }
+  });
+
   it("returns problem details for routes, methods, media types, JSON, and body limits", async () => {
     const running = await startReferenceServer(new LoyaltyEngine(makeProgram()), {
       apiKey: "server-test-key"
