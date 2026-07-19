@@ -98,6 +98,7 @@ function addMockCommand(name: "mock" | "quickstart" | "serve", description: stri
     .option("--rate-limit <requests>", "requests allowed per client window", positiveCount, 120)
     .option("--rate-window-ms <milliseconds>", "rate-limit window in milliseconds", positiveCount, 60_000)
     .option("--no-structured-logs", "disable JSON request logs")
+    .option("--write-freeze", "start with /lip/v1 writes frozen (maintenance mode)")
     .action(async (options: {
       host: string;
       port: number;
@@ -109,6 +110,7 @@ function addMockCommand(name: "mock" | "quickstart" | "serve", description: stri
       rateLimit: number;
       rateWindowMs: number;
       structuredLogs: boolean;
+      writeFreeze?: boolean;
     }) => {
       if (options.apiKey.length < 8) throw new Error("API key must contain at least 8 characters");
       await runMockServer({
@@ -123,7 +125,8 @@ function addMockCommand(name: "mock" | "quickstart" | "serve", description: stri
           windowMs: options.rateWindowMs
         },
         structuredLogs: options.structuredLogs,
-        ...(options.program ? { programPath: resolve(options.program) } : {})
+        ...(options.program ? { programPath: resolve(options.program) } : {}),
+        writeFrozen: options.writeFreeze || process.env.LIP_WRITE_FREEZE === "true" || process.env.LIP_WRITE_FREEZE === "1"
       });
     });
 }
