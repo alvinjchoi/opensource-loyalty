@@ -1,7 +1,11 @@
+import { execFile } from "node:child_process";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { promisify } from "node:util";
+import { afterEach, beforeAll, describe, expect, it } from "vitest";
+import { LoyaltyEngine } from "@loyalty-interchange/reference";
+import { startReferenceServer } from "@loyalty-interchange/server";
 import {
   defaultConfig,
   formatReport,
@@ -14,6 +18,10 @@ import {
   startMockServer,
   validateFile
 } from "@loyalty-interchange/cli";
+import { makeProgram } from "../fixtures.js";
+
+const execFileAsync = promisify(execFile);
+const cliEntry = resolve(import.meta.dirname, "../../packages/cli/dist/cli.js");
 
 const temporaryDirectories: string[] = [];
 
@@ -115,6 +123,70 @@ describe("lip diagnostics", () => {
     });
     expect(unreachable.ok).toBe(false);
     expect(unreachable.checks.every((check) => !check.ok)).toBe(true);
+  });
+});
+
+describe("lip cloud-verify command", () => {
+  beforeAll(async () => {
+    await execFileAsync("npm", ["run", "build", "--workspace", "@loyalty-interchange/cli"], {
+      cwd: resolve(import.meta.dirname, "../..")
+    });
+  }, 120_000);
+
+  async function seededServer() {
+    const engine = new LoyaltyEngine(makeProgram());
+    const ctx = (key: string) => ({
+      protocol_version: "1.0" as const,
+      profile: "foodservice/1.0" as const,
+      request_id: `req-${key}`,
+      idempotency_key: key,
+      occurred_at: "2026-07-18T00:00:00.000Z",
+      source: { system: "seed" }
+    });
+    engine.enroll({
+      context: ctx("seed-enroll"),
+      program_id: "demo-foodservice",
+      identity: { type: "token", value: "known-guest" },
+      member_id: "member-001"
+    });
+    const server = await startReferenceServer(engine, { apiKey: "cloud-verify-cli-key", port: 0 });
+    return { server, apiKey: "cloud-verify-cli-key" };
+  }
+
+  it("prints doctor, conformance, and member reports and exits 0 when expectations match", async () => {
+    const { server, apiKey } = await seededServer();
+    try {
+      const { stdout } = await execFileAsync(process.execPath, [
+        cliEntry,
+        "cloud-verify",
+        server.url,
+        "--api-key", apiKey,
+        "--program-id", "demo-foodservice",
+        "--expect-member", "known-guest",
+        "--expect-available", "0"
+      ]);
+      expect(stdout).toContain("LIP diagnostics");
+      expect(stdout).toContain("known member available: expected 0, got 0");
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("exits non-zero when the known member's balance does not match", async () => {
+    const { server, apiKey } = await seededServer();
+    try {
+      await expect(execFileAsync(process.execPath, [
+        cliEntry,
+        "cloud-verify",
+        server.url,
+        "--api-key", apiKey,
+        "--program-id", "demo-foodservice",
+        "--expect-member", "known-guest",
+        "--expect-available", "999"
+      ])).rejects.toMatchObject({ code: 1 });
+    } finally {
+      await server.close();
+    }
   });
 });
 

@@ -2,6 +2,7 @@
 
 import { resolve } from "node:path";
 import { Command, InvalidArgumentError } from "commander";
+import { runCloudVerification } from "./cloud-verify.js";
 import { defaultConfig, initializeConfig, readConfig } from "./config.js";
 import { formatReport, runBaselineConformance, runDoctor } from "./diagnostics.js";
 import { runStateExport, runStateImport, type StateExportOptions, type StateImportOptions } from "./migration.js";
@@ -178,6 +179,40 @@ program
   .action(async (url: string | undefined, options: ConnectionFlags) => {
     const report = await runBaselineConformance(await connection(url, options));
     console.log(formatReport(report));
+    if (!report.ok) process.exitCode = 1;
+  });
+
+program
+  .command("cloud-verify [url]")
+  .description("Run doctor + baseline conformance and optional member checks against a provisioned host")
+  .option("-k, --api-key <key>", "Admin/API key for Bearer auth")
+  .option("--program-id <id>", "Program id (required for --expect-member)")
+  .option("--expect-member <identity>", "Known member token identity to verify")
+  .option("--expect-available <n>", "Expected available balance for --expect-member")
+  .option("--expect-members <n>", "Expected total member count (uses the non-normative admin snapshot)")
+  .action(async (url: string | undefined, options: ConnectionFlags & {
+    programId?: string; expectMember?: string; expectAvailable?: string; expectMembers?: string;
+  }) => {
+    const conn = await connection(url, options);
+    const expectations: Parameters<typeof runCloudVerification>[1] = {};
+    if (options.programId) expectations.programId = options.programId;
+    if (options.expectMember !== undefined) {
+      if (options.expectAvailable === undefined) throw new Error("--expect-available is required with --expect-member");
+      expectations.expectMember = {
+        identity: { type: "token", value: options.expectMember },
+        available: Number(options.expectAvailable)
+      };
+    }
+    if (options.expectMembers !== undefined) expectations.expectMembers = Number(options.expectMembers);
+    const report = await runCloudVerification(conn, expectations);
+    console.log(formatReport(report.doctor));
+    console.log(formatReport(report.conformance));
+    if (report.knownMember) {
+      console.log(`[${report.knownMember.ok ? "pass" : "fail"}] known member available: expected ${report.knownMember.expected}, got ${report.knownMember.actual}`);
+    }
+    if (report.memberCount) {
+      console.log(`[${report.memberCount.ok ? "pass" : "fail"}] member count: expected ${report.memberCount.expected}, got ${report.memberCount.actual}`);
+    }
     if (!report.ok) process.exitCode = 1;
   });
 
