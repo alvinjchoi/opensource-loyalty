@@ -8,6 +8,18 @@
     "light": "#4ADE80",
     "dark": "#15803D"
   },
+  "logo": {
+    "light": "/logo/light.svg",
+    "dark": "/logo/dark.svg"
+  },
+  "favicon": "/favicon.svg",
+  "banner": {
+    "content": "LIP 0.1.0 is on npm — `npx @loyalty-interchange/cli serve`",
+    "dismissible": true
+  },
+  "contextual": {
+    "options": ["copy", "view", "chatgpt", "claude"]
+  },
   "navigation": {
     "tabs": [
       {
@@ -26,8 +38,18 @@
             "pages": [
               "guides/typescript-sdk",
               "guides/webhooks",
+              "guides/customer-identity",
               "guides/reference-platform",
+              "guides/postgres",
+              "guides/migration",
               "guides/punchh-migration"
+            ]
+          },
+          {
+            "group": "AI & Agents",
+            "pages": [
+              "guides/using-lip-with-ai",
+              "guides/ai-prompts"
             ]
           },
           {
@@ -58,14 +80,24 @@
   "navbar": {
     "links": [
       {
+        "label": "npm",
+        "href": "https://www.npmjs.com/org/loyalty-interchange"
+      },
+      {
         "label": "GitHub",
         "href": "https://github.com/alvinjchoi/opensource-loyalty"
       }
-    ]
+    ],
+    "primary": {
+      "type": "button",
+      "label": "Quickstart",
+      "href": "/get-started/quickstart"
+    }
   },
   "footer": {
     "socials": {
-      "github": "https://github.com/alvinjchoi/opensource-loyalty"
+      "github": "https://github.com/alvinjchoi/opensource-loyalty",
+      "npm": "https://www.npmjs.com/org/loyalty-interchange"
     }
   }
 }
