@@ -17,7 +17,7 @@ function bearer(init: RequestInit): string | undefined {
 // Full happy-path host: health ok, discovery valid, real key 200 / bogus 401, program matches.
 function happyHost(url: string, init: RequestInit): Response | undefined {
   if (url.endsWith("/health")) return Response.json({ status: "ok" });
-  if (url.endsWith("/.well-known/lip")) return Response.json({ protocol_version: "1.0", profile: "foodservice/1.0" });
+  if (url.endsWith("/.well-known/lip")) return Response.json({ protocol_version: "1.0", profiles: ["foodservice/1.0"] });
   if (url.endsWith("/lip/v1/capabilities")) return new Response(null, { status: bearer(init) === GOOD ? 200 : 401 });
   if (url.endsWith("/lip/v1/programs/get")) return Response.json({ program: { program_id: "demo-rewards" } });
   return undefined;
@@ -53,7 +53,7 @@ describe("RemoteEnvironmentAttacher", () => {
   });
 
   it("reports discovery_invalid on a version mismatch", async () => {
-    const r = await attacher((u, i) => u.endsWith("/.well-known/lip") ? Response.json({ protocol_version: "9.9", profile: "x" }) : happyHost(u, i)).validate(
+    const r = await attacher((u, i) => u.endsWith("/.well-known/lip") ? Response.json({ protocol_version: "9.9", profiles: ["x"] }) : happyHost(u, i)).validate(
       { endpoint_url: "https://lip.example.com", api_key: GOOD, program_id: "demo-rewards" });
     expect(r).toMatchObject({ ok: false, code: "discovery_invalid" });
   });

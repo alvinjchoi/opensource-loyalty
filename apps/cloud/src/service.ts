@@ -1,4 +1,5 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { RemoteEnvironmentAttacher } from "./remote-attach.js";
 import { CloudRepositoryConflictError } from "./types.js";
 import type {
   CloudDashboard,
@@ -49,6 +50,7 @@ export interface CloudControlPlaneOptions {
   regions?: string[];
   defaultPlanId?: string;
   now?: () => Date;
+  attacher?: RemoteEnvironmentAttacher;
 }
 
 function identifier(prefix: string): string {
@@ -100,6 +102,7 @@ export class CloudControlPlane {
   private readonly regions: Set<string>;
   private readonly defaultPlanId: string;
   private readonly clock: () => Date;
+  private readonly attacher: RemoteEnvironmentAttacher;
 
   public constructor(options: CloudControlPlaneOptions) {
     this.repository = options.repository;
@@ -107,6 +110,7 @@ export class CloudControlPlane {
     if (this.regions.size === 0) throw new Error("At least one Cloud region is required");
     this.defaultPlanId = options.defaultPlanId ?? "free";
     this.clock = options.now ?? (() => new Date());
+    this.attacher = options.attacher ?? new RemoteEnvironmentAttacher();
   }
 
   public async migrate(): Promise<void> {
@@ -552,6 +556,38 @@ export class CloudControlPlane {
       throw new CloudError(429, "usage_limit_exceeded", `${input.metric} hard limit exceeded`);
     }
     return { event, duplicate: result === "duplicate" };
+  }
+
+  public async attachEnvironment(
+    principal: CloudPrincipal,
+    environmentId: string,
+    input: { endpoint_url: string; api_key: string }
+  ): Promise<CloudEnvironment> {
+    const environment = await this.requiredEnvironment(environmentId);
+    const project = await this.requiredProject(environment.project_id);
+    await this.requireRole(principal, project.organization_id, managementRoles);
+    if (environment.status === "suspended") {
+      throw new CloudError(409, "environment_suspended", "A suspended environment cannot be attached");
+    }
+    const result = await this.attacher.validate({
+      endpoint_url: input.endpoint_url.trim(),
+      api_key: input.api_key,
+      program_id: environment.program_id
+    });
+    if (!result.ok) {
+      await this.repository.attachEnvironment(environmentId, {
+        api_url: input.endpoint_url.trim(),
+        status: "failed",
+        status_message: result.code
+      });
+      throw new CloudError(422, result.code, result.message);
+    }
+    return this.repository.attachEnvironment(environmentId, {
+      api_url: result.binding.api_url,
+      admin_url: result.binding.admin_url,
+      api_key_fingerprint: result.binding.api_key_fingerprint,
+      status: "ready"
+    });
   }
 
   public async usage(

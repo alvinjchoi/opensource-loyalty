@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 const EXPECTED_PROTOCOL = "1.0";
 const EXPECTED_PROFILE = "foodservice/1.0";
 
@@ -63,8 +65,13 @@ export class RemoteEnvironmentAttacher {
     // 2. discovery
     const disc = await this.safe(() => this.fetchImpl(at("/.well-known/lip")));
     const discBody = disc && disc.ok ? await this.json(disc) : undefined;
-    const d = discBody as { protocol_version?: unknown; profile?: unknown } | undefined;
-    if (!d || d.protocol_version !== EXPECTED_PROTOCOL || d.profile !== EXPECTED_PROFILE) {
+    const d = discBody as { protocol_version?: unknown; profiles?: unknown } | undefined;
+    if (
+      !d ||
+      d.protocol_version !== EXPECTED_PROTOCOL ||
+      !Array.isArray(d.profiles) ||
+      !d.profiles.includes(EXPECTED_PROFILE)
+    ) {
       return { ok: false, code: "discovery_invalid", message: "discovery document missing or version mismatch" };
     }
 
@@ -85,7 +92,17 @@ export class RemoteEnvironmentAttacher {
     const prog = await this.safe(() => this.fetchImpl(at("/lip/v1/programs/get"), {
       method: "POST",
       headers: { authorization: `Bearer ${input.api_key}`, "content-type": "application/json" },
-      body: JSON.stringify({ program_id: input.program_id })
+      body: JSON.stringify({
+        context: {
+          protocol_version: EXPECTED_PROTOCOL,
+          profile: EXPECTED_PROFILE,
+          request_id: randomUUID(),
+          idempotency_key: randomUUID(),
+          occurred_at: new Date().toISOString(),
+          source: { system: "lip-cloud-attacher" }
+        },
+        program_id: input.program_id
+      })
     }));
     const progBody = prog && prog.ok ? await this.json(prog) : undefined;
     const servedId = (progBody as { program?: { program_id?: unknown } } | undefined)?.program?.program_id;
