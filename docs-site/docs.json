@@ -96,8 +96,7 @@
   },
   "footer": {
     "socials": {
-      "github": "https://github.com/alvinjchoi/opensource-loyalty",
-      "npm": "https://www.npmjs.com/org/loyalty-interchange"
+      "github": "https://github.com/alvinjchoi/opensource-loyalty"
     }
   }
 }
