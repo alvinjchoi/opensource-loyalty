@@ -16,7 +16,7 @@ To use an existing database:
 
 ```bash
 LIP_DATABASE_URL=postgres://user:password@host:5432/loyalty \
-LIP_TENANT_ID=sakura-japan \
+LIP_TENANT_ID=demo-cafe \
 LIP_API_KEY=replace-with-a-secret \
 npm run serve
 ```

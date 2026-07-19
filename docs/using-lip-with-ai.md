@@ -79,7 +79,7 @@ Useful commands for agent workflows:
 | `lip schemas` | List schema names accepted by `lip validate` |
 
 Load a custom program when building a brand-specific integration (for example
-the Sakura Rewards program in the companion `sakura-japan` app):
+a demo rewards program in a companion app):
 
 ```bash
 LIP_WEBHOOK_URL=http://127.0.0.1:8787/loyalty/webhook \
@@ -172,8 +172,8 @@ changes without polling the ledger. A typical pattern:
 3. The receiver verifies, deduplicates, and triggers downstream automation
    (CRM sync, push notifications, analytics).
 
-The Sakura Japan reference BFF implements this pattern and exposes received
-events at `GET /loyalty/events` for local inspection.
+A reference BFF that implements this pattern typically exposes received
+events at an endpoint like `GET /loyalty/events` for local inspection.
 
 ## Build integrations with AI coding tools
 
@@ -189,9 +189,8 @@ customer-facing apps should introduce a thin backend that:
   `redemptions/capture`, with `redemptions/reverse` on failure
 - Posts `orders/adjust` on refunds
 
-The Sakura Japan app (`sakura-japan` repo) is the working reference for this
-pattern: Expo app → Node BFF → LIP server, with webhooks wired for event
-inspection.
+A typical reference for this pattern is a mobile app → Node BFF → LIP server
+stack, with webhooks wired for event inspection.
 
 ### Checkout preview
 
@@ -210,8 +209,7 @@ npm run test
 ```
 
 For a full-stack integration, add HTTP end-to-end tests that boot the real
-server and drive the lifecycle (the Sakura `npm run test:e2e` suite is the
-template).
+server and drive the lifecycle end to end.
 
 ## Use LIP's MCP server
 

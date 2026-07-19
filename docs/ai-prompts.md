@@ -146,6 +146,6 @@ insufficient-balance redemption rejection, successful redemption, refund with
 points clawback, webhook signature verification, and idempotent order retry
 (same orderKey must not double-accrue).
 
-Use Node's built-in test runner and isolated temp databases. See
-sakura-japan/server/e2e.test.mjs as a reference pattern.
+Use Node's built-in test runner and isolated temp databases. A companion BFF's
+end-to-end test suite is a good reference pattern.
 ```

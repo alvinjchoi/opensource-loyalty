@@ -76,7 +76,7 @@ npx skills add .
 npm run lip -- init    # prints skills + MCP hints
 ```
 
-Enable MCP: [`mcp.json`](mcp.json) · Skills: [`skills/README.md`](skills/README.md)
+Enable MCP: [`mcp.json`](../mcp.json) · Skills: [`skills/README.md`](../skills/README.md)
 
 ## Getting started
 

@@ -1,8 +1,9 @@
 # Releasing npm packages
 
-All eight `@loyalty-interchange/*` workspaces are configured as public packages
+All ten `@loyalty-interchange/*` workspaces are configured as public packages
 with provenance, repository metadata, Node.js requirements, and restricted
-`dist` package contents.
+`dist` package contents. The first release (v0.1.0) shipped through this
+pipeline with provenance attestations.
 
 ## One-time npm setup
 

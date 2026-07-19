@@ -136,7 +136,7 @@ curl -X POST http://127.0.0.1:3220/cloud/v1/organizations \
   -H "X-LIP-Cloud-Subject: user_123" \
   -H "X-LIP-Cloud-Email: owner@example.com" \
   -H "Content-Type: application/json" \
-  -d '{"name":"Sakura Restaurants","slug":"sakura-restaurants"}'
+  -d '{"name":"Demo Restaurants","slug":"demo-restaurants"}'
 ```
 
 ## Isolation and metering

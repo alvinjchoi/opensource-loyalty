@@ -27,7 +27,7 @@ mechanics in explicit modules or profiles.
 
 ## Current API surface
 
-The checked-in LIP OpenAPI document currently exposes 14 operations across 8
+The checked-in LIP OpenAPI document currently exposes 18 operations across 9
 tags:
 
 | Tag | Operations |
@@ -35,11 +35,12 @@ tags:
 | Discovery | 3 |
 | Programs | 1 |
 | Accounts | 1 |
-| Ledger | 1 |
+| Ledger | 2 |
 | Members | 2 |
 | Orders | 2 |
 | Accruals | 1 |
 | Redemptions | 3 |
+| Issued Rewards | 3 |
 
 OpenLoyalty's public OpenAPI document exposes a much broader platform surface:
 
@@ -85,7 +86,7 @@ OpenLoyalty's public OpenAPI document exposes a much broader platform surface:
 | Campaigns | Campaign CRUD, eligibility windows, targeting, stacking, caps, triggers, and marketer-controlled rules. | Optional platform module, not LIP core. |
 | Segments | Segment CRUD, dynamic audiences, import-backed lists, member targeting. | Optional platform module; protocol may reference segment ids only when needed. |
 | Member CRM | Profile updates, deletion, preferences, consents, identifiers, merge/split, status, custom fields. | Platform member API; protocol should keep portable identity resolution narrow. |
-| Points operations | Manual adjustments, transfers, expiration jobs, classifications, bonus/gift/migration entries. | Account and ledger module; some entries are already planned in `PLAN.md`. |
+| Points operations | Manual adjustments, transfers, expiration jobs, classifications, bonus/gift/migration entries. | Account and ledger module; manual adjustments now ship as `POST /lip/v1/ledger/manual-adjustments`. |
 | Wallets | Multi-wallet accounts, stored value, unit conversion, wallet credit lifecycle. | Optional account module; wallet credit is important for restaurant commerce. |
 | Rewards | Reward CRUD, categories, issued reward wallet, coupons, activation, cancel/reissue, external artifacts. | Platform API and future account-experience expansion. |
 | Tiers | Tier CRUD, qualification policies, achievement rewards, downgrade rules, benefit management. | Platform configuration API; protocol reads tier progress today. |

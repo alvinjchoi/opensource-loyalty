@@ -12,7 +12,7 @@ From a clone of this repo:
 npx skills add .
 ```
 
-After the package is published to GitHub, install from the remote:
+Or install from the public repository without cloning:
 
 ```bash
 npx skills add alvinjchoi/opensource-loyalty

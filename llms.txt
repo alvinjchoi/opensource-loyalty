@@ -40,7 +40,7 @@ Agent docs:
 - spec/core.md — protocol context, idempotency, problem details
 - spec/profiles/foodservice.md — FoodserviceOrder, earning exclusions, channels
 - spec/webhooks.md — HMAC-SHA256 signature profile, deduplication
-- spec/openapi.yaml — generated HTTP binding (14 operations)
+- spec/openapi.yaml — generated HTTP binding (18 operations)
 - spec/schemas/ — JSON Schema Draft 2020-12 payloads
 
 ## Runnable examples
@@ -104,6 +104,10 @@ org.loyalty-interchange.order.adjusted.v1
 org.loyalty-interchange.redemption.reserved.v1
 org.loyalty-interchange.redemption.captured.v1
 org.loyalty-interchange.redemption.reversed.v1
+org.loyalty-interchange.issued-reward.issued.v1
+org.loyalty-interchange.issued-reward.redeemed.v1
+org.loyalty-interchange.issued-reward.restored.v1
+org.loyalty-interchange.issued-reward.cancelled.v1
 
 Enable: LIP_WEBHOOK_URL + LIP_WEBHOOK_SECRET env vars on lip serve
 Failed deliveries persist in the SQLite outbox and resume after restart.
@@ -126,7 +130,7 @@ validates it, maps `{tenant_id, issuer, subject}` to a stable customer/member,
 and holds LIP_API_KEY. BFF calls evaluate for cart preview and runs
 reserve→pay→accrue→capture. `@loyalty-interchange/identity` supplies the thin
 server-side verifier and mapping contract; it does not own sign-in or sessions.
-Reference: sakura-japan repo (Expo app + server/index.mjs BFF).
+Reference: docs/customer-identity.md (BFF integration pattern and mapping contract).
 
 ## Not in LIP (build in your app or wait for platform)
 

@@ -1,7 +1,8 @@
 # LIP Developer Experience Plan
 
 Status: active; local implementation has reached the managed Cloud foundation
-in Milestone 2.8; package publication and listed follow-ups remain pending
+in Milestone 2.8; the `@loyalty-interchange/*` packages are published to npm
+(v0.1.0, with provenance); listed follow-ups remain pending
 
 ## Current implementation focus: minimal developer onboarding
 
@@ -129,7 +130,7 @@ normative specification.
 Goal: install one CLI and complete the first transaction without reading the
 specification.
 
-- [ ] Publish `@loyalty-interchange/cli` to expose the short `lip` command externally
+- [x] Publish `@loyalty-interchange/cli` to expose the short `lip` command externally
 - [x] `lip quickstart` starts the stateful reference environment
 - [x] `lip mock` starts the server with configurable host, port, and API key
 - [x] `lip validate <file> --schema <name>` validates local JSON
@@ -149,7 +150,7 @@ health and discovery; all CLI commands have unit or black-box coverage.
 Goal: application developers call domain methods rather than construct protocol
 envelopes.
 
-- [ ] Publish the idiomatic TypeScript SDK package
+- [x] Publish the idiomatic TypeScript SDK package
 - [x] Add public-package metadata, package dry runs, provenance, and trusted
   GitHub Actions publishing in dependency order
 - [x] Automatically add versions, request ids, timestamps, and idempotency keys
@@ -266,12 +267,11 @@ Active cross-repository ownership (July 16, 2026):
 - `craveup-loyalty` owns standards-based OIDC token validation, stable
   customer/member mapping, the server-side integration package, and contract
   tests on `feat/customer-identity-contract`.
-- `sakura-japan` owns Expo integration, removal of its custom password/session
-  implementation, secure native token storage, mobile E2E, demo locations, and
-  Stripe/storefront readiness.
+- The private consumer-app repository owns Expo integration, removal of its
+  custom password/session implementation, secure native token storage, mobile
+  E2E, demo locations, and Stripe/storefront readiness.
 - Agents must not edit both dirty repositories concurrently. The
-  cross-repository handoff lives in the private `sakura-japan` repository
-  (`docs/operations/sakura-agent-handoff.md`).
+  cross-repository handoff lives in the private companion repository.
 
 Product positioning: **open-source loyalty infrastructure for Clerk, Auth0, or
 any OIDC provider**. The selected provider owns all authentication UX,
@@ -287,8 +287,8 @@ customer-to-loyalty mapping.
   sign-in, refresh, recovery, or account-management APIs.
 - [x] Add a standards-based OIDC verifier outside the normative protocol that
   supports Clerk, Auth0, and other compatible issuers.
-- [x] Select Clerk as Sakura's initial consumer CIAM while preserving the OIDC
-  boundary for other applications.
+- [x] Select Clerk as the pilot app's initial consumer CIAM while preserving
+  the OIDC boundary for other applications.
 - [x] Keep restaurant staff/admin identity isolated from consumer identity;
   never share customer and merchant sessions or authorization policies.
 - [x] Use `{tenant_id, issuer, subject}` as the immutable external identity key.
@@ -304,7 +304,7 @@ customer-to-loyalty mapping.
   `CustomerDirectoryRepository`, and customer-to-member resolution.
 - [ ] Add a transaction-safe production repository implementation for customer,
   external-identity, and member-link records.
-- [ ] Integrate Clerk's native Expo SDK in Sakura and remove its custom
+- [ ] Integrate Clerk's native Expo SDK in the pilot app and remove its custom
   password/session endpoints.
 - [ ] Store customer tokens using platform-secure native storage and provider
   refresh/session handling.
