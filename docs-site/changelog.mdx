@@ -3,6 +3,17 @@ title: "Changelog"
 description: "Release notes and product updates for the Loyalty Interchange Protocol"
 ---
 
+<Update label="0.1.1" description="2026-07-18">
+  ## Idempotent replay fix
+
+  A retry that reuses the idempotency key with a regenerated `request_id` /
+  `occurred_at` now returns the original result — the provider compares the
+  business payload and echoes the retry's `request_id` on the replayed
+  response. Reusing a key with a different payload still returns
+  `409 idempotency_conflict`. Idempotency entries stored before 0.1.1 keep
+  working under a pinned replay (dual-check).
+</Update>
+
 <Update label="0.1.0" description="2026-07-18">
   ## First public release
 

@@ -1,6 +1,6 @@
 {
   "name": "@loyalty-interchange/server",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "HTTP reference binding for Loyalty Interchange Protocol.",
   "license": "Apache-2.0",
   "repository": { "type": "git", "url": "git+https://github.com/alvinjchoi/opensource-loyalty.git", "directory": "packages/server" },
@@ -27,10 +27,10 @@
     "prepack": "npm run build --workspace @loyalty-interchange/admin && npm run build"
   },
   "dependencies": {
-    "@loyalty-interchange/protocol": "0.1.0",
-    "@loyalty-interchange/reference": "0.1.0",
-    "@loyalty-interchange/storage-postgres": "0.1.0",
-    "@loyalty-interchange/storage-sqlite": "0.1.0",
+    "@loyalty-interchange/protocol": "0.1.1",
+    "@loyalty-interchange/reference": "0.1.1",
+    "@loyalty-interchange/storage-postgres": "0.1.1",
+    "@loyalty-interchange/storage-sqlite": "0.1.1",
     "@sinclair/typebox": "^0.34.52"
   }
 }

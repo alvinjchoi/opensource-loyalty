@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.1 - 2026-07-18
+
+- Fix idempotent replay: a retry that reuses the idempotency key with a
+  regenerated `request_id`/`occurred_at` now returns the original result
+  (echoing the retry's `request_id`) instead of a false `409` or an SDK
+  validation error. Entries stored before this release still match a pinned
+  replay (dual-check).
+
 ## 0.1.0 - 2026-07-18
 
 - Initial LIP core and foodservice profile.
