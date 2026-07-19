@@ -21,6 +21,8 @@ export interface MockOptions {
   structuredLogs?: boolean;
   /** Path to a JSON program definition that replaces the built-in demo program. */
   programPath?: string;
+  /** Start with /lip/v1 writes frozen (maintenance mode). */
+  writeFrozen?: boolean;
 }
 
 async function loadProgram(path: string): Promise<ProgramDefinition> {
@@ -46,6 +48,7 @@ export async function startMockServer(options: MockOptions): Promise<RunningServ
     apiKey: options.apiKey,
     reservationTtlSeconds: 120,
     ...(options.rateLimit ? { rateLimit: options.rateLimit } : {}),
+    ...(options.writeFrozen ? { writeFrozen: true } : {}),
     ...(options.structuredLogs ? {
       requestLogger: (entry) => console.log(JSON.stringify({ event: "http_request", ...entry }))
     } : {}),

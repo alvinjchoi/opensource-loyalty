@@ -21,6 +21,9 @@
     "profile": {
       "const": "foodservice/1.0",
       "type": "string"
+    },
+    "write_frozen": {
+      "type": "boolean"
     }
   }
 }

@@ -190,6 +190,35 @@ describe("lip cloud-verify command", () => {
   });
 });
 
+describe("lip serve write-freeze", () => {
+  it("starts frozen when writeFrozen is set and reports write_frozen on /health", async () => {
+    const running = await startMockServer({
+      host: "127.0.0.1",
+      port: 0,
+      apiKey: "cli-test-key",
+      writeFrozen: true
+    });
+    try {
+      const response = await fetch(`${running.url}/health`);
+      const body = await response.json();
+      expect(body).toMatchObject({ write_frozen: true });
+    } finally {
+      await running.close();
+    }
+  });
+
+  it("starts unfrozen by default", async () => {
+    const running = await startMockServer({ host: "127.0.0.1", port: 0, apiKey: "cli-test-key" });
+    try {
+      const response = await fetch(`${running.url}/health`);
+      const body = await response.json();
+      expect(body).toMatchObject({ write_frozen: false });
+    } finally {
+      await running.close();
+    }
+  });
+});
+
 describe("lip terminal presentation", () => {
   it("formats a clear local server startup screen", () => {
     const output = formatServerReady({

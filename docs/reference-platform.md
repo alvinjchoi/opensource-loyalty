@@ -133,6 +133,47 @@ An authenticated `GET /metrics` endpoint exports low-cardinality request
 counters and duration sums/counts in Prometheus text format. Unknown URLs and
 Admin assets are normalized to bounded labels to avoid cardinality growth.
 
+## Maintenance / write-freeze
+
+The reference server can refuse `/lip/v1` writes while keeping reads and
+`/health` available, for planned maintenance windows or coordinated
+migrations. The flag is in-memory only; it is not persisted and resets to
+unfrozen on restart unless set again at startup.
+
+Start frozen from the CLI or container:
+
+```sh
+npm run lip -- serve --write-freeze
+LIP_WRITE_FREEZE=true npm run lip -- serve
+```
+
+`--write-freeze` and `LIP_WRITE_FREEZE=true` (or `1`) are equivalent; either
+is enough to start frozen.
+
+Once running, an authenticated operator can toggle the flag at runtime
+through the Admin API:
+
+```sh
+curl -X POST http://127.0.0.1:3210/admin/api/v1/maintenance \
+  -H "Authorization: Bearer $ADMIN_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"write_frozen": true}'
+
+curl http://127.0.0.1:3210/admin/api/v1/maintenance \
+  -H "Authorization: Bearer $ADMIN_KEY"
+```
+
+The `GET` returns the current `{"write_frozen": boolean}` status. The `POST`
+requires an authenticated Admin/API key and, for session-cookie callers, a
+valid CSRF token, matching every other Admin write.
+
+While frozen, any `/lip/v1` request classified as a protocol write (including
+`evaluate`) receives `503 application/problem+json` with
+`{"code": "write_frozen"}` and a `Retry-After` header. Reads stay available,
+and `GET /health` reports the current state as `write_frozen` alongside the
+existing status fields, so monitoring can detect maintenance windows without
+calling the Admin API.
+
 ## Segments and reward campaigns
 
 Campaign authoring remains a non-normative platform feature under

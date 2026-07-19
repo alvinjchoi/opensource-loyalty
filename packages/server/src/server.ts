@@ -71,6 +71,7 @@ class TransportError extends Error {
 
 export interface ServerOptions {
   apiKey: string;
+  writeFrozen?: boolean;
   reservationTtlSeconds?: number;
   persistState?: (state: LoyaltyEngineState) => void;
   /**
@@ -664,6 +665,7 @@ export function createReferenceServer(engine: LoyaltyEngine, options: ServerOpti
   }
   const routes = routeTable(engine);
   const adminSessions = new Map<string, AdminSession>();
+  let writeFrozen = options.writeFrozen ?? false;
   const adminEnabled = options.admin?.enabled ?? true;
   const rateLimiter = options.rateLimit === false ? undefined : createRateLimiter(options.rateLimit);
   const metrics = options.metrics === false ? undefined : new HttpMetrics();
@@ -688,6 +690,7 @@ export function createReferenceServer(engine: LoyaltyEngine, options: ServerOpti
     allowedMethods.set("/admin/api/v1/session", ["POST"]);
     allowedMethods.set("/admin/api/v1/logout", ["POST"]);
     allowedMethods.set("/admin/api/v1/snapshot", ["GET"]);
+    allowedMethods.set("/admin/api/v1/maintenance", ["GET", "POST"]);
     if (options.admin?.access) {
       allowedMethods.set("/admin/api/v1/access/users", ["PUT"]);
       allowedMethods.set("/admin/api/v1/access/api-keys", ["POST"]);
@@ -827,7 +830,8 @@ export function createReferenceServer(engine: LoyaltyEngine, options: ServerOpti
         sendJson(response, 200, {
           status: "ok",
           protocol_version: "1.0",
-          profile: "foodservice/1.0"
+          profile: "foodservice/1.0",
+          write_frozen: writeFrozen
         });
         return;
       }
@@ -1375,6 +1379,60 @@ export function createReferenceServer(engine: LoyaltyEngine, options: ServerOpti
         return;
       }
 
+      if (adminEnabled && method === "GET" && path === "/admin/api/v1/maintenance") {
+        if (!isAdminAuthorized(request, options, adminSessions)) {
+          sendJson(response, 401, problem(401, "Unauthorized", "unauthorized"), "application/problem+json");
+          return;
+        }
+        sendJson(response, 200, { write_frozen: writeFrozen });
+        return;
+      }
+
+      if (adminEnabled && method === "POST" && path === "/admin/api/v1/maintenance") {
+        if (!isAdminAuthorized(request, options, adminSessions)) {
+          sendJson(response, 401, problem(401, "Unauthorized", "unauthorized"), "application/problem+json");
+          return;
+        }
+        if (!isAdminWriteAuthorized(request, options, adminSessions)) {
+          sendJson(
+            response,
+            403,
+            problem(403, "Forbidden", "csrf_failed", "Admin writes require a valid CSRF token"),
+            "application/problem+json"
+          );
+          return;
+        }
+        const body = await readBody(request);
+        const values = body && typeof body === "object" && !Array.isArray(body)
+          ? body as Record<string, unknown>
+          : {};
+        if (typeof values["write_frozen"] !== "boolean") {
+          throw new TransportError(
+            422,
+            "validation_failed",
+            "Request validation failed",
+            "write_frozen (boolean) is required"
+          );
+        }
+        writeFrozen = values["write_frozen"];
+        const principal = bearerPrincipal(request, options) ?? adminPrincipal(request, options, adminSessions);
+        if (principal) {
+          try {
+            options.admin?.access?.recordAudit(
+              principal,
+              "maintenance.write_freeze.changed",
+              "server",
+              undefined,
+              { write_frozen: writeFrozen }
+            );
+          } catch {
+            // Audit persistence must never change an already completed response.
+          }
+        }
+        sendJson(response, 200, { write_frozen: writeFrozen });
+        return;
+      }
+
       const webhookManager = options.admin?.webhookManager;
       if (
         adminEnabled &&
@@ -1578,6 +1636,17 @@ export function createReferenceServer(engine: LoyaltyEngine, options: ServerOpti
       if (!protocolAuthorized(request, options, protocolPermission(path))) {
         response.setHeader("www-authenticate", "Bearer");
         sendJson(response, 401, problem(401, "Unauthorized", "unauthorized"), "application/problem+json");
+        return;
+      }
+      if (writeFrozen && protocolPermission(path) === "protocol:write") {
+        response.setHeader("retry-after", "30");
+        sendJson(
+          response,
+          503,
+          problem(503, "Write operations are temporarily frozen", "write_frozen",
+            "The provider is in a maintenance window; retry after it closes"),
+          "application/problem+json"
+        );
         return;
       }
       if (!enforceRateLimit()) return;
