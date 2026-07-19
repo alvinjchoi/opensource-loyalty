@@ -63,6 +63,42 @@ survive restarts. Only `create` operations are supported; credentials remain
 files rather than an encrypted secret store. Regional adapters still replace
 this for production.
 
+## Attaching a data-plane host
+
+`POST /cloud/v1/environments/{environment_id}/attach` binds an environment to
+a LIP data-plane host you run yourself — anywhere, on any infrastructure —
+without any cloud-provider API. This is the remote counterpart to the
+in-process `LocalDataPlaneProvisioner` above: instead of provisioning a
+runtime, the control plane validates and records a host you already run.
+
+Request body:
+
+```json
+{ "endpoint_url": "https://lip.example.com", "api_key": "lip_sk_..." }
+```
+
+Attach is synchronous — no job is queued. The control plane performs five
+checks against `endpoint_url` before binding it:
+
+1. the URL uses TLS (or is a localhost address for local development);
+2. `GET /health` responds and reports `status: "ok"`;
+3. `GET /.well-known/lip` matches the expected protocol version and profile;
+4. the supplied `api_key` authenticates against `GET /lip/v1/capabilities`,
+   and an unknown key is correctly rejected;
+5. `POST /lip/v1/programs/get` confirms the host serves the environment's
+   `program_id`.
+
+On success the environment moves to `ready` with its `api_url`, `admin_url`,
+and an `api_key_fingerprint` — only a masked fingerprint is stored, never the
+key itself. On failure the environment is marked `failed` with a
+`status_message` describing which check failed, and the request returns
+`422` with a matching error code (for example `auth_rejected` or
+`program_mismatch`).
+
+Re-attaching is allowed for `pending`, `ready`, or `failed` environments, so
+you can rebind after key rotation or a host migration; a `suspended`
+environment rejects attach with `409 environment_suspended`.
+
 ## Start locally
 
 Start Postgres and the Cloud API:
@@ -125,6 +161,7 @@ details.
 - `POST /cloud/v1/organizations/{organization_id}/invitations`
 - `POST /cloud/v1/invitations/accept`
 - `GET|POST /cloud/v1/projects/{project_id}/environments`
+- `POST /cloud/v1/environments/{environment_id}/attach`
 - `POST /cloud/v1/environments/{environment_id}/usage-events`
 - `GET /cloud/v1/environments/{environment_id}/usage`
 

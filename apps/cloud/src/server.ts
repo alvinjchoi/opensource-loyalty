@@ -351,6 +351,20 @@ export function createCloudServer(
         return;
       }
 
+      const environmentAttachId = pathId(
+        path,
+        /^\/cloud\/v1\/environments\/([^/]+)\/attach$/
+      );
+      if (environmentAttachId && method === "POST") {
+        const body = await readBody(request);
+        const environment = await controlPlane.attachEnvironment(actor, environmentAttachId, {
+          endpoint_url: requiredString(body, "endpoint_url"),
+          api_key: requiredString(body, "api_key")
+        });
+        sendJson(response, 200, { data: environment }, headers);
+        return;
+      }
+
       const environmentUsageEventsId = pathId(
         path,
         /^\/cloud\/v1\/environments\/([^/]+)\/usage-events$/

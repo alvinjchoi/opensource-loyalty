@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   SignJWT,
   createLocalJWKSet,
@@ -7,6 +9,7 @@ import {
   generateKeyPair
 } from "jose";
 import { describe, expect, it } from "vitest";
+import { createDemoPlatform, startReferenceServer } from "@loyalty-interchange/server";
 import { OidcAuthenticator } from "./auth.js";
 import { MemoryCloudRepository } from "./memory-repository.js";
 import { PostgresCloudRepository } from "./postgres-repository.js";
@@ -397,6 +400,113 @@ describe("Cloud control plane", () => {
       await running.close();
       await cloud.close();
     }
+  });
+
+  it("attaches a remote data-plane host synchronously via POST /attach", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "lip-cloud-attach-"));
+    const databasePath = join(directory, "reference.db");
+    const platform = createDemoPlatform({ databasePath, reset: true, seed: false });
+    const lipApiKey = "lip_sk_attach_test_0123456789abcdef";
+    const lipServer = await startReferenceServer(platform.engine, {
+      apiKey: lipApiKey,
+      port: 0
+    });
+    const repository = new MemoryCloudRepository();
+    const cloud = new CloudControlPlane({
+      repository,
+      now: () => new Date(fixedNow)
+    });
+    const running = await startCloudServer(cloud, {
+      apiKey: "cloud-attach-test-api-key",
+      port: 0
+    });
+    // The apiKey auth mode derives the actor's issuer as the trusted gateway
+    // (see principal() in server.ts), so the operator's membership must be
+    // created under that same issuer for the HTTP requests below to match it.
+    const operator = {
+      issuer: "urn:lip:trusted-gateway",
+      subject: "attach-operator-001",
+      email: "attach-operator@example.com"
+    };
+    const operatorHeaders = {
+      authorization: "Bearer cloud-attach-test-api-key",
+      "content-type": "application/json",
+      "x-lip-cloud-subject": operator.subject,
+      "x-lip-cloud-email": operator.email
+    };
+    try {
+      const dashboard = await cloud.createOrganization(operator, {
+        name: "Attach Restaurants",
+        slug: "attach-restaurants"
+      });
+      const project = await cloud.createProject(
+        operator,
+        dashboard.organization.organization_id,
+        { name: "Attach Loyalty", slug: "attach-loyalty" }
+      );
+      const environment = await cloud.createEnvironment(operator, project.project_id, {
+        name: "Production",
+        slug: "production",
+        kind: "production",
+        region: "us-east-1",
+        program_id: platform.engine.getProgramDefinition().program_id
+      });
+      const cloudUrl = running.url;
+      const environmentId = environment.environment_id;
+
+      // attach with the correct key → ready + fingerprint, no full key stored
+      const attach = await fetch(`${cloudUrl}/cloud/v1/environments/${environmentId}/attach`, {
+        method: "POST",
+        headers: operatorHeaders,
+        body: JSON.stringify({ endpoint_url: lipServer.url, api_key: lipApiKey })
+      });
+      expect(attach.status).toBe(200);
+      const attachedEnv = (await attach.json() as {
+        data: {
+          status: string;
+          api_url: string;
+          api_key_fingerprint: string;
+        };
+      }).data;
+      expect(attachedEnv.status).toBe("ready");
+      expect(attachedEnv.api_url).toBe(lipServer.url.replace(/\/+$/, ""));
+      expect(attachedEnv.api_key_fingerprint).toContain("…");
+      expect(JSON.stringify(attachedEnv)).not.toContain(lipApiKey);
+
+      // attach with a wrong key → 422 auth_rejected, not ready
+      const bad = await fetch(`${cloudUrl}/cloud/v1/environments/${environmentId}/attach`, {
+        method: "POST",
+        headers: operatorHeaders,
+        body: JSON.stringify({ endpoint_url: lipServer.url, api_key: "lip_sk_wrong" })
+      });
+      expect(bad.status).toBe(422);
+      expect((await bad.json() as { code: string }).code).toBe("auth_rejected");
+      expect(await repository.environmentById(environmentId)).toMatchObject({
+        status: "failed",
+        status_message: "auth_rejected"
+      });
+    } finally {
+      await running.close();
+      await cloud.close();
+      await lipServer.close();
+      platform.close();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects attach for a non-attachable environment status with 409", async () => {
+    const { cloud, repository, environment } = await fixture();
+    await repository.attachEnvironment(environment.environment_id, {
+      api_url: "https://x",
+      status: "suspended"
+    });
+    await expect(cloud.attachEnvironment(owner, environment.environment_id, {
+      endpoint_url: "https://data-plane.example.com",
+      api_key: "lip_sk_irrelevant"
+    })).rejects.toMatchObject({
+      status: 409,
+      code: "environment_not_attachable"
+    });
   });
 });
 
