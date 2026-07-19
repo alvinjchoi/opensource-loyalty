@@ -63,7 +63,7 @@ describe("reference HTTP server", () => {
       expect(enroll.status).toBe(503);
       expect(enroll.headers.get("content-type")).toContain("application/problem+json");
       expect(enroll.headers.get("retry-after")).toBeTruthy();
-      expect((await enroll.json()).code).toBe("write_frozen");
+      expect(await enroll.json()).toMatchObject({ code: "write_frozen" });
 
       // a read still works
       const program = await fetch(`${running.url}/lip/v1/programs/get`, {
@@ -85,7 +85,7 @@ describe("reference HTTP server", () => {
     const running = await startReferenceServer(new LoyaltyEngine(makeProgram()), { apiKey: "unfrozen-key" });
     try {
       const health = await (await fetch(`${running.url}/health`)).json();
-      expect(health.write_frozen).toBe(false);
+      expect(health).toMatchObject({ write_frozen: false });
       const enroll = await fetch(`${running.url}/lip/v1/members/enroll`, {
         method: "POST",
         headers: { authorization: "Bearer unfrozen-key", "content-type": "application/json" },
