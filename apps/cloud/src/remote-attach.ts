@@ -19,7 +19,9 @@ export interface RemoteEnvironmentAttacherOptions {
 }
 
 export function apiKeyFingerprint(key: string): string {
-  if (key.length <= 8) return "…";
+  // Only reveal first-11 + last-4 when a hidden middle remains (length > 15);
+  // otherwise fully mask so a short key can't be reconstructed.
+  if (key.length <= 15) return "…";
   return `${key.slice(0, 11)}…${key.slice(-4)}`;
 }
 

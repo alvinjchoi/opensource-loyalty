@@ -81,4 +81,11 @@ describe("RemoteEnvironmentAttacher", () => {
     expect(fp).not.toContain(GOOD);
     expect(fp).toContain("…");
   });
+
+  it("fully masks a short key so it can't be reconstructed", () => {
+    const short = "lip_sk_short1"; // 13 chars
+    const fp = apiKeyFingerprint(short);
+    expect(fp).toBe("…");
+    expect(fp).not.toContain("short");
+  });
 });
