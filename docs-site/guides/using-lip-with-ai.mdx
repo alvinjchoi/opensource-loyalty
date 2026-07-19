@@ -1,0 +1,373 @@
+---
+title: "Using LIP with AI"
+description: "The fastest path from zero to a correct loyalty integration when you build with coding agents and MCP."
+icon: "robot"
+---
+
+Loyalty Interchange Protocol (LIP) is designed for agent-assisted development. Whether you drive Cursor, Claude Code, Codex, or another coding agent to build a restaurant loyalty integration — or you wire an automation that reacts to loyalty events — the resources on this page take an agent from zero to a correct implementation.
+
+<Note>
+  LIP is **not** an identity provider. Your app or backend-for-frontend (BFF) owns customer sign-in; LIP owns the loyalty ledger. Agents should follow that split unless they are building a provider adapter.
+</Note>
+
+## AI resources
+
+Everything an agent needs to reason about LIP correctly — no guessing loyalty semantics from training data.
+
+<CardGroup cols={2}>
+  <Card title="Agent Skills" icon="wand-magic-sparkles" href="#agent-skills">
+    Installable, task-specific knowledge for checkout, webhooks, the BFF pattern, SDK usage, and conformance.
+  </Card>
+  <Card title="MCP server" icon="plug" href="#mcp-server">
+    Official server exposing spec lookups, schema validation, and checkout checklists as tools.
+  </Card>
+  <Card title="llms.txt index" icon="file-lines" href="https://github.com/alvinjchoi/opensource-loyalty/blob/main/llms.txt">
+    A compact index of the spec, OpenAPI contract, SDK entry points, and CLI — point your agent here first.
+  </Card>
+  <Card title="AI prompts" icon="message-code" href="/guides/ai-prompts">
+    Curated prompts that get enroll, checkout, webhook, and refund flows right on the first pass.
+  </Card>
+</CardGroup>
+
+## Quick setup
+
+<Steps>
+  <Step title="Point your agent at llms.txt">
+    Load the checked-in [`llms.txt`](https://github.com/alvinjchoi/opensource-loyalty/blob/main/llms.txt) so the agent reads the normative spec before changing behavior.
+
+    ```text
+    @llms.txt
+    ```
+  </Step>
+  <Step title="Install the Agent Skills">
+    From a clone of the repo, install specialized loyalty knowledge into any skills-aware agent.
+
+    ```bash
+    npx skills add .
+    ```
+  </Step>
+  <Step title="Connect the MCP server">
+    Enable the repo-root [`mcp.json`](https://github.com/alvinjchoi/opensource-loyalty/blob/main/mcp.json), or run the published server standalone.
+
+    ```bash
+    npx @loyalty-interchange/mcp
+    ```
+  </Step>
+</Steps>
+
+## The `llms.txt` index
+
+The repo root includes [`llms.txt`](https://github.com/alvinjchoi/opensource-loyalty/blob/main/llms.txt), a compact index of the normative spec, OpenAPI contract, SDK entry points, CLI commands, and the files agents should read before changing behavior. Point your agent at it first:
+
+```text
+@llms.txt
+```
+
+<Tip>
+  If your tool supports URL context, prefer the checked-in file in your clone over generated summaries — it stays in sync with the code you are actually building against.
+</Tip>
+
+## Agent Skills
+
+LIP ships installable [Agent Skills](https://agentskills.io/) in the [`skills/`](https://github.com/alvinjchoi/opensource-loyalty/tree/main/skills) directory. They give coding agents specialized knowledge for the checkout lifecycle, webhooks, the BFF pattern, SDK usage, and conformance.
+
+<CodeGroup>
+```bash Install all
+npx skills add .
+```
+
+```bash Install one
+npx skills add . --skill lip-checkout
+```
+
+```bash From the public repo
+npx skills add alvinjchoi/opensource-loyalty
+```
+</CodeGroup>
+
+| Skill | When to use |
+| --- | --- |
+| `lip` | **Router** — start here |
+| `lip-cli` | `serve`, `doctor`, `test`, `validate` |
+| `lip-sdk` | `LipClient`, idempotency, errors |
+| `lip-checkout` | evaluate → reserve → accrue → capture → refund |
+| `lip-webhooks` | signed CloudEvents, receivers |
+| `lip-bff` | customer app + backend-for-frontend |
+| `lip-conformance` | doctor, test, e2e patterns |
+
+Works with Cursor, Claude Code, Codex, Windsurf, GitHub Copilot, and other agents that support the skills format. See the [Skills README](https://github.com/alvinjchoi/opensource-loyalty/blob/main/skills/README.md) for the full catalog.
+
+<Note>
+  `lip init` prints the install command when you bootstrap a new project, so the Skills are one step away from any fresh integration.
+</Note>
+
+## MCP server
+
+LIP includes an official MCP server that exposes spec lookups, the `llms.txt` index, OpenAPI operation lists, schema validation, checkout lifecycle checklists, and SDK snippets — so agents do not guess loyalty semantics from training data.
+
+**Cursor:** enable the repo-root [`mcp.json`](https://github.com/alvinjchoi/opensource-loyalty/blob/main/mcp.json) (Settings → MCP).
+
+**Manual configuration:**
+
+<CodeGroup>
+```json Published package
+{
+  "mcpServers": {
+    "lip": {
+      "command": "npx",
+      "args": ["@loyalty-interchange/mcp"]
+    }
+  }
+}
+```
+
+```json From source
+{
+  "mcpServers": {
+    "lip": {
+      "command": "npx",
+      "args": ["tsx", "packages/mcp/src/server.ts"]
+    }
+  }
+}
+```
+</CodeGroup>
+
+Run it standalone:
+
+<CodeGroup>
+```bash Published package
+npx @loyalty-interchange/mcp
+```
+
+```bash From a clone
+npm run mcp
+```
+</CodeGroup>
+
+### MCP tools
+
+| Tool | Purpose |
+| --- | --- |
+| `lip_index` | Return `llms.txt` |
+| `lip_read_doc` | Read allowed docs/spec files |
+| `lip_list_api_operations` | Summarize `spec/openapi.yaml` |
+| `lip_list_schemas` | Schema names for validation |
+| `lip_validate_json` | Validate JSON against a schema |
+| `lip_checkout_flow` | Checkout + refund lifecycle checklist |
+| `lip_sdk_snippet` | TypeScript snippet for an operation |
+
+<Note>
+  In MCP, the **client** is the LLM application (Cursor, Claude) and the **server** is the tool provider. LIP's MCP server supplies docs and validation — it does not hold member data or merchant keys. Runtime loyalty calls still go through your BFF and the HTTP API. To expose live loyalty operations as MCP tools in your product, wrap `LipClient` in a custom server and keep the merchant key server-side.
+</Note>
+
+## CLI
+
+The `lip` CLI is the primary tool for agents and humans to validate, serve, and test a LIP deployment. Use the published package with `npx`, or `npm run lip` from a clone.
+
+<CodeGroup>
+```bash Published package
+npx @loyalty-interchange/cli init
+npx @loyalty-interchange/cli serve --api-key lip-dev-key
+npx @loyalty-interchange/cli doctor http://127.0.0.1:3210 --api-key lip-dev-key
+npx @loyalty-interchange/cli test http://127.0.0.1:3210 --api-key lip-dev-key
+```
+
+```bash From a clone
+npm run lip -- init
+npm run lip -- serve --api-key lip-dev-key
+npm run lip -- doctor http://127.0.0.1:3210 --api-key lip-dev-key
+npm run lip -- test http://127.0.0.1:3210 --api-key lip-dev-key
+```
+</CodeGroup>
+
+Useful commands for agent workflows:
+
+| Command | Purpose |
+| --- | --- |
+| `lip init` | Create `lip.config.json` with a default base URL and API-key env var |
+| `lip serve` | Start the reference API, Admin dashboard, and SQLite sandbox |
+| `lip serve --program ./my-program.json` | Boot with a custom program definition |
+| `lip doctor` | Check discovery, health, auth, and capabilities |
+| `lip test` | Run baseline non-destructive HTTP conformance checks |
+| `lip validate -s FoodserviceOrder ./order.json` | Validate a payload against a schema |
+| `lip schemas` | List schema names accepted by `lip validate` |
+
+Load a custom program when building a brand-specific integration — for example, a demo rewards program in a companion app:
+
+```bash
+LIP_WEBHOOK_URL=http://127.0.0.1:8787/loyalty/webhook \
+LIP_WEBHOOK_SECRET=your-shared-secret \
+npm run lip -- serve --program ./my-program.json --api-key lip-dev-key
+```
+
+See the [Quickstart](/get-started/quickstart) and [Essentials](/get-started/essentials) for the full local setup path.
+
+## Spec and OpenAPI as agent context
+
+LIP's contract is machine-readable. Before implementing or modifying loyalty behavior, agents should load:
+
+| Resource | Path | Use when |
+| --- | --- | --- |
+| OpenAPI 3.1 binding | [`spec/openapi.yaml`](https://github.com/alvinjchoi/opensource-loyalty/blob/main/spec/openapi.yaml) | HTTP paths, auth, request/response shapes |
+| JSON Schemas | [`spec/schemas/`](https://github.com/alvinjchoi/opensource-loyalty/tree/main/spec/schemas) | Payload validation and code generation |
+| Lifecycle rules | [`spec/lifecycle.md`](https://github.com/alvinjchoi/opensource-loyalty/blob/main/spec/lifecycle.md) | Reserve → capture → reverse, refunds, idempotency |
+| Foodservice profile | [`spec/profiles/foodservice.md`](https://github.com/alvinjchoi/opensource-loyalty/blob/main/spec/profiles/foodservice.md) | Order lines, modifiers, tenders, earning rules |
+| Webhook profile | [`spec/webhooks.md`](https://github.com/alvinjchoi/opensource-loyalty/blob/main/spec/webhooks.md) | Signature verification and deduplication |
+| Full lifecycle example | [`examples/typescript/full-lifecycle.ts`](https://github.com/alvinjchoi/opensource-loyalty/blob/main/examples/typescript/full-lifecycle.ts) | End-to-end SDK usage |
+
+<Warning>
+  When docs and spec disagree, treat `spec/` as canonical.
+</Warning>
+
+Recommended agent read order for a new integration:
+
+<Steps>
+  <Step title="llms.txt">
+    Start with the [index](https://github.com/alvinjchoi/opensource-loyalty/blob/main/llms.txt) to orient on what exists.
+  </Step>
+  <Step title="Lifecycle rules">
+    Read [`spec/lifecycle.md`](https://github.com/alvinjchoi/opensource-loyalty/blob/main/spec/lifecycle.md) for reserve → capture → reverse and idempotency.
+  </Step>
+  <Step title="Full lifecycle example">
+    Study [`examples/typescript/full-lifecycle.ts`](https://github.com/alvinjchoi/opensource-loyalty/blob/main/examples/typescript/full-lifecycle.ts) for end-to-end SDK usage.
+  </Step>
+  <Step title="TypeScript SDK">
+    Review the [TypeScript SDK](/guides/typescript-sdk) for operations and helpers.
+  </Step>
+  <Step title="API reference">
+    Cross-check paths against the [API reference](/api-reference/overview).
+  </Step>
+</Steps>
+
+## TypeScript SDK
+
+The idiomatic client handles protocol context, validation, typed errors, and retry-safe reads. Agents should prefer `LipClient` over hand-rolled `fetch` calls:
+
+```ts
+import { LipClient } from "@loyalty-interchange/sdk";
+
+const lip = new LipClient({
+  baseUrl: process.env.LIP_URL!,
+  apiKey: process.env.LIP_API_KEY!,
+  source: { system: "my-ordering-app", instance: "production" }
+});
+
+const evaluation = await lip.orders.evaluate({
+  member_id: memberId,
+  order: draftOrder
+});
+```
+
+<Warning>
+  Mutations must use **stable idempotency keys** derived from business identifiers (order id, reservation id) — never a random UUID per attempt. Retrying with a fresh key double-posts.
+</Warning>
+
+```ts
+await lip.accruals.post(
+  { member_id: memberId, order },
+  { idempotencyKey: `accrual:${order.order_id}` }
+);
+```
+
+Run the runnable example:
+
+```bash
+npm run example:sdk
+```
+
+See the [TypeScript SDK](/guides/typescript-sdk) for operations, money helpers, the order builder, and webhook verification.
+
+## Webhooks and event-driven agents
+
+The reference platform emits signed CloudEvents after successful mutations (enrollment, accrual, adjustment, reserve, capture, reverse). Enable delivery with environment variables or the `webhooks` option on `createDemoPlatform`.
+
+Receivers must verify the raw body with `verifyWebhook` from `@loyalty-interchange/sdk` and deduplicate on CloudEvent `source` + `id`. This is the primary event surface for agents that need to react to loyalty changes without polling the ledger.
+
+<Steps>
+  <Step title="Expose a receiver">
+    Your BFF or worker exposes `POST /loyalty/webhook`.
+  </Step>
+  <Step title="Receive signed events">
+    The LIP server pushes signed CloudEvents after mutations.
+  </Step>
+  <Step title="Verify, dedupe, and act">
+    The receiver verifies the raw body, deduplicates on `source` + `id`, and triggers downstream automation (CRM sync, push notifications, analytics).
+  </Step>
+</Steps>
+
+<Note>
+  A reference BFF that implements this pattern typically exposes received events at an endpoint like `GET /loyalty/events` for local inspection. See [Webhooks](/guides/webhooks) for configuration and semantics.
+</Note>
+
+## Build integrations with AI coding tools
+
+### The BFF pattern
+
+Mobile and web apps should not hold the LIP merchant API key. Agents building customer-facing apps should introduce a thin backend that:
+
+- Owns customer auth (email, OTP, social — outside LIP today)
+- Maps app users to `member_id` and enrolls via `members/enroll`
+- Prices orders server-side and calls `orders/evaluate` for earn/redeem previews
+- Runs checkout: `redemptions/reserve` → payment → `accruals` → `redemptions/capture`, with `redemptions/reverse` on failure
+- Posts `orders/adjust` on refunds
+
+A typical reference for this pattern is a mobile app → Node BFF → LIP server stack, with webhooks wired for event inspection. See [Customer identity](/guides/customer-identity) for where sign-in lives relative to the loyalty ledger.
+
+### Checkout preview
+
+<Warning>
+  Never compute points or reward eligibility client-side when the program can change (tiers, campaigns, availability windows). Call `orders/evaluate` from your BFF and surface `estimated_accrual` and `rewards[].status` to the app.
+</Warning>
+
+### Conformance before you ship
+
+Agents should run these checks after implementing loyalty flows:
+
+<CodeGroup>
+```bash Published package
+npx @loyalty-interchange/cli doctor http://127.0.0.1:3210 --api-key lip-dev-key
+npx @loyalty-interchange/cli test http://127.0.0.1:3210 --api-key lip-dev-key
+npm run test
+```
+
+```bash From a clone
+npm run lip -- doctor http://127.0.0.1:3210 --api-key lip-dev-key
+npm run lip -- test http://127.0.0.1:3210 --api-key lip-dev-key
+npm run test
+```
+</CodeGroup>
+
+For a full-stack integration, add HTTP end-to-end tests that boot the real server and drive the lifecycle end to end.
+
+## AI prompts
+
+Curated prompts help agents implement LIP correctly on the first pass — enroll flows, checkout lifecycle, webhook receivers, refund adjustments, and conformance checks.
+
+<Card title="AI prompts" icon="message-code" href="/guides/ai-prompts">
+  Copy-ready prompts for every core loyalty flow.
+</Card>
+
+## What LIP does not provide
+
+<Warning>
+  Agents often assume platform features that LIP does not provide. Do **not** implement these against LIP directly — build them in your BFF or a future platform module.
+</Warning>
+
+- Customer sign-in, OTP, or social auth (merchant-key API only)
+- Campaigns, segments, push notifications, or CRM
+- Program editing at runtime (boot-time `--program`, or Admin read-only today)
+- Issued coupon wallets or QR check-in flows
+
+See [Punchh migration](/guides/punchh-migration) for migration mapping and the [Migration guide](/guides/migration) for the full platform comparison.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="AI prompts" icon="message-code" href="/guides/ai-prompts">
+    Ready-to-paste prompts for enroll, checkout, webhooks, refunds, and conformance.
+  </Card>
+  <Card title="TypeScript SDK" icon="code" href="/guides/typescript-sdk">
+    Operations, money helpers, the order builder, and webhook verification.
+  </Card>
+</CardGroup>
