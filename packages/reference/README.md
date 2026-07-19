@@ -14,7 +14,8 @@ npm install @loyalty-interchange/reference
 
 ## Documentation
 
-- Protocol and guides: https://github.com/alvinjchoi/opensource-loyalty
+- Docs site: https://loyalty-interchange.mintlify.app
+- Source and issues: https://github.com/alvinjchoi/opensource-loyalty
 - npm scope: https://www.npmjs.com/org/loyalty-interchange
 
 ## License

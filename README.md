@@ -19,7 +19,7 @@
 > BFF/customer-data layer without ever being provisioned in a managed customer
 > identity platform.
 
-For more information, be sure to check out the **[LIP Documentation](docs/README.md)**. Building with an AI coding agent? Start with **[Getting started with AI](#getting-started-with-ai-)**.
+📖 **Documentation: [loyalty-interchange.mintlify.app](https://loyalty-interchange.mintlify.app)** (the guides in [`docs/`](docs/README.md) are the source). Building with an AI coding agent? Start with **[Getting started with AI](#getting-started-with-ai-)**.
 
 ## Key Features of LIP ⭐
 
@@ -304,6 +304,8 @@ npm run verify        # Full local verification pipeline
 ```
 
 ## Documentation 📚
+
+Full docs site: **[loyalty-interchange.mintlify.app](https://loyalty-interchange.mintlify.app)**
 
 Developer guides:
 
