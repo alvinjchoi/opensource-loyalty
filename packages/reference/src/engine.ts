@@ -217,6 +217,20 @@ export function idempotencyFingerprintV2(value: unknown): string {
   return fingerprint(payload);
 }
 
+/** Returns a clone of a response with its response-context request_id replaced. */
+function withReplayedRequestId<T>(response: T, requestId: string): T {
+  if (response && typeof response === "object" && "context" in response) {
+    const ctx = (response as { context?: unknown }).context;
+    if (ctx && typeof ctx === "object") {
+      return {
+        ...(response as object),
+        context: { ...(ctx as object), request_id: requestId }
+      } as T;
+    }
+  }
+  return response;
+}
+
 function identityKey(programId: string, identity: IdentityReference): string {
   return [programId, identity.type, identity.issuer ?? "", identity.value].join("|");
 }
@@ -2237,7 +2251,7 @@ export class LoyaltyEngine {
           "Idempotency key was already used with a different request"
         );
       }
-      return clone(prior.response as T);
+      return withReplayedRequestId(clone(prior.response as T), context.request_id);
     }
 
     const response = run();

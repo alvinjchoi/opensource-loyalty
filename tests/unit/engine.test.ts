@@ -507,7 +507,10 @@ describe("LoyaltyEngine members and evaluation", () => {
       identity: request.identity
     });
 
-    expect(replay).toEqual(enrolled);
+    expect(replay).toEqual({
+      ...enrolled,
+      context: { ...enrolled.context, request_id: "retry-request-id" }
+    });
     expect(lookup.member?.member_id).toBe("member-001");
     expect(lookup.balances[0]).toMatchObject({ amount: 0, reserved: 0, available: 0 });
   });
@@ -620,6 +623,23 @@ describe("LoyaltyEngine financial lifecycle", () => {
       member_id: "member-001",
       order: changedOrder
     })).toThrowError(/different facts/);
+  });
+
+  it("echoes the retry's request_id on idempotent replay", () => {
+    const engine = enrolledEngine();
+    const request = {
+      context: makeContext("accrual-request-id-echo"),
+      member_id: "member-001" as const,
+      order: makeOrder()
+    };
+    const first = engine.postAccrual(request);
+
+    const retry = structuredClone(request);
+    retry.context.request_id = "retry-request-id-echo";
+
+    const replay = engine.postAccrual(retry);
+    expect(replay.entry.entry_id).toBe(first.entry.entry_id);      // original result
+    expect(replay.context.request_id).toBe("retry-request-id-echo"); // echoes the retry
   });
 
   it("replays idempotently when only occurred_at changes on retry", () => {
