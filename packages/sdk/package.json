@@ -1,6 +1,6 @@
 {
   "name": "@loyalty-interchange/sdk",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Idiomatic TypeScript SDK for Loyalty Interchange Protocol.",
   "license": "Apache-2.0",
   "repository": { "type": "git", "url": "git+https://github.com/alvinjchoi/opensource-loyalty.git", "directory": "packages/sdk" },
@@ -24,7 +24,7 @@
     "prepack": "npm run build"
   },
   "dependencies": {
-    "@loyalty-interchange/protocol": "0.1.0",
+    "@loyalty-interchange/protocol": "0.1.1",
     "@sinclair/typebox": "^0.34.52"
   }
 }

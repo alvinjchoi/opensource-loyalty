@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { LoyaltyEngine, EngineError } from "@loyalty-interchange/reference";
+import { LoyaltyEngine, EngineError, idempotencyFingerprintV1 } from "@loyalty-interchange/reference";
 import {
   MutableClock,
   makeContext,
@@ -507,7 +507,10 @@ describe("LoyaltyEngine members and evaluation", () => {
       identity: request.identity
     });
 
-    expect(replay).toEqual(enrolled);
+    expect(replay).toEqual({
+      ...enrolled,
+      context: { ...enrolled.context, request_id: "retry-request-id" }
+    });
     expect(lookup.member?.member_id).toBe("member-001");
     expect(lookup.balances[0]).toMatchObject({ amount: 0, reserved: 0, available: 0 });
   });
@@ -620,6 +623,60 @@ describe("LoyaltyEngine financial lifecycle", () => {
       member_id: "member-001",
       order: changedOrder
     })).toThrowError(/different facts/);
+  });
+
+  it("echoes the retry's request_id on idempotent replay", () => {
+    const engine = enrolledEngine();
+    const request = {
+      context: makeContext("accrual-request-id-echo"),
+      member_id: "member-001" as const,
+      order: makeOrder()
+    };
+    const first = engine.postAccrual(request);
+
+    const retry = structuredClone(request);
+    retry.context.request_id = "retry-request-id-echo";
+
+    const replay = engine.postAccrual(retry);
+    expect(replay.entry.entry_id).toBe(first.entry.entry_id);      // original result
+    expect(replay.context.request_id).toBe("retry-request-id-echo"); // echoes the retry
+  });
+
+  it("replays idempotently when only occurred_at changes on retry", () => {
+    const engine = enrolledEngine();
+    const request = {
+      context: makeContext("accrual-occurred-at-retry"),
+      member_id: "member-001" as const,
+      order: makeOrder()
+    };
+    const first = engine.postAccrual(request);
+
+    const retry = structuredClone(request);
+    retry.context.occurred_at = "2026-07-14T11:30:00.000Z"; // different event time
+
+    const replay = engine.postAccrual(retry);
+    expect(replay.entry.entry_id).toBe(first.entry.entry_id);
+    expect(engine.getLedger()).toHaveLength(1);
+  });
+
+  it("still matches a legacy v1-fingerprinted entry via dual-check", () => {
+    const engine = enrolledEngine();
+    const request = {
+      context: makeContext("legacy-v1-key"),
+      member_id: "member-001" as const,
+      order: makeOrder()
+    };
+    // Post once, then rewrite the stored fingerprint to the legacy v1 value to
+    // simulate an entry written by a pre-0.1.1 engine.
+    const first = engine.postAccrual(request);
+    const snapshot = engine.exportState();
+    const key = `${request.context.source.system}|accrual.post|${request.context.idempotency_key}`;
+    const entry = snapshot.idempotency.find(([k]) => k === key)!;
+    entry[1] = { ...entry[1], fingerprint: idempotencyFingerprintV1(request) };
+    const rehydrated = new LoyaltyEngine(makeProgram(), { state: snapshot });
+
+    const replay = rehydrated.postAccrual(structuredClone(request)); // pinned envelope
+    expect(replay.entry.entry_id).toBe(first.entry.entry_id);
   });
 
   it("reserves, captures, and reverses without double spending", () => {

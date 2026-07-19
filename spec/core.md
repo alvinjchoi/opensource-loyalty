@@ -21,6 +21,14 @@ provider MUST also protect business identifiers such as `order_id`,
 `adjustment_id`, `redemption_id`, and `reservation_id` from duplicate financial effects when a
 caller mistakenly changes the idempotency key.
 
+Idempotency compares the **business payload** of a request. The `context`
+envelope — `request_id`, `occurred_at`, `source`, and the protocol/profile
+versions — MUST NOT by itself cause a conflict: a retry that reuses the
+idempotency key with the same business payload but a regenerated envelope MUST
+return the original result. On such a replay, the response `context.request_id`
+MUST reflect the replaying request (it echoes the retry's `request_id`);
+`processed_at` reflects the original processing.
+
 Consumers MUST treat identifiers as opaque case-sensitive strings.
 
 ## Discovery and capabilities
