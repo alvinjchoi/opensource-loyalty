@@ -82,7 +82,8 @@ const openapi = {
     { name: "Members" },
     { name: "Orders" },
     { name: "Accruals" },
-    { name: "Redemptions" }
+    { name: "Redemptions" },
+    { name: "Issued Rewards" }
   ],
   paths: {
     "/.well-known/lip": {

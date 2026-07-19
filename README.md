@@ -1,5 +1,6 @@
 # Loyalty Interchange Protocol (LIP) 👋
 
+[![npm](https://img.shields.io/npm/v/%40loyalty-interchange%2Fsdk?logo=npm&label=%40loyalty-interchange)](https://www.npmjs.com/org/loyalty-interchange)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 ![TypeScript](https://img.shields.io/badge/TypeScript-6.x-3178C6?logo=typescript&logoColor=white)
 ![Node.js](https://img.shields.io/badge/Node.js-20.19%2B-339933?logo=nodedotjs&logoColor=white)
@@ -230,18 +231,23 @@ text format.
 > The complete Admin service suite still uses SQLite-backed extension stores;
 > production Admin deployments must port those stores and add location scoping.
 
-### npm Install Experience 📦
+### Install from npm 📦
 
-The packages and provenance-enabled release workflow are publish-ready. After
-the one-time npm organization/trusted-publisher setup, the install experience is:
+All packages are published to npm with provenance under the
+[`@loyalty-interchange`](https://www.npmjs.com/org/loyalty-interchange) scope.
+Run the sandbox without cloning:
 
 ```bash
 npx @loyalty-interchange/cli serve
 ```
 
-See [the release guide](docs/releasing.md) for dry-run verification and trusted
-publishing setup. Docker and source remain the verified install paths until the
-first registry release is completed.
+Or add the SDK to your app:
+
+```bash
+npm install @loyalty-interchange/sdk
+```
+
+See [the release guide](docs/releasing.md) for how releases are cut and verified.
 
 ## Project Structure 🗂️
 
@@ -277,7 +283,7 @@ first registry release is completed.
 - **SDK:** Handwritten domain client plus generated low-level OpenAPI client
 - **Storage:** SQLite sandbox or normalized, tenant-scoped PostgreSQL
 - **Testing:** Vitest and black-box HTTP conformance tests
-- **Packaging:** Docker today, npm CLI package planned
+- **Packaging:** npm (`@loyalty-interchange/*`, published with provenance) and Docker
 
 ## Common Commands 🧑‍💻
 
@@ -323,7 +329,6 @@ Normative specification (canonical when docs and generated artifacts disagree):
 Current priorities are tracked in [PLAN.md](PLAN.md). Near-term focus:
 
 - Minimal developer onboarding
-- `serve` CLI alias and public package publishing
 - Program-as-code configuration drafts with validation, preview, publish, and rollback
 - Reward wallet and reward management APIs
 - Webhook subscription management

@@ -20,6 +20,7 @@ tags:
   - name: Orders
   - name: Accruals
   - name: Redemptions
+  - name: Issued Rewards
 paths:
   /.well-known/lip:
     get:

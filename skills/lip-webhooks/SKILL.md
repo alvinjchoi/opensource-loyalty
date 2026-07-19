@@ -44,6 +44,10 @@ Deduplicate on CloudEvent `source` + `id` (idempotent replays reuse resource ids
 - `org.loyalty-interchange.redemption.reserved.v1`
 - `org.loyalty-interchange.redemption.captured.v1`
 - `org.loyalty-interchange.redemption.reversed.v1`
+- `org.loyalty-interchange.issued-reward.issued.v1`
+- `org.loyalty-interchange.issued-reward.redeemed.v1`
+- `org.loyalty-interchange.issued-reward.restored.v1`
+- `org.loyalty-interchange.issued-reward.cancelled.v1`
 
 ## Reference
 
