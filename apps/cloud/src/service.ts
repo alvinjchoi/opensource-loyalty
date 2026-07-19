@@ -566,8 +566,13 @@ export class CloudControlPlane {
     const environment = await this.requiredEnvironment(environmentId);
     const project = await this.requiredProject(environment.project_id);
     await this.requireRole(principal, project.organization_id, managementRoles);
-    if (environment.status === "suspended") {
-      throw new CloudError(409, "environment_suspended", "A suspended environment cannot be attached");
+    const attachableStatuses = new Set(["pending", "ready", "failed"]);
+    if (!attachableStatuses.has(environment.status)) {
+      throw new CloudError(
+        409,
+        "environment_not_attachable",
+        `An environment in status ${environment.status} cannot be attached`
+      );
     }
     const result = await this.attacher.validate({
       endpoint_url: input.endpoint_url.trim(),

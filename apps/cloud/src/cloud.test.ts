@@ -493,6 +493,21 @@ describe("Cloud control plane", () => {
       rmSync(directory, { recursive: true, force: true });
     }
   });
+
+  it("rejects attach for a non-attachable environment status with 409", async () => {
+    const { cloud, repository, environment } = await fixture();
+    await repository.attachEnvironment(environment.environment_id, {
+      api_url: "https://x",
+      status: "suspended"
+    });
+    await expect(cloud.attachEnvironment(owner, environment.environment_id, {
+      endpoint_url: "https://data-plane.example.com",
+      api_key: "lip_sk_irrelevant"
+    })).rejects.toMatchObject({
+      status: 409,
+      code: "environment_not_attachable"
+    });
+  });
 });
 
 const postgresUrl = process.env["LIP_TEST_POSTGRES_URL"];
