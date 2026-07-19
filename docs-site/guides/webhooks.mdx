@@ -1,6 +1,6 @@
 ---
 title: "Webhooks"
-description: "Signed CloudEvents pushed after every successful mutation"
+description: "Signed CloudEvents pushed after every successful mutation, with a durable retry outbox"
 icon: "bolt"
 ---
 
@@ -14,8 +14,12 @@ The reference platform pushes CloudEvents 1.0 structured JSON to HTTP receivers 
 | Redemption reserved | `org.loyalty-interchange.redemption.reserved.v1` |
 | Redemption captured | `org.loyalty-interchange.redemption.captured.v1` |
 | Redemption reversed | `org.loyalty-interchange.redemption.reversed.v1` |
+| Issued reward created | `org.loyalty-interchange.issued-reward.issued.v1` |
+| Issued reward redeemed | `org.loyalty-interchange.issued-reward.redeemed.v1` |
+| Issued reward restored | `org.loyalty-interchange.issued-reward.restored.v1` |
+| Issued reward cancelled | `org.loyalty-interchange.issued-reward.cancelled.v1` |
 
-Event ids are derived from the underlying resource ids (ledger entry, reservation, member), so idempotent request replays re-deliver events with the same CloudEvent `source` + `id`. Receivers deduplicate on that pair.
+Event ids are derived from the underlying resource ids (ledger entry, reservation, member), so idempotent request replays re-deliver events with the same CloudEvent `source` + `id`. Receivers deduplicate on that pair, as the spec requires.
 
 ## Enabling delivery
 
@@ -27,7 +31,7 @@ LIP_WEBHOOK_SECRET=your-shared-secret \
 npm run lip -- serve --port 4010 --api-key local-dev-key
 ```
 
-Optionally restrict delivered event types with a comma-separated allowlist:
+Optionally restrict the delivered event types with a comma-separated allowlist:
 
 ```bash
 LIP_WEBHOOK_EVENTS=org.loyalty-interchange.order.accrued.v1,org.loyalty-interchange.redemption.captured.v1
@@ -44,15 +48,58 @@ const platform = createDemoPlatform({
 });
 ```
 
-`platform.webhooks` exposes the dispatcher, including `flush()` to await in-flight deliveries and `deliveries()` for recent delivery history.
+<Note>
+Subscriptions can also be added, deleted, and rotated at runtime from the Admin **API** view. Runtime subscriptions persist in SQLite and take precedence over boot-time environment configuration after their first write. Signing secrets are write-only in Admin responses — the local reference runtime stores them in its protected SQLite database; production adapters should use envelope encryption or an external secret manager.
+</Note>
+
+`platform.webhooks` exposes the dispatcher, including `flush()` to await the current retry cycle, `pendingDeliveries()` for the durable queue, and `deliveries()` for recent process-local delivery results.
 
 ## Delivery semantics
 
 - Each event is POSTed as JSON with `LIP-Webhook-Timestamp` and `LIP-Webhook-Signature: v1=<base64url>` headers.
-- Failed deliveries (network errors or non-2xx responses) are retried with exponential backoff, three attempts total by default.
+- Failed deliveries (network errors or non-2xx responses) are retried with exponential backoff, three attempts per process run by default.
+- Pending deliveries are stored in SQLite under a separate webhook-outbox state key. A normal server restart reloads and retries them; successful 2xx deliveries are removed. `--reset` clears both loyalty state and the outbox.
 - Delivery is at-least-once. Receivers must verify the signature over the raw body and deduplicate using CloudEvent `source` + `id`.
 - Receivers can verify with the SDK's `verifyWebhook` — see the [TypeScript SDK guide](/guides/typescript-sdk#webhook-verification).
 
-<Note>
-The normative signing and replay-protection rules live in `spec/webhooks.md` in the repository. The protocol does not yet define webhook subscription management APIs.
-</Note>
+<Warning>
+Delivery is **at-least-once**. Always verify the signature over the raw request body and deduplicate on the CloudEvent `source` + `id` pair before acting on an event.
+</Warning>
+
+## Operator visibility
+
+The Admin dashboard's **Developer** view manages persisted receivers and secret rotation, shows pending outbox entries, retry attempts, last errors, and durable completed outcomes, and can immediately retry pending deliveries or replay a completed event. Deleting a receiver also removes its pending deliveries. Completed history and event payloads are retained in SQLite up to the configured history limit.
+
+Programmatic and Admin API subscription writes may set a `retry_policy`:
+
+| Field | Meaning |
+| --- | --- |
+| `max_attempts` | Total delivery attempts before the entry is marked failed |
+| `backoff_ms` | Base backoff between retries (grows exponentially) |
+| `timeout_ms` | Per-request timeout |
+
+Omitted values use the server defaults.
+
+### Cutover health probe
+
+Authenticated Admin clients can poll a secret-free summary — useful before unfreezing a migration cutover:
+
+```bash
+curl -s http://127.0.0.1:3210/admin/api/v1/webhooks/health \
+  -H "Authorization: Bearer $LIP_API_KEY"
+```
+
+The response includes `enabled`, pending outbox count, recent delivered/failed counts, `success_rate`, and `healthy` (`true` when webhooks are enabled, the outbox is empty, and no retained recent delivery failed).
+
+<Info>
+The normative signing and replay-protection rules live in `spec/webhooks.md` in the repository.
+</Info>
+
+<CardGroup cols={2}>
+  <Card title="TypeScript SDK" icon="code" href="/guides/typescript-sdk#webhook-verification">
+    Verify signatures with `verifyWebhook`.
+  </Card>
+  <Card title="Migration" icon="arrow-right-arrow-left" href="/guides/migration">
+    Use the health probe during a zero-loss cutover.
+  </Card>
+</CardGroup>

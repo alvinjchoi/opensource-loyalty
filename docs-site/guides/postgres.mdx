@@ -1,0 +1,113 @@
+---
+title: "PostgreSQL Storage"
+description: "Run the LIP reference server on a normalized, multi-instance PostgreSQL engine store."
+icon: "database"
+---
+
+The reference server supports a normalized PostgreSQL engine store in addition to the default SQLite sandbox. Postgres mode gives you transactional, multi-instance-safe persistence suitable for a production deployment.
+
+<Note>
+  The migrations and repositories described here ship in `@loyalty-interchange/storage-postgres`, available on npm at `0.1.0`.
+</Note>
+
+## Start the Postgres profile
+
+The quickest way to try Postgres mode is the bundled Docker Compose profile.
+
+<CodeGroup>
+
+```bash Docker Compose
+docker compose --profile postgres up --build
+```
+
+```bash Existing database
+LIP_DATABASE_URL=postgres://user:password@host:5432/loyalty \
+LIP_TENANT_ID=demo-cafe \
+LIP_API_KEY=replace-with-a-secret \
+npm run serve
+```
+
+</CodeGroup>
+
+<Info>
+  The SQLite runtime remains on port `3210`. The Postgres-backed runtime is available on port `3211` by default. Set `LIP_POSTGRES_PORT` to change it.
+</Info>
+
+Startup applies numbered migrations from `@loyalty-interchange/storage-postgres`.
+
+<Warning>
+  `LIP_RESET=true` explicitly deletes the selected tenant/program engine state before seeding. Only set it when you intend to wipe that tenant's data.
+</Warning>
+
+## Data model
+
+Core engine state is split into tenant-scoped tables for:
+
+- members and identity indexes
+- account balances
+- redemption reservations
+- immutable ledger entries
+- expiring balance lots and lot consumption
+- idempotency records
+- order accrual and adjustment indexes
+- issued rewards
+
+Every table includes `tenant_id` and `program_id` in its key. JSONB payloads preserve forward-compatible protocol fields while indexed columns keep common operator and reconciliation queries relational.
+
+## Multi-instance behavior
+
+Each protocol request runs the same transactional sequence:
+
+<Steps>
+  <Step title="Check out a client">
+    The request checks out one database client.
+  </Step>
+  <Step title="Begin a transaction">
+    A transaction is started for the operation.
+  </Step>
+  <Step title="Acquire an advisory lock">
+    It obtains a tenant/program advisory transaction lock.
+  </Step>
+  <Step title="Reload the latest revision">
+    The latest engine revision is reloaded.
+  </Step>
+  <Step title="Perform the operation">
+    The requested protocol operation runs against the reloaded state.
+  </Step>
+  <Step title="Replace rows atomically">
+    All normalized rows are replaced atomically and the revision advances.
+  </Step>
+  <Step title="Commit before responding">
+    The transaction commits before the HTTP response is returned.
+  </Step>
+</Steps>
+
+<Note>
+  This prevents lost updates across server instances. Webhook events generated inside the operation are buffered and released only after commit.
+</Note>
+
+`PostgresEngineRepository.withLease()` exposes session advisory leases for single-run schedulers and background jobs. `PostgresJsonStateStore` provides optimistic revisions for tenant-scoped extension state.
+
+<Warning>
+  The bundled Admin in Postgres mode currently exposes engine snapshots and runtime webhook controls. Program publishing, campaign scheduling, membership operations, and access-directory writes remain enabled in the full SQLite reference runtime until those service stores are moved to asynchronous Postgres repositories.
+</Warning>
+
+## Integration test
+
+The default suite does not require a database. To run the live adapter test, point it at a reachable Postgres instance:
+
+```bash
+LIP_TEST_POSTGRES_URL=postgres://user:password@localhost:5432/loyalty \
+npx vitest run tests/unit/postgres-storage.test.ts
+```
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Reference platform" icon="server" href="/guides/reference-platform">
+    See how the reference server, Admin, and storage adapters fit together.
+  </Card>
+  <Card title="Migration" icon="arrow-right-arrow-left" href="/guides/migration">
+    Move engine state onto Postgres and manage schema revisions.
+  </Card>
+</CardGroup>

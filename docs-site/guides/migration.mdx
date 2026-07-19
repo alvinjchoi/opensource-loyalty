@@ -1,0 +1,169 @@
+---
+title: "Migrating a self-hosted LIP program"
+description: "A zero-loss runbook for moving one LIP program between SQLite and Postgres hosts without losing member or financial state."
+icon: "arrow-right-arrow-left"
+---
+
+This runbook moves one LIP program from SQLite or Postgres to another LIP host without losing member or financial state. It applies to self-hosted-to-managed, self-hosted-to-self-hosted, and managed-to-managed moves.
+
+The protocol rules in `spec/` remain canonical. In particular, ledger entries are immutable and retries must preserve their original idempotency keys.
+
+## What the archive contains
+
+`lip state export` creates a versioned, SHA-256 checksummed JSON archive with:
+
+- the active program definition and fingerprint;
+- members and privacy-preserving identity indexes;
+- every account balance, expiration lot, and lot consumption;
+- the immutable accrual, redemption, adjustment, and migration ledger;
+- every reservation, including reservations still in `reserved` state;
+- issued rewards;
+- request idempotency records; and
+- business-identifier indexes for orders, adjustments, and redemptions.
+
+<Warning>
+The archive is created with file mode `0600`. It contains customer-linked financial data and must be encrypted in transit and at rest.
+</Warning>
+
+<Note>
+The engine archive does **not** contain BFF customer accounts, sessions, consent, payment records, webhook secrets, pending webhook deliveries, Admin users, campaigns, memberships, or messaging connectors. Move those application and platform records separately. Recreate webhook configuration on the target and let the old host flush its webhook outbox before cutover.
+</Note>
+
+## Export and import commands
+
+Use the exact active program JSON on both sides. Import rejects a different program fingerprint and refuses to replace existing engine state unless `--force` is explicitly supplied.
+
+Export from SQLite:
+
+```bash
+npm run lip -- state export \
+  --program ./program.json \
+  --database /data/reference.db \
+  --output ./lip-migration.json
+```
+
+Import into the target. Choose the tab that matches the target's storage:
+
+<CodeGroup>
+
+```bash Import into SQLite
+npm run lip -- state import \
+  --program ./program.json \
+  --database /data/reference.db \
+  --input ./lip-migration.json
+```
+
+```bash Import into Postgres
+LIP_DATABASE_URL='postgres://...' \
+LIP_TENANT_ID='your-tenant-id' \
+npm run lip -- state import \
+  --program ./program.json \
+  --input ./lip-migration.json
+```
+
+</CodeGroup>
+
+<Info>
+The published container (available on npm at `0.1.0` under the `@loyalty-interchange` org) can run the same commands with `node packages/cli/dist/cli.js` in place of `npm run lip --`.
+</Info>
+
+<Warning>
+Do not use `--force` during a normal cutover. It is reserved for a verified restore into a disposable or explicitly replaced target.
+</Warning>
+
+## Zero-loss cutover
+
+<Steps>
+
+<Step title="Prepare the target">
+Provision its tenant, network path, API credential, program JSON, webhook destination, and webhook secret. Keep protocol writes disabled.
+</Step>
+
+<Step title="Freeze all source writes">
+Put the BFF's signup and order mutation routes into maintenance mode, or stop/scale the BFF after draining requests. Freezing only accruals is insufficient: enrollment, reserve, capture, reverse, adjustment, and reward issuance also mutate loyalty state.
+</Step>
+
+<Step title="Drain in-flight checkout">
+Wait for payment callbacks and active BFF requests to finish. Flush the source webhook outbox. Record any reservations that remain open.
+</Step>
+
+<Step title="Export once">
+Run `lip state export` against the source database. Save the printed member, balance, ledger, open-reservation, and idempotency counts with the archive checksum.
+</Step>
+
+<Step title="Import once">
+Run `lip state import` while the target is empty and frozen. The command verifies the checksum, program fingerprint, complete engine state, and target emptiness before saving.
+</Step>
+
+<Step title="Verify before routing traffic">
+Compare archive counts, inspect several known member accounts and ledger histories, and run:
+
+```bash
+npm run lip -- doctor https://new-loyalty-host --api-key "$LIP_API_KEY"
+npm run lip -- test https://new-loyalty-host --api-key "$LIP_API_KEY"
+```
+</Step>
+
+<Step title="Repoint the BFF">
+Change `LIP_HOST` and `LIP_PORT` (or `LIP_URL`) together with the target `LIP_API_KEY`, then restart the BFF. Do not expose that key to the mobile app.
+</Step>
+
+<Step title="Canary while frozen">
+Read the program and a known account through the BFF. Confirm target logs receive the requests and that no request reaches the old host.
+</Step>
+
+<Step title="Unfreeze">
+Re-enable signup and order mutations. Place one controlled order, then confirm exactly one accrual ledger entry and any expected reserve/capture entries.
+</Step>
+
+<Step title="Retain the source read-only">
+Keep its database and archive until the rollback window closes. Securely delete temporary archive copies afterward.
+</Step>
+
+</Steps>
+
+<Note>
+Keep clocks synchronized. Open reservations retain their original expiration timestamps and can expire naturally during a long cutover. Finish within the reservation TTL or reverse those reservations before the freeze.
+</Note>
+
+## Why retries do not double-accrue
+
+LIP requires a stable idempotency key per source system and operation. It also protects business identifiers such as `order_id`, `adjustment_id`, `redemption_id`, and `reservation_id`.
+
+The migration archive preserves both layers. If the source committed an accrual before export but the BFF lost the response, retrying that order against the target returns the imported result instead of posting another ledger entry. Derive mutation keys from stable order/cart identifiers, for example `<order-id>-accrue`, `<order-id>-reserve`, and `<order-id>-capture`.
+
+<Warning>
+Never generate a new random idempotency key for a retry. Never import only members and balances: omitting ledger, idempotency, or business indexes makes a financially safe cutover impossible.
+</Warning>
+
+## Rollback
+
+Before unfreezing the target, rollback is simply repointing the BFF to the still-frozen source. After the target accepts any write, do not repoint to the old snapshot: that would discard new transactions. Freeze again, export the target, import that state back to a clean source, verify it, and only then repoint traffic.
+
+## Worked example: pilot cutover
+
+This runbook has been exercised end to end on a production pilot: a full local rehearsal (seeded members, an open reservation surviving export/import, and byte-identical idempotency-key replay returning the original entry with no balance change), a read-only rehearsal against the live pilot database via a `VACUUM INTO` snapshot, and then a real zero-loss cutover from a self-hosted LIP to a public host using the exact sequence above:
+
+1. Freeze BFF mutations (`503` + a machine-readable freeze code on health)
+2. Export from a consistent snapshot of the source database
+3. Import into an **empty** target tenant (no `--force`); verify counts and a known member's balance and ledger
+4. Swap the BFF's LIP base URL **and** API key together; restart
+5. Canary read, then one controlled write with a new, unused order key
+6. Unfreeze
+
+Post-cutover, the double-accrual guards were re-verified against the live target: replaying a pre-cutover accrual key returned the original entry id with no balance change, and a new key reusing an accrued `order_id` with different facts returned `409 conflict`.
+
+<Info>
+Operational records for the pilot (service topology, archive checksums, and member-level verification) live in the operator's private runbook, not in this public repository.
+</Info>
+
+## Related guides
+
+<CardGroup cols={2}>
+  <Card title="Postgres storage" icon="database" href="/guides/postgres">
+    Configure a Postgres-backed tenant as the migration target.
+  </Card>
+  <Card title="Reference platform" icon="server" href="/guides/reference-platform">
+    How the engine, storage adapters, and snapshots fit together.
+  </Card>
+</CardGroup>
