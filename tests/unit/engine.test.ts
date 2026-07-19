@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { LoyaltyEngine, EngineError } from "@loyalty-interchange/reference";
+import { LoyaltyEngine, EngineError, idempotencyFingerprintV1 } from "@loyalty-interchange/reference";
 import {
   MutableClock,
   makeContext,
@@ -620,6 +620,43 @@ describe("LoyaltyEngine financial lifecycle", () => {
       member_id: "member-001",
       order: changedOrder
     })).toThrowError(/different facts/);
+  });
+
+  it("replays idempotently when only occurred_at changes on retry", () => {
+    const engine = enrolledEngine();
+    const request = {
+      context: makeContext("accrual-occurred-at-retry"),
+      member_id: "member-001" as const,
+      order: makeOrder()
+    };
+    const first = engine.postAccrual(request);
+
+    const retry = structuredClone(request);
+    retry.context.occurred_at = "2026-07-14T11:30:00.000Z"; // different event time
+
+    const replay = engine.postAccrual(retry);
+    expect(replay.entry.entry_id).toBe(first.entry.entry_id);
+    expect(engine.getLedger()).toHaveLength(1);
+  });
+
+  it("still matches a legacy v1-fingerprinted entry via dual-check", () => {
+    const engine = enrolledEngine();
+    const request = {
+      context: makeContext("legacy-v1-key"),
+      member_id: "member-001" as const,
+      order: makeOrder()
+    };
+    // Post once, then rewrite the stored fingerprint to the legacy v1 value to
+    // simulate an entry written by a pre-0.1.1 engine.
+    const first = engine.postAccrual(request);
+    const snapshot = engine.exportState();
+    const key = `${request.context.source.system}|accrual.post|${request.context.idempotency_key}`;
+    const entry = snapshot.idempotency.find(([k]) => k === key)!;
+    entry[1] = { ...entry[1], fingerprint: idempotencyFingerprintV1(request) };
+    const rehydrated = new LoyaltyEngine(makeProgram(), { state: snapshot });
+
+    const replay = rehydrated.postAccrual(structuredClone(request)); // pinned envelope
+    expect(replay.entry.entry_id).toBe(first.entry.entry_id);
   });
 
   it("reserves, captures, and reverses without double spending", () => {

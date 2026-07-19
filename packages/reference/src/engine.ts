@@ -188,7 +188,11 @@ function fingerprint(value: unknown): string {
   return createHash("sha256").update(JSON.stringify(stableValue(value))).digest("hex");
 }
 
-function idempotencyFingerprint(value: unknown): string {
+/**
+ * v1 idempotency fingerprint: strips only context.request_id.
+ * Retained so entries stored before v2 still match a pinned replay.
+ */
+export function idempotencyFingerprintV1(value: unknown): string {
   if (!value || typeof value !== "object") {
     return fingerprint(value);
   }
@@ -198,6 +202,19 @@ function idempotencyFingerprint(value: unknown): string {
   }
   const { request_id: _requestId, ...context } = request.context as Record<string, unknown>;
   return fingerprint({ ...request, context });
+}
+
+/**
+ * v2 idempotency fingerprint: strips the entire context envelope. The identity
+ * of "the same logical request" is the business payload; envelope fields
+ * (request_id, occurred_at, source, versions) do not affect it.
+ */
+export function idempotencyFingerprintV2(value: unknown): string {
+  if (!value || typeof value !== "object") {
+    return fingerprint(value);
+  }
+  const { context: _context, ...payload } = value as Record<string, unknown>;
+  return fingerprint(payload);
 }
 
 function identityKey(programId: string, identity: IdentityReference): string {
@@ -2209,10 +2226,12 @@ export class LoyaltyEngine {
     run: () => T
   ): T {
     const key = `${context.source.system}|${operation}|${context.idempotency_key}`;
-    const requestFingerprint = idempotencyFingerprint(request);
     const prior = this.idempotency.get(key);
     if (prior) {
-      if (prior.fingerprint !== requestFingerprint) {
+      const matches =
+        prior.fingerprint === idempotencyFingerprintV2(request) ||
+        prior.fingerprint === idempotencyFingerprintV1(request);
+      if (!matches) {
         throw new EngineError(
           "idempotency_conflict",
           "Idempotency key was already used with a different request"
@@ -2222,7 +2241,10 @@ export class LoyaltyEngine {
     }
 
     const response = run();
-    this.idempotency.set(key, { fingerprint: requestFingerprint, response: clone(response) });
+    this.idempotency.set(key, {
+      fingerprint: idempotencyFingerprintV2(request),
+      response: clone(response)
+    });
     return response;
   }
 }
