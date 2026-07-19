@@ -68,7 +68,13 @@ export const ResponseContextSchema = Type.Object(
   {
     protocol_version: ProtocolVersionSchema,
     profile: ProfileSchema,
-    request_id: IdSchema,
+    request_id: Type.String({
+      minLength: 1,
+      maxLength: 128,
+      pattern: "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+      description:
+        "Echoes the request's request_id. On an idempotent replay it echoes the replaying request's request_id, not the original."
+    }),
     processed_at: DateTimeSchema
   },
   { additionalProperties: false }

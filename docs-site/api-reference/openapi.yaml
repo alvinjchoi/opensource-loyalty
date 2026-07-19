@@ -1835,7 +1835,8 @@ components:
               minLength: 1
               maxLength: 128
               pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
-              description: Opaque, stable identifier within the owning system.
+              description: Echoes the request's request_id. On an idempotent replay it echoes the replaying
+                request's request_id, not the original.
               type: string
             processed_at:
               format: date-time
@@ -3171,7 +3172,8 @@ components:
               minLength: 1
               maxLength: 128
               pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
-              description: Opaque, stable identifier within the owning system.
+              description: Echoes the request's request_id. On an idempotent replay it echoes the replaying
+                request's request_id, not the original.
               type: string
             processed_at:
               format: date-time
@@ -3283,7 +3285,8 @@ components:
               minLength: 1
               maxLength: 128
               pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
-              description: Opaque, stable identifier within the owning system.
+              description: Echoes the request's request_id. On an idempotent replay it echoes the replaying
+                request's request_id, not the original.
               type: string
             processed_at:
               format: date-time
@@ -3662,7 +3665,8 @@ components:
               minLength: 1
               maxLength: 128
               pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
-              description: Opaque, stable identifier within the owning system.
+              description: Echoes the request's request_id. On an idempotent replay it echoes the replaying
+                request's request_id, not the original.
               type: string
             processed_at:
               format: date-time
@@ -3814,7 +3818,8 @@ components:
               minLength: 1
               maxLength: 128
               pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
-              description: Opaque, stable identifier within the owning system.
+              description: Echoes the request's request_id. On an idempotent replay it echoes the replaying
+                request's request_id, not the original.
               type: string
             processed_at:
               format: date-time
@@ -4905,7 +4910,8 @@ components:
               minLength: 1
               maxLength: 128
               pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
-              description: Opaque, stable identifier within the owning system.
+              description: Echoes the request's request_id. On an idempotent replay it echoes the replaying
+                request's request_id, not the original.
               type: string
             processed_at:
               format: date-time
@@ -5286,7 +5292,8 @@ components:
               minLength: 1
               maxLength: 128
               pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
-              description: Opaque, stable identifier within the owning system.
+              description: Echoes the request's request_id. On an idempotent replay it echoes the replaying
+                request's request_id, not the original.
               type: string
             processed_at:
               format: date-time
@@ -5546,7 +5553,8 @@ components:
               minLength: 1
               maxLength: 128
               pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
-              description: Opaque, stable identifier within the owning system.
+              description: Echoes the request's request_id. On an idempotent replay it echoes the replaying
+                request's request_id, not the original.
               type: string
             processed_at:
               format: date-time
@@ -7162,7 +7170,8 @@ components:
               minLength: 1
               maxLength: 128
               pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
-              description: Opaque, stable identifier within the owning system.
+              description: Echoes the request's request_id. On an idempotent replay it echoes the replaying
+                request's request_id, not the original.
               type: string
             processed_at:
               format: date-time
@@ -8253,7 +8262,8 @@ components:
               minLength: 1
               maxLength: 128
               pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
-              description: Opaque, stable identifier within the owning system.
+              description: Echoes the request's request_id. On an idempotent replay it echoes the replaying
+                request's request_id, not the original.
               type: string
             processed_at:
               format: date-time
@@ -9212,7 +9222,8 @@ components:
           minLength: 1
           maxLength: 128
           pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
-          description: Opaque, stable identifier within the owning system.
+          description: Echoes the request's request_id. On an idempotent replay it echoes the replaying
+            request's request_id, not the original.
           type: string
         processed_at:
           format: date-time
