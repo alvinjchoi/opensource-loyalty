@@ -35,4 +35,18 @@ describe("attachEnvironment", () => {
     });
     expect(updated).toMatchObject({ status: "failed", status_message: "auth_rejected" });
   });
+
+  it("clears the fingerprint on a failed re-attach (binding omits it)", async () => {
+    const repo = new MemoryCloudRepository();
+    await repo.createEnvironment(pendingEnv(), { /* audit */ } as never);
+    await repo.attachEnvironment("env_1", {
+      api_url: "https://lip.example.com", admin_url: "https://lip.example.com/admin/",
+      api_key_fingerprint: "lip_sk_abcd…wxyz", status: "ready"
+    });
+    const failed = await repo.attachEnvironment("env_1", {
+      api_url: "https://lip.example.com", status: "failed", status_message: "auth_rejected"
+    });
+    expect(failed.status).toBe("failed");
+    expect(failed.api_key_fingerprint).toBeUndefined(); // cleared, matching Postgres
+  });
 });

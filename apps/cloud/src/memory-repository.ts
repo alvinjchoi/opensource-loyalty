@@ -370,6 +370,7 @@ export class MemoryCloudRepository implements CloudRepository {
     if (binding.admin_url) updated.admin_url = binding.admin_url;
     else delete updated.admin_url;
     if (binding.api_key_fingerprint) updated.api_key_fingerprint = binding.api_key_fingerprint;
+    else delete updated.api_key_fingerprint;
     if (binding.status_message) updated.status_message = binding.status_message;
     else delete updated.status_message;
     this.environments.set(environmentId, clone(updated));
