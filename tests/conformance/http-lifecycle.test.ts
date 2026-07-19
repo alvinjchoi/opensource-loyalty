@@ -219,7 +219,8 @@ describe("LIP foodservice HTTP conformance", () => {
     expect(await health.json()).toEqual({
       status: "ok",
       protocol_version: "1.0",
-      profile: "foodservice/1.0"
+      profile: "foodservice/1.0",
+      write_frozen: false
     });
 
     const unauthorized = await post("/lip/v1/members/enroll", makeEnroll(), "wrong-key");
