@@ -1,0 +1,34 @@
+---
+title: "Changelog"
+description: "Release notes and product updates for the Loyalty Interchange Protocol"
+---
+
+<Update label="0.1.0" description="2026-07-18">
+  ## First public release
+
+  LIP 0.1.0 is published to npm under the [`@loyalty-interchange`](https://www.npmjs.com/org/loyalty-interchange) scope with build provenance. Run the sandbox without cloning:
+
+  ```bash
+  npx @loyalty-interchange/cli serve
+  ```
+
+  **Protocol & program model**
+  - Initial LIP core and foodservice profile.
+  - Program, tier, reward, account-summary, and cursor-based ledger read models.
+  - Configurable earning policies for minimum spend, channels, exclusions, and rounding.
+  - Annual tier qualification windows, tier multipliers, and original-rate refund attribution.
+  - Earned-date point lots with FIFO consumption, reversal restoration, expiring balance buckets, and source-linked expiration ledger entries.
+
+  **Engine & storage**
+  - Deterministic reference engine with versioned snapshots and program-fingerprint validation.
+  - Pluggable state-store contract and a durable SQLite implementation.
+  - Seeded foodservice reference platform with restart-safe local and Docker state.
+
+  **API, SDK & tooling**
+  - HTTP reference server and black-box conformance suite.
+  - Generated and idiomatic TypeScript clients for the account experience operations.
+  - TypeScript schema package with JSON Schema Draft 2020-12 validation.
+
+  **Admin**
+  - Authenticated read-only Admin API and a responsive Admin application for program, member, tier, expiration, ledger, and developer inspection.
+</Update>

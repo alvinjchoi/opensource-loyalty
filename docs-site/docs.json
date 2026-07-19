@@ -74,6 +74,17 @@
             "openapi": "api-reference/openapi.yaml"
           }
         ]
+      },
+      {
+        "tab": "Changelog",
+        "groups": [
+          {
+            "group": "Releases",
+            "pages": [
+              "changelog"
+            ]
+          }
+        ]
       }
     ]
   },
