@@ -32,7 +32,7 @@ npm run verify
 ## End-to-end pattern
 
 Boot LIP + your BFF as child processes, drive HTTP lifecycle, use temp databases.
-See `sakura-japan/server/e2e.test.mjs` (companion repo).
+A companion BFF's end-to-end test suite is a good reference pattern.
 
 ## When tests fail
 

@@ -62,12 +62,12 @@ injected server-side callback and credential.
 API audience. Other standards-compliant providers use the generic OIDC adapter.
 
 Clerk's standard session token includes `iss`, `sub`, `exp`, `sid`, and `azp`
-but does not include `aud` by default. Sakura can either:
+but does not include `aud` by default. An integrating app can either:
 
-1. verify the standard session token with the exact Sakura frontend origins in
+1. verify the standard session token with its exact frontend origins in
    `authorizedParties`; or
-2. use a Clerk custom JWT template containing the CraveUp customer API
-   audience, then configure both `audience` and `authorizedParties`.
+2. use a Clerk custom JWT template containing the customer API audience, then
+   configure both `audience` and `authorizedParties`.
 
 When `audience` is configured, a missing or different `aud` is rejected.
 Verified email or phone is returned only when both the value and its
@@ -111,20 +111,20 @@ Retention periods and the legal basis for identity tombstones and loyalty
 ledger entries must be configured with counsel; this contract defines safe
 technical behavior, not a universal retention policy.
 
-## Sakura consumer handoff
+## Consumer app handoff
 
-Sakura should keep Clerk tokens in platform secure storage and send the access
-token only to its BFF/customer gateway. The BFF should:
+A consumer app should keep provider tokens in platform secure storage and send
+the access token only to its BFF/customer gateway. The BFF should:
 
-1. call `introspectSession` with its fixed Sakura tenant and Clerk provider id;
-2. retain `customer_id` as the app-facing identity and never expose Clerk
-   `subject` to LIP;
-3. call `enrollLoyalty` once for `sakura-rewards`;
+1. call `introspectSession` with its fixed tenant and provider id;
+2. retain `customer_id` as the app-facing identity and never expose the
+   provider `subject` to LIP;
+3. call `enrollLoyalty` once for its program (for example `demo-rewards`);
 4. use the returned `member_id` for wallet, rewards, activity, preview, and
    checkout LIP operations; and
 5. call `deleteAccount` before clearing the native token.
 
-Sakura must not remove its current auth implementation until a published
+An app should not remove its existing auth implementation until a published
 customer package or hosted customer gateway exposes this contract. The current
 slice is ready for server integration and conformance testing, but it does not
 yet provide hosted sign-up/sign-in UI, refresh handling, native secure-storage

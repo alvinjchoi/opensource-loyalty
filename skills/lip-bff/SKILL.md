@@ -3,7 +3,7 @@ name: lip-bff
 description: >-
   Build a backend-for-frontend for LIP-powered mobile or web apps. Use when the
   app must not hold the merchant API key, mapping app users to member_id,
-  server-side order pricing, engine-backed cart preview, or Sakura-style stacks.
+  server-side order pricing, engine-backed cart preview, or similar BFF stacks.
 ---
 
 # LIP BFF pattern
@@ -45,8 +45,8 @@ the stored order — do not double-accrue. Lifecycle:
 
 ## Reference implementation
 
-Sakura Japan (`sakura-japan` repo): Expo app → `server/index.mjs` → LIP server.
-E2E template: `sakura-japan/server/e2e.test.mjs`.
+A typical stack: mobile app → Node BFF (`server/index.mjs`) → LIP server, with
+an end-to-end test suite booting both as child processes.
 
 ## Reference
 

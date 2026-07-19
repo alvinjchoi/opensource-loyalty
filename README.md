@@ -14,9 +14,10 @@
 > Customer authentication is intentionally outside the LIP transaction
 > boundary. The app BFF integrates Clerk, Auth0, or another identity provider,
 > keeps the merchant API key server-side, and maps authenticated customers to
-> opaque LIP `member_id` values. A LIP member is not automatically a Crave
-> platform customer. For example, Sakura demo guests currently exist in the
-> Sakura BFF/customer-data layer, not in Crave Customer Identity.
+> opaque LIP `member_id` values. A LIP member is not automatically a platform
+> customer. For example, a pilot app's demo guests can exist in that app's
+> BFF/customer-data layer without ever being provisioned in a managed customer
+> identity platform.
 
 For more information, be sure to check out the **[LIP Documentation](docs/README.md)**. Building with an AI coding agent? Start with **[Getting started with AI](#getting-started-with-ai-)**.
 

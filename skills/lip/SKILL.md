@@ -31,7 +31,7 @@ Read [`llms.txt`](../../llms.txt) first. When docs and `spec/` disagree, `spec/`
 - `/lip-sdk` — application client
 - `/lip-checkout` — earn and redeem lifecycle
 - `/lip-webhooks` — signed CloudEvents
-- `/lip-bff` — customer app pattern (Sakura reference)
+- `/lip-bff` — customer app pattern (BFF reference)
 - `/lip-conformance` — doctor, test, validate
 
 ## Pitfalls (do not implement against LIP directly)

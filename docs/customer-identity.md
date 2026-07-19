@@ -78,8 +78,8 @@ const resolver = new CustomerLoyaltyResolver({
 });
 
 const { customer, memberLink } = await resolver.resolve({
-  tenantId: "sakura",
-  programId: "sakura-rewards",
+  tenantId: "demo-cafe",
+  programId: "demo-rewards",
   principal
 });
 ```

@@ -40,4 +40,4 @@ Use idempotency keys: `${order_id}-reserve`, `${order_id}-accrue`, `${order_id}-
 ## Reference
 
 - [`examples/typescript/full-lifecycle.ts`](../../examples/typescript/full-lifecycle.ts)
-- Sakura BFF: `sakura-japan/server/index.mjs` (companion repo)
+- A companion BFF's server entrypoint is a good real-world reference
