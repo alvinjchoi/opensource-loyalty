@@ -756,11 +756,11 @@ describe("LoyaltyEngine financial lifecycle", () => {
       member_id: "member-001",
       program_id: "demo-foodservice",
       reward_id: "one-dollar-off",
-      artifact: { type: "qr_code", value: "SAKURA-REWARD-001" }
+      artifact: { type: "qr_code", value: "ACME-REWARD-001" }
     });
     expect(issued.issued_reward).toMatchObject({
       status: "issued",
-      artifact: { type: "qr_code", value: "SAKURA-REWARD-001" }
+      artifact: { type: "qr_code", value: "ACME-REWARD-001" }
     });
     const withoutIssuedReward = makeProgram();
     withoutIssuedReward.rewards = withoutIssuedReward.rewards.filter((reward) =>

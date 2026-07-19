@@ -1,4 +1,4 @@
-# Public Sandbox cutover target for Sakura Asian Grill.
+# Public Sandbox cutover target for Acme Asian Grill.
 # Render builds this from the opensource-loyalty checkout (public repo).
 FROM node:22-alpine AS build
 
@@ -18,8 +18,8 @@ ENV LIP_DATABASE_PATH=/data/reference.db
 COPY --from=build /app/package.json /app/package-lock.json ./
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/packages ./packages
-COPY deploy/sakura-sandbox/sakura-program.json /config/sakura-program.json
-COPY deploy/sakura-sandbox/start-loyalty.sh /usr/local/bin/start-loyalty
+COPY deploy/acme-sandbox/acme-program.json /config/acme-program.json
+COPY deploy/acme-sandbox/start-loyalty.sh /usr/local/bin/start-loyalty
 
 RUN mkdir -p /data \
   && chmod +x /usr/local/bin/start-loyalty \

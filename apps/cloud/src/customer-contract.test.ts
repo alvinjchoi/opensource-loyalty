@@ -30,7 +30,7 @@ import type {
 
 const issuer = "https://identity.example.com";
 const audience = "craveup-customer";
-const tenantId = "tenant_sakura";
+const tenantId = "tenant_acme";
 let privateKey: CryptoKey;
 let key: JWTVerifyGetKey;
 
@@ -54,7 +54,7 @@ async function token(input: {
     email_verified: true,
     phone_number: "+15555550100",
     phone_number_verified: true,
-    azp: input.authorizedParty ?? "https://sakura.example.com"
+    azp: input.authorizedParty ?? "https://acme.example.com"
   })
     .setProtectedHeader({ alg: "RS256", kid: "customer-contract-key" })
     .setIssuer(input.tokenIssuer ?? issuer)
@@ -81,7 +81,7 @@ function providerContract(name: string, factory: ProviderFactory): void {
         issuer,
         subject: "user_customer_001",
         audiences: [audience],
-        authorized_party: "https://sakura.example.com",
+        authorized_party: "https://acme.example.com",
         email: { value: "customer@example.com" },
         phone: { value: "+15555550100" }
       });
@@ -120,7 +120,7 @@ const baseProviderOptions = (): OidcCustomerIdentityProviderOptions => ({
   tenantId,
   issuer,
   audience,
-  authorizedParties: ["https://sakura.example.com"],
+  authorizedParties: ["https://acme.example.com"],
   key
 });
 
@@ -224,7 +224,7 @@ function platformFixture(repository: CustomerRepository = new MemoryCustomerRepo
     "clerk",
     "clerk",
     tenantId,
-    "https://sakura.clerk.accounts.dev"
+    "https://acme.clerk.accounts.dev"
   );
   const oidc = new StubProvider(
     "legacy",
@@ -285,7 +285,7 @@ describe("managed customer identity contract", () => {
       "other-clerk",
       "clerk",
       "tenant_other",
-      "https://sakura.clerk.accounts.dev"
+      "https://acme.clerk.accounts.dev"
     );
     otherProvider.subjects.set("same-subject", "alice");
     const second = new CustomerPlatform({
@@ -357,20 +357,20 @@ describe("managed customer identity contract", () => {
       token: "clerk-alice"
     });
     const first = await platform.enrollLoyalty(session, {
-      program_id: "sakura-rewards"
+      program_id: "acme-rewards"
     });
     const retry = await platform.enrollLoyalty(session, {
-      program_id: "sakura-rewards"
+      program_id: "acme-rewards"
     });
     const secondProgram = await platform.enrollLoyalty(session, {
-      program_id: "sakura-vip"
+      program_id: "acme-vip"
     });
     expect(retry.member_id).toBe(first.member_id);
     expect(secondProgram.member_id).not.toBe(first.member_id);
     expect(enroll).toHaveBeenCalledTimes(2);
     expect(enroll).toHaveBeenCalledWith(expect.objectContaining({
       idempotency_key:
-        `customer:${session.customer_id}:program:sakura-rewards`
+        `customer:${session.customer_id}:program:acme-rewards`
     }));
   });
 
@@ -395,10 +395,10 @@ describe("managed customer identity contract", () => {
       provider_id: "clerk",
       token: "clerk-bob"
     });
-    await platform.enrollLoyalty(alice, { program_id: "sakura-rewards" });
+    await platform.enrollLoyalty(alice, { program_id: "acme-rewards" });
     await expect(platform.enrollLoyalty(
       bob,
-      { program_id: "sakura-rewards" }
+      { program_id: "acme-rewards" }
     )).rejects.toMatchObject({
       status: 409,
       code: "member_conflict"
@@ -417,10 +417,10 @@ describe("managed customer identity contract", () => {
       purpose: "marketing_email",
       status: "granted",
       policy_version: "2026-07",
-      source: "sakura-app"
+      source: "acme-app"
     });
     const membership = await platform.enrollLoyalty(session, {
-      program_id: "sakura-rewards"
+      program_id: "acme-rewards"
     });
     const exported = await platform.exportAccount(session);
     expect(exported.identities[0]).not.toHaveProperty("subject");

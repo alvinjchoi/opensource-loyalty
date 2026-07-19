@@ -25,8 +25,8 @@ function requestContext() {
 }
 
 const program = {
-  program_id: "sakura-rewards",
-  name: "Sakura Rewards",
+  program_id: "acme-rewards",
+  name: "Acme Rewards",
   currency: "USD",
   accounts: [{ unit: "points", unit_label: "points", is_primary: true }],
   earn_rate: { points: 1, spend_minor_units: 100 },
@@ -43,7 +43,7 @@ const program = {
         amount: { amount: 500, currency: "USD" },
         allocations: [{ amount: { amount: 500, currency: "USD" } }]
       },
-      funding: [{ party_id: "sakura-brand", party_type: "brand", share_bps: 10_000 }]
+      funding: [{ party_id: "acme-brand", party_type: "brand", share_bps: 10_000 }]
     }
   ]
 };
@@ -52,7 +52,7 @@ async function fixture(input: { programId?: string } = {}) {
   const programDirectory = mkdtempSync(join(tmpdir(), "lip-cloud-programs-"));
   const dataDirectory = mkdtempSync(join(tmpdir(), "lip-cloud-data-"));
   writeFileSync(
-    join(programDirectory, "sakura-rewards.json"),
+    join(programDirectory, "acme-rewards.json"),
     JSON.stringify(program)
   );
   const provisioned: ProvisionedRuntime[] = [];
@@ -64,20 +64,20 @@ async function fixture(input: { programId?: string } = {}) {
   const repository = new MemoryCloudRepository();
   const cloud = new CloudControlPlane({ repository });
   const dashboard = await cloud.createOrganization(owner, {
-    name: "Sakura Restaurants",
-    slug: "sakura-restaurants"
+    name: "Acme Restaurants",
+    slug: "acme-restaurants"
   });
   const project = await cloud.createProject(
     owner,
     dashboard.organization.organization_id,
-    { name: "Sakura Loyalty", slug: "sakura-loyalty" }
+    { name: "Acme Loyalty", slug: "acme-loyalty" }
   );
   const environment = await cloud.createEnvironment(owner, project.project_id, {
     name: "Staging",
     slug: "staging",
     kind: "staging",
     region: "us-east-1",
-    program_id: input.programId ?? "sakura-rewards"
+    program_id: input.programId ?? "acme-rewards"
   });
   const worker = new CloudProvisioningWorker({
     repository,
@@ -120,11 +120,11 @@ describe("LocalDataPlaneProvisioner", () => {
         authorization: `Bearer ${runtime.api_key}`,
         "content-type": "application/json"
       },
-      body: JSON.stringify({ context: requestContext(), program_id: "sakura-rewards" })
+      body: JSON.stringify({ context: requestContext(), program_id: "acme-rewards" })
     });
     expect(authorized.status).toBe(200);
     const body = await authorized.json() as { program: { program_id: string } };
-    expect(body.program.program_id).toBe("sakura-rewards");
+    expect(body.program.program_id).toBe("acme-rewards");
 
     const unauthorized = await fetch(`${ready!.api_url}/lip/v1/programs/get`, {
       method: "POST",
@@ -132,7 +132,7 @@ describe("LocalDataPlaneProvisioner", () => {
         authorization: "Bearer wrong-key",
         "content-type": "application/json"
       },
-      body: JSON.stringify({ context: requestContext(), program_id: "sakura-rewards" })
+      body: JSON.stringify({ context: requestContext(), program_id: "acme-rewards" })
     });
     expect(unauthorized.status).toBe(401);
 
@@ -184,7 +184,7 @@ describe("LocalDataPlaneProvisioner", () => {
   it("restores the same port and API key after close", async () => {
     const programDirectory = mkdtempSync(join(tmpdir(), "lip-cloud-programs-"));
     const dataDirectory = mkdtempSync(join(tmpdir(), "lip-cloud-data-"));
-    writeFileSync(join(programDirectory, "sakura-rewards.json"), JSON.stringify(program));
+    writeFileSync(join(programDirectory, "acme-rewards.json"), JSON.stringify(program));
     const first = new LocalDataPlaneProvisioner({
       programDirectory,
       dataDirectory,
@@ -193,20 +193,20 @@ describe("LocalDataPlaneProvisioner", () => {
     const repository = new MemoryCloudRepository();
     const cloud = new CloudControlPlane({ repository });
     const dashboard = await cloud.createOrganization(owner, {
-      name: "Sakura Restaurants",
-      slug: "sakura-restaurants"
+      name: "Acme Restaurants",
+      slug: "acme-restaurants"
     });
     const project = await cloud.createProject(
       owner,
       dashboard.organization.organization_id,
-      { name: "Sakura Loyalty", slug: "sakura-loyalty" }
+      { name: "Acme Loyalty", slug: "acme-loyalty" }
     );
     const environment = await cloud.createEnvironment(owner, project.project_id, {
       name: "Staging",
       slug: "staging",
       kind: "staging",
       region: "us-east-1",
-      program_id: "sakura-rewards"
+      program_id: "acme-rewards"
     });
     const worker = new CloudProvisioningWorker({
       repository,

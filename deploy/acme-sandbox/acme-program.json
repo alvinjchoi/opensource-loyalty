@@ -1,6 +1,6 @@
 {
-  "program_id": "sakura-rewards",
-  "name": "Sakura Rewards",
+  "program_id": "acme-rewards",
+  "name": "Acme Rewards",
   "description": "Earn 1 point per $1. 50 points = $5 off.",
   "currency": "USD",
   "accounts": [{ "unit": "points", "unit_label": "points", "is_primary": true }],
@@ -36,7 +36,7 @@
         "amount": { "amount": 500, "currency": "USD" },
         "allocations": [{ "amount": { "amount": 500, "currency": "USD" } }]
       },
-      "funding": [{ "party_id": "sakura-brand", "party_type": "brand", "share_bps": 10000 }]
+      "funding": [{ "party_id": "acme-brand", "party_type": "brand", "share_bps": 10000 }]
     }
   ]
 }
