@@ -6,7 +6,8 @@ export const HealthDocumentSchema = Type.Object(
   {
     status: Type.Literal("ok"),
     protocol_version: ProtocolVersionSchema,
-    profile: ProfileSchema
+    profile: ProfileSchema,
+    write_frozen: Type.Optional(Type.Boolean())
   },
   { additionalProperties: false }
 );

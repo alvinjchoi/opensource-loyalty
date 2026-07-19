@@ -162,6 +162,37 @@ describe("reference HTTP server", () => {
     }
   });
 
+  it("rejects a maintenance write with a valid session but no CSRF header, leaving the flag unchanged", async () => {
+    const running = await startReferenceServer(new LoyaltyEngine(makeProgram()), {
+      apiKey: "maintenance-csrf-key"
+    });
+    try {
+      const login = await fetch(`${running.url}/admin/api/v1/session`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ api_key: "maintenance-csrf-key" })
+      });
+      expect(login.status).toBe(204);
+      const setCookies = login.headers.getSetCookie();
+      const cookie = setCookies.map((value) => value.split(";", 1)[0]).join("; ");
+
+      // session cookie present, but no x-lip-csrf header
+      const res = await fetch(`${running.url}/admin/api/v1/maintenance`, {
+        method: "POST",
+        headers: { cookie, "content-type": "application/json" },
+        body: JSON.stringify({ write_frozen: true })
+      });
+      expect(res.status).toBe(403);
+      expect(await res.json()).toMatchObject({ code: "csrf_failed" });
+
+      // flag unchanged: a follow-up GET still reports unfrozen
+      const after = await (await fetch(`${running.url}/admin/api/v1/maintenance`, { headers: { cookie } })).json();
+      expect(after).toMatchObject({ write_frozen: false });
+    } finally {
+      await running.close();
+    }
+  });
+
   it("rejects a maintenance write without admin authorization, leaving the flag unchanged", async () => {
     const running = await startReferenceServer(new LoyaltyEngine(makeProgram()), {
       apiKey: "maintenance-unauth-key"

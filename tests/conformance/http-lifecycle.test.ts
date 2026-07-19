@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   EvaluationResponseSchema,
+  HealthDocumentSchema,
   LedgerListResponseSchema,
   LedgerResponseSchema,
   MemberAccountResponseSchema,
@@ -216,7 +217,11 @@ describe("LIP foodservice HTTP conformance", () => {
   it("enforces authentication and returns machine-readable validation errors", async () => {
     const health = await fetch(`${running.url}/health`);
     expect(health.status).toBe(200);
-    expect(await health.json()).toEqual({
+    const healthBody = await health.json();
+    // Guards against /health drifting from its own normative schema (additionalProperties: false):
+    // a property added to the response without a matching schema update fails here.
+    expect(validate(HealthDocumentSchema, healthBody)).toMatchObject({ ok: true });
+    expect(healthBody).toEqual({
       status: "ok",
       protocol_version: "1.0",
       profile: "foodservice/1.0",
