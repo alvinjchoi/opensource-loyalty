@@ -11,19 +11,19 @@ describe("tenant access control", () => {
     try {
       const first = new AccessControlService({
         path: databasePath,
-        tenantId: "tenant-sakura",
-        tenantName: "Sakura Japan",
+        tenantId: "tenant-acme",
+        tenantName: "Acme Japan",
         reset: true
       });
       const root = first.rootPrincipal();
       const user = first.upsertUser({
-        email: " Operator@Sakura.Example ",
+        email: " Operator@Acme.Example ",
         name: "Store Operator",
         role: "operator"
       }, root);
       expect(user).toMatchObject({
-        tenant_id: "tenant-sakura",
-        email: "operator@sakura.example",
+        tenant_id: "tenant-acme",
+        email: "operator@acme.example",
         role: "operator",
         active: true
       });
@@ -40,7 +40,7 @@ describe("tenant access control", () => {
         role: "viewer"
       }, root)).toThrowError(/valid user email/);
       expect(() => first.upsertUser({
-        email: "invalid-role@sakura.example",
+        email: "invalid-role@acme.example",
         role: "unknown" as never
       }, root)).toThrowError(/Unknown tenant role/);
       expect(() => first.createApiKey({
@@ -50,7 +50,7 @@ describe("tenant access control", () => {
       }, root)).toThrowError(/expiration must be in the future/);
 
       const created = first.createApiKey({
-        name: "Sakura mobile BFF",
+        name: "Acme mobile BFF",
         role: "integration",
         expires_at: "2099-01-01T00:00:00.000Z"
       }, root);
@@ -58,25 +58,25 @@ describe("tenant access control", () => {
       expect(JSON.stringify(first.snapshot())).not.toContain(created.secret);
       const integration = first.authenticate(created.secret);
       expect(integration).toMatchObject({
-        tenant_id: "tenant-sakura",
+        tenant_id: "tenant-acme",
         actor_id: created.api_key.key_id,
         role: "integration"
       });
       expect(first.hasPermission(integration!, "protocol:write")).toBe(true);
       expect(first.hasPermission(integration!, "admin:read")).toBe(false);
       expect(() => first.upsertUser({
-        email: "forbidden@sakura.example",
+        email: "forbidden@acme.example",
         role: "viewer"
       }, integration!)).toThrowError(/access:manage/);
       first.close();
 
       const second = new AccessControlService({
         path: databasePath,
-        tenantId: "tenant-sakura",
-        tenantName: "Sakura Japan"
+        tenantId: "tenant-acme",
+        tenantName: "Acme Japan"
       });
       expect(second.snapshot()).toMatchObject({
-        tenant: { tenant_id: "tenant-sakura" },
+        tenant: { tenant_id: "tenant-acme" },
         users: [{ user_id: user.user_id }],
         api_keys: [{
           key_id: created.api_key.key_id,
@@ -102,10 +102,10 @@ describe("tenant access control", () => {
   it("does not authenticate an API key against another tenant", () => {
     const directory = mkdtempSync(join(tmpdir(), "lip-access-isolation-"));
     const databasePath = join(directory, "reference.db");
-    const sakura = new AccessControlService({
+    const acme = new AccessControlService({
       path: databasePath,
-      tenantId: "tenant-sakura",
-      tenantName: "Sakura",
+      tenantId: "tenant-acme",
+      tenantName: "Acme",
       reset: true
     });
     const other = new AccessControlService({
@@ -115,13 +115,13 @@ describe("tenant access control", () => {
       reset: true
     });
     try {
-      const created = sakura.createApiKey(
-        { name: "Sakura integration", role: "integration" },
-        sakura.rootPrincipal()
+      const created = acme.createApiKey(
+        { name: "Acme integration", role: "integration" },
+        acme.rootPrincipal()
       );
       expect(other.authenticate(created.secret)).toBeUndefined();
     } finally {
-      sakura.close();
+      acme.close();
       other.close();
       rmSync(directory, { recursive: true, force: true });
     }

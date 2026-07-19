@@ -45,7 +45,7 @@ function lipFixture(memberId = "member-001") {
     },
     member: {
       member_id: memberId,
-      program_id: "sakura-rewards",
+      program_id: "acme-rewards",
       status: "active" as const,
       joined_at: NOW,
       identities: [
@@ -89,7 +89,7 @@ async function signedToken(input: {
   })
     .setProtectedHeader({ alg: "RS256", kid: "test-key" })
     .setIssuer(input.issuer ?? "https://identity.example.com")
-    .setAudience(input.audience ?? "sakura-bff")
+    .setAudience(input.audience ?? "acme-bff")
     .setSubject(input.subject ?? "user_123")
     .setIssuedAt()
     .setExpirationTime("5m")
@@ -102,7 +102,7 @@ describe("OIDC token verifier", () => {
     const { key, token } = await signedToken({});
     const verifier = new OidcTokenVerifier({
       issuer: "https://identity.example.com/",
-      audience: "sakura-bff",
+      audience: "acme-bff",
       key
     });
 
@@ -120,8 +120,8 @@ describe("OIDC token verifier", () => {
     const { key, token } = await signedToken({ audience: "another-api", azp: "https://bad.app" });
     const verifier = new OidcTokenVerifier({
       issuer: "https://identity.example.com",
-      audience: "sakura-bff",
-      authorizedParties: ["https://sakura.app"],
+      audience: "acme-bff",
+      authorizedParties: ["https://acme.app"],
       key
     });
 
@@ -131,11 +131,11 @@ describe("OIDC token verifier", () => {
   });
 
   it("accepts an allowed authorized party", async () => {
-    const { key, token } = await signedToken({ azp: "https://sakura.app" });
+    const { key, token } = await signedToken({ azp: "https://acme.app" });
     const verifier = new OidcTokenVerifier({
       issuer: "https://identity.example.com",
-      audience: "sakura-bff",
-      authorizedParties: ["https://sakura.app"],
+      audience: "acme-bff",
+      authorizedParties: ["https://acme.app"],
       key
     });
 
@@ -151,7 +151,7 @@ describe("OIDC token verifier", () => {
     });
     const verifier = new OidcTokenVerifier({
       issuer: "https://identity.example.com",
-      audience: "sakura-bff",
+      audience: "acme-bff",
       key
     });
 
@@ -189,13 +189,13 @@ describe("customer-to-member resolution", () => {
     });
 
     const first = await resolver.resolve({
-      tenantId: "sakura",
-      programId: "sakura-rewards",
+      tenantId: "acme",
+      programId: "acme-rewards",
       principal: principal("clerk-user")
     });
     const second = await resolver.resolve({
-      tenantId: "sakura",
-      programId: "sakura-rewards",
+      tenantId: "acme",
+      programId: "acme-rewards",
       principal: principal("clerk-user")
     });
 
@@ -203,7 +203,7 @@ describe("customer-to-member resolution", () => {
     expect(first.memberLink.memberId).toBe("member-001");
     expect(enroll).toHaveBeenCalledTimes(1);
     expect(enroll.mock.calls[0]?.[0]).toEqual({
-      program_id: "sakura-rewards",
+      program_id: "acme-rewards",
       identity: {
         type: "external",
         issuer: LIP_CUSTOMER_IDENTITY_ISSUER,
@@ -216,11 +216,11 @@ describe("customer-to-member resolution", () => {
 
   it("isolates the same provider subject by tenant", async () => {
     const repository = new MemoryCustomerDirectoryRepository();
-    const firstLip = lipFixture("member-sakura");
+    const firstLip = lipFixture("member-acme");
     const secondLip = lipFixture("member-another");
     let sequence = 0;
     const ids = () => `customer-00${++sequence}`;
-    const sakura = new CustomerLoyaltyResolver({
+    const acme = new CustomerLoyaltyResolver({
       repository,
       lip: firstLip.lip,
       clock: () => new Date(NOW),
@@ -233,9 +233,9 @@ describe("customer-to-member resolution", () => {
       customerId: ids
     });
 
-    const first = await sakura.resolve({
-      tenantId: "sakura",
-      programId: "sakura-rewards",
+    const first = await acme.resolve({
+      tenantId: "acme",
+      programId: "acme-rewards",
       principal: principal("shared-subject")
     });
     const second = await another.resolve({
@@ -257,20 +257,20 @@ describe("customer-to-member resolution", () => {
       customerId: () => "customer-001"
     });
     const resolved = await resolver.resolve({
-      tenantId: "sakura",
-      programId: "sakura-rewards",
+      tenantId: "acme",
+      programId: "acme-rewards",
       principal: principal("clerk-user", "https://clerk.example.com")
     });
 
     await resolver.linkIdentity({
-      tenantId: "sakura",
+      tenantId: "acme",
       customerId: resolved.customer.customerId,
       principal: principal("auth0-user", "https://auth0.example.com")
     });
 
     await expect(
       repository.customerForIdentity(
-        "sakura",
+        "acme",
         "https://auth0.example.com",
         "auth0-user"
       )
@@ -289,17 +289,17 @@ describe("customer-to-member resolution", () => {
       customerId: () => "customer-001"
     });
     await resolver.resolve({
-      tenantId: "sakura",
-      programId: "sakura-rewards",
+      tenantId: "acme",
+      programId: "acme-rewards",
       principal: principal("clerk-user")
     });
-    await resolver.deleteCustomer("sakura", "customer-001");
+    await resolver.deleteCustomer("acme", "customer-001");
 
     expect(cancelMember).toHaveBeenCalledWith("member-001");
     await expect(
       resolver.resolve({
-        tenantId: "sakura",
-        programId: "sakura-rewards",
+        tenantId: "acme",
+        programId: "acme-rewards",
         principal: principal("clerk-user")
       })
     ).rejects.toMatchObject({ code: "customer_deleted" });
@@ -377,26 +377,26 @@ describe("customer-to-member resolution", () => {
   it("rejects conflicting identity and member links", async () => {
     const repository = new MemoryCustomerDirectoryRepository();
     await repository.resolveOrCreateCustomer({
-      tenantId: "sakura",
+      tenantId: "acme",
       principal: principal("first"),
       customerId: "customer-first",
       now: NOW
     });
     await repository.resolveOrCreateCustomer({
-      tenantId: "sakura",
+      tenantId: "acme",
       principal: principal("second"),
       customerId: "customer-second",
       now: NOW
     });
     await repository.linkExternalIdentity({
-      tenantId: "sakura",
+      tenantId: "acme",
       customerId: "customer-first",
       principal: principal("shared"),
       now: NOW
     });
     await expect(
       repository.linkExternalIdentity({
-        tenantId: "sakura",
+        tenantId: "acme",
         customerId: "customer-second",
         principal: principal("shared"),
         now: NOW
@@ -404,17 +404,17 @@ describe("customer-to-member resolution", () => {
     ).rejects.toMatchObject({ code: "identity_conflict" });
 
     await repository.linkMember({
-      tenantId: "sakura",
+      tenantId: "acme",
       customerId: "customer-first",
-      programId: "sakura-rewards",
+      programId: "acme-rewards",
       memberId: "member-first",
       now: NOW
     });
     await expect(
       repository.linkMember({
-        tenantId: "sakura",
+        tenantId: "acme",
         customerId: "customer-first",
-        programId: "sakura-rewards",
+        programId: "acme-rewards",
         memberId: "member-second",
         now: NOW
       })

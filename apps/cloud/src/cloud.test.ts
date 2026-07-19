@@ -32,20 +32,20 @@ async function fixture() {
     now: () => new Date(fixedNow)
   });
   const dashboard = await cloud.createOrganization(owner, {
-    name: "Sakura Restaurants",
-    slug: "sakura-restaurants"
+    name: "Acme Restaurants",
+    slug: "acme-restaurants"
   });
   const project = await cloud.createProject(
     owner,
     dashboard.organization.organization_id,
-    { name: "Sakura Loyalty", slug: "sakura-loyalty" }
+    { name: "Acme Loyalty", slug: "acme-loyalty" }
   );
   const environment = await cloud.createEnvironment(owner, project.project_id, {
     name: "Production",
     slug: "production",
     kind: "production",
     region: "us-east-1",
-    program_id: "sakura-rewards"
+    program_id: "acme-rewards"
   });
   return { cloud, repository, dashboard, project, environment };
 }
@@ -86,7 +86,7 @@ describe("Cloud control plane", () => {
   it("creates isolated organizations, projects, and provisionable environments", async () => {
     const { cloud, dashboard, project, environment } = await fixture();
     expect(dashboard).toMatchObject({
-      organization: { slug: "sakura-restaurants" },
+      organization: { slug: "acme-restaurants" },
       membership: { subject: owner.subject, role: "owner" },
       subscription: { plan_id: "free", status: "active" },
       plan: { plan_id: "free" }
@@ -97,7 +97,7 @@ describe("Cloud control plane", () => {
       kind: "production",
       region: "us-east-1",
       status: "pending",
-      program_id: "sakura-rewards"
+      program_id: "acme-rewards"
     });
     expect(environment.tenant_id).toMatch(/^tenant_/);
     await expect(cloud.dashboard(
@@ -106,7 +106,7 @@ describe("Cloud control plane", () => {
     )).rejects.toMatchObject({ status: 404 });
     await expect(cloud.createOrganization(owner, {
       name: "Duplicate",
-      slug: "sakura-restaurants"
+      slug: "acme-restaurants"
     })).rejects.toMatchObject({ status: 409, code: "slug_conflict" });
   });
 
@@ -287,7 +287,7 @@ describe("Cloud control plane", () => {
       slug: "other-env",
       kind: "production",
       region: "moon-1",
-      program_id: "sakura-rewards"
+      program_id: "acme-rewards"
     })).rejects.toMatchObject({ status: 422, code: "unsupported_region" });
     await expect(cloud.recordUsage(owner, environment.environment_id, {
       metric: "messages",

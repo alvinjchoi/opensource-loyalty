@@ -8,7 +8,7 @@ The Cloud control plane can only provision data planes with
 `LocalDataPlaneProvisioner`, which runs LIP runtimes in-process on localhost
 ports — not publicly reachable, not on managed infrastructure. There is no way
 to take an environment to `ready` against a real, TLS-reachable regional LIP
-host, so the Sakura-style cutover and the #8 conformance run have no target.
+host, so the Acme-style cutover and the #8 conformance run have no target.
 
 ## Decisions
 
