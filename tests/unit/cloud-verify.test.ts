@@ -62,4 +62,15 @@ describe("runCloudVerification", () => {
       expect(r.ok).toBe(true);
     } finally { await server.close(); }
   });
+
+  it("degrades cleanly when the host is unreachable (no throw)", async () => {
+    // A port with nothing listening; fetch should reject → caught → actual null.
+    const r = await runCloudVerification(
+      { baseUrl: "http://127.0.0.1:1", apiKey: "x" },
+      { programId: "demo-foodservice", expectMember: { identity: { type: "token", value: "known-guest" }, available: 0 }, expectMembers: 1 }
+    );
+    expect(r.ok).toBe(false);
+    expect(r.knownMember).toMatchObject({ ok: false, actual: null });
+    expect(r.memberCount).toMatchObject({ ok: false, actual: null });
+  });
 });

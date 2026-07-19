@@ -34,11 +34,17 @@ async function lookupAvailable(
   identity: IdentityReference
 ): Promise<number | null> {
   const base = connection.baseUrl.replace(/\/+$/, "");
-  const res = await fetch(`${base}/lip/v1/members/lookup`, {
-    method: "POST",
-    headers: { authorization: `Bearer ${connection.apiKey}`, "content-type": "application/json" },
-    body: JSON.stringify({ context: context(), program_id: programId, identity })
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${base}/lip/v1/members/lookup`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${connection.apiKey}`, "content-type": "application/json" },
+      body: JSON.stringify({ context: context(), program_id: programId, identity }),
+      signal: AbortSignal.timeout(5000)
+    });
+  } catch {
+    return null;
+  }
   if (!res.ok) return null;
   const body = (await res.json()) as { balances?: Array<{ available?: number }> };
   const balance = body.balances?.[0];
@@ -49,9 +55,15 @@ async function snapshotMemberCount(
   connection: { baseUrl: string; apiKey: string }
 ): Promise<number | null> {
   const base = connection.baseUrl.replace(/\/+$/, "");
-  const res = await fetch(`${base}/admin/api/v1/snapshot`, {
-    headers: { authorization: `Bearer ${connection.apiKey}` }
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${base}/admin/api/v1/snapshot`, {
+      headers: { authorization: `Bearer ${connection.apiKey}` },
+      signal: AbortSignal.timeout(5000)
+    });
+  } catch {
+    return null;
+  }
   if (!res.ok) return null;
   const snap = (await res.json()) as { members?: unknown };
   return Array.isArray(snap.members) ? snap.members.length : null;
