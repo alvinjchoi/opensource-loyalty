@@ -72,6 +72,7 @@ export interface CloudEnvironment {
   status_message?: string;
   api_url?: string;
   admin_url?: string;
+  api_key_fingerprint?: string;
   created_at: string;
   updated_at: string;
 }
@@ -224,6 +225,16 @@ export interface CloudRepository {
     slug: string
   ): Promise<CloudEnvironment | undefined>;
   environmentsForProject(projectId: string): Promise<CloudEnvironment[]>;
+  attachEnvironment(
+    environmentId: string,
+    binding: {
+      api_url: string;
+      admin_url?: string;
+      api_key_fingerprint?: string;
+      status: ProvisioningStatus;
+      status_message?: string;
+    }
+  ): Promise<CloudEnvironment>;
   plans(): Promise<CloudPlan[]>;
   planById(planId: string): Promise<CloudPlan | undefined>;
   subscriptionForOrganization(

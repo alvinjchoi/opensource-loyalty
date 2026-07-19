@@ -22,6 +22,7 @@ import {
   type CloudRepository,
   type CloudSubscription,
   type CloudUsageEvent,
+  type ProvisioningStatus,
   type UsageMetric
 } from "./types.js";
 
@@ -40,6 +41,11 @@ const migrations = [
     version: 3,
     name: "customer_identity",
     url: new URL("../migrations/003_customer_identity.sql", import.meta.url)
+  },
+  {
+    version: 4,
+    name: "environment_key_fingerprint",
+    url: new URL("../migrations/004_environment_key_fingerprint.sql", import.meta.url)
   }
 ] as const;
 
@@ -117,7 +123,8 @@ function environment(row: Record<string, unknown>): CloudEnvironment {
     updated_at: iso(row["updated_at"] as Date | string),
     ...(row["status_message"] ? { status_message: String(row["status_message"]) } : {}),
     ...(row["api_url"] ? { api_url: String(row["api_url"]) } : {}),
-    ...(row["admin_url"] ? { admin_url: String(row["admin_url"]) } : {})
+    ...(row["admin_url"] ? { admin_url: String(row["admin_url"]) } : {}),
+    ...(row["api_key_fingerprint"] ? { api_key_fingerprint: String(row["api_key_fingerprint"]) } : {})
   };
 }
 
@@ -690,6 +697,39 @@ export class PostgresCloudRepository implements CloudRepository {
       ORDER BY created_at
     `, [projectId]);
     return result.rows.map(environment);
+  }
+
+  public async attachEnvironment(
+    environmentId: string,
+    binding: {
+      api_url: string;
+      admin_url?: string;
+      api_key_fingerprint?: string;
+      status: ProvisioningStatus;
+      status_message?: string;
+    }
+  ): Promise<CloudEnvironment> {
+    const result = await this.pool.query(`
+      UPDATE lip_cloud_environments
+      SET status = $2,
+          status_message = $3,
+          api_url = $4,
+          admin_url = $5,
+          api_key_fingerprint = $6,
+          updated_at = now()
+      WHERE environment_id = $1
+      RETURNING *
+    `, [
+      environmentId,
+      binding.status,
+      binding.status_message ?? null,
+      binding.api_url,
+      binding.admin_url ?? null,
+      binding.api_key_fingerprint ?? null
+    ]);
+    const row = result.rows[0];
+    if (!row) throw new Error(`Environment ${environmentId} was not found`);
+    return environment(row);
   }
 
   public async plans(): Promise<CloudPlan[]> {

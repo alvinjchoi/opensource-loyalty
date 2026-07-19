@@ -13,6 +13,7 @@ import {
   type CloudRepository,
   type CloudSubscription,
   type CloudUsageEvent,
+  type ProvisioningStatus,
   type UsageMetric
 } from "./types.js";
 
@@ -345,6 +346,34 @@ export class MemoryCloudRepository implements CloudRepository {
     return [...this.environments.values()]
       .filter((environment) => environment.project_id === projectId)
       .map(clone);
+  }
+
+  public async attachEnvironment(
+    environmentId: string,
+    binding: {
+      api_url: string;
+      admin_url?: string;
+      api_key_fingerprint?: string;
+      status: ProvisioningStatus;
+      status_message?: string;
+    }
+  ): Promise<CloudEnvironment> {
+    const existing = this.environments.get(environmentId);
+    if (!existing) throw new Error(`Environment ${environmentId} was not found`);
+    const timestamp = new Date().toISOString();
+    const updated: CloudEnvironment = {
+      ...existing,
+      status: binding.status,
+      api_url: binding.api_url,
+      updated_at: timestamp
+    };
+    if (binding.admin_url) updated.admin_url = binding.admin_url;
+    else delete updated.admin_url;
+    if (binding.api_key_fingerprint) updated.api_key_fingerprint = binding.api_key_fingerprint;
+    if (binding.status_message) updated.status_message = binding.status_message;
+    else delete updated.status_message;
+    this.environments.set(environmentId, clone(updated));
+    return clone(updated);
   }
 
   public async plans(): Promise<CloudPlan[]> {
