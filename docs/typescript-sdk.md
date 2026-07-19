@@ -92,6 +92,21 @@ const [{ program }, account, history] = await Promise.all([
 ]);
 ```
 
+## Idempotent retries
+
+To retry a mutation safely, reuse the **same `idempotencyKey`** across attempts:
+
+```ts
+const opts = { idempotencyKey: `${orderId}-accrue` };
+await lip.accruals.post(request, opts);   // first attempt
+await lip.accruals.post(request, opts);   // retry — returns the original result
+```
+
+You do not need to pin `request_id` or `occurred_at`; the provider treats the
+business payload as the request identity and echoes your retry's `request_id`
+on the replayed response. Reusing a key with a **different** business payload
+returns `409 idempotency_conflict`.
+
 ## Errors
 
 - `LipValidationError`: the local request or successful server response did not

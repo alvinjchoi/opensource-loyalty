@@ -505,6 +505,37 @@ describe("LipClient", () => {
     }
   });
 
+  it("replays a caller-level retry that reuses the idempotency key", async () => {
+    const running = await startReferenceServer(new LoyaltyEngine(makeProgram()), {
+      apiKey: "sdk-retry-key"
+    });
+    try {
+      const client = new LipClient({
+        baseUrl: running.url,
+        apiKey: "sdk-retry-key",
+        source: { system: "sdk-retry-test" }
+      });
+
+      const enroll = {
+        program_id: "demo-foodservice",
+        identity: { type: "token" as const, value: "retry-guest", issuer: "sdk-retry-test" },
+        member_id: "retry-member-001"
+      };
+
+      // No explicit idGenerator: the client's default generates a fresh request_id
+      // per call, so these two calls exercise a genuine caller-level retry rather
+      // than an exact-duplicate request.
+      const first = await client.members.enroll(enroll, { idempotencyKey: "retry-shared-key" });
+      const second = await client.members.enroll(enroll, { idempotencyKey: "retry-shared-key" });
+
+      expect(second.member.member_id).toBe(first.member.member_id);
+      expect(second.member.member_id).toBe("retry-member-001");
+      expect(second.context.request_id).not.toBe(first.context.request_id);
+    } finally {
+      await running.close();
+    }
+  });
+
   it("retries safe operations with the same generated context", async () => {
     let attempts = 0;
     const requestBodies: string[] = [];
