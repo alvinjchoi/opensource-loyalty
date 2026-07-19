@@ -99,6 +99,38 @@ Re-attaching is allowed for `pending`, `ready`, or `failed` environments, so
 you can rebind after key rotation or a host migration; a `suspended`
 environment rejects attach with `409 environment_suspended`.
 
+## Verifying a staging tenant
+
+Attach binds the host, but binding is not proof the tenant is safe to send
+traffic to. After `/attach` returns `ready` with an `api_url`, run the same
+diagnostics used to gate a local sandbox against that URL:
+
+```bash
+lip cloud-verify <api_url> \
+  --api-key <key> \
+  --program-id <id> \
+  --expect-member <token> \
+  --expect-available <n> \
+  [--expect-members <N>]
+```
+
+`cloud-verify` runs `lip doctor` (discovery, health, authentication, and
+capabilities) and baseline conformance against `<api_url>`, then, given
+`--program-id`, `--expect-member`, and `--expect-available`, looks up that
+member's balance and compares it to the expected value. The optional
+`--expect-members <N>` additionally checks the total member count. Record the
+printed report as part of the cutover: the command exits non-zero on any
+failure, so it can gate promoting a newly attached tenant rather than relying
+on `/attach` having returned `200` alone.
+
+Member counts also appear in `lip state import`'s summary output when you
+migrate an archive into the target host; `--expect-members` gives you the same
+number from a second, independent source by reading it directly off the
+running host. That count comes from the host's admin snapshot endpoint, which
+is a non-normative operational surface outside the versioned `/lip/v1`
+protocol — treat `--expect-members` as an operator convenience for staging
+verification, not a protocol guarantee.
+
 ## Start locally
 
 Start Postgres and the Cloud API:
