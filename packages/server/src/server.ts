@@ -690,6 +690,7 @@ export function createReferenceServer(engine: LoyaltyEngine, options: ServerOpti
     allowedMethods.set("/admin/api/v1/session", ["POST"]);
     allowedMethods.set("/admin/api/v1/logout", ["POST"]);
     allowedMethods.set("/admin/api/v1/snapshot", ["GET"]);
+    allowedMethods.set("/admin/api/v1/maintenance", ["GET", "POST"]);
     if (options.admin?.access) {
       allowedMethods.set("/admin/api/v1/access/users", ["PUT"]);
       allowedMethods.set("/admin/api/v1/access/api-keys", ["POST"]);
@@ -1375,6 +1376,60 @@ export function createReferenceServer(engine: LoyaltyEngine, options: ServerOpti
           );
         }
         sendJson(response, 200, { member: engine.cancelMember(values["member_id"]) });
+        return;
+      }
+
+      if (adminEnabled && method === "GET" && path === "/admin/api/v1/maintenance") {
+        if (!isAdminAuthorized(request, options, adminSessions)) {
+          sendJson(response, 401, problem(401, "Unauthorized", "unauthorized"), "application/problem+json");
+          return;
+        }
+        sendJson(response, 200, { write_frozen: writeFrozen });
+        return;
+      }
+
+      if (adminEnabled && method === "POST" && path === "/admin/api/v1/maintenance") {
+        if (!isAdminAuthorized(request, options, adminSessions)) {
+          sendJson(response, 401, problem(401, "Unauthorized", "unauthorized"), "application/problem+json");
+          return;
+        }
+        if (!isAdminWriteAuthorized(request, options, adminSessions)) {
+          sendJson(
+            response,
+            403,
+            problem(403, "Forbidden", "csrf_failed", "Admin writes require a valid CSRF token"),
+            "application/problem+json"
+          );
+          return;
+        }
+        const body = await readBody(request);
+        const values = body && typeof body === "object" && !Array.isArray(body)
+          ? body as Record<string, unknown>
+          : {};
+        if (typeof values["write_frozen"] !== "boolean") {
+          throw new TransportError(
+            422,
+            "validation_failed",
+            "Request validation failed",
+            "write_frozen (boolean) is required"
+          );
+        }
+        writeFrozen = values["write_frozen"];
+        const principal = bearerPrincipal(request, options) ?? adminPrincipal(request, options, adminSessions);
+        if (principal) {
+          try {
+            options.admin?.access?.recordAudit(
+              principal,
+              "maintenance.write_freeze.changed",
+              "server",
+              undefined,
+              { write_frozen: writeFrozen }
+            );
+          } catch {
+            // Audit persistence must never change an already completed response.
+          }
+        }
+        sendJson(response, 200, { write_frozen: writeFrozen });
         return;
       }
 

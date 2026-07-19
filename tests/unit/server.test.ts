@@ -97,6 +97,95 @@ describe("reference HTTP server", () => {
     }
   });
 
+  it("toggles the write-freeze via the admin maintenance endpoint", async () => {
+    const running = await startReferenceServer(new LoyaltyEngine(makeProgram()), {
+      apiKey: "maintenance-admin-key"
+    });
+    try {
+      const login = await fetch(`${running.url}/admin/api/v1/session`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ api_key: "maintenance-admin-key" })
+      });
+      expect(login.status).toBe(204);
+      const setCookies = login.headers.getSetCookie();
+      const cookie = setCookies.map((value) => value.split(";", 1)[0]).join("; ");
+      const csrf = decodeURIComponent(
+        setCookies
+          .find((value) => value.startsWith("lip_admin_csrf="))!
+          .split(";", 1)[0]!
+          .slice("lip_admin_csrf=".length)
+      );
+      const authed = { cookie, "content-type": "application/json", "x-lip-csrf": csrf };
+
+      // starts unfrozen: status read reflects it
+      const before = await (await fetch(`${running.url}/admin/api/v1/maintenance`, { headers: { cookie } })).json();
+      expect(before).toMatchObject({ write_frozen: false });
+
+      // freeze
+      const set = await fetch(`${running.url}/admin/api/v1/maintenance`, {
+        method: "POST",
+        headers: authed,
+        body: JSON.stringify({ write_frozen: true })
+      });
+      expect(set.status).toBe(200);
+      expect(await set.json()).toMatchObject({ write_frozen: true });
+
+      // a write is now frozen
+      const enroll = await fetch(`${running.url}/lip/v1/members/enroll`, {
+        method: "POST",
+        headers: { authorization: "Bearer maintenance-admin-key", "content-type": "application/json" },
+        body: JSON.stringify(makeEnroll("toggle-write-key"))
+      });
+      expect(enroll.status).toBe(503);
+
+      // unfreeze -> write works
+      const unset = await fetch(`${running.url}/admin/api/v1/maintenance`, {
+        method: "POST",
+        headers: authed,
+        body: JSON.stringify({ write_frozen: false })
+      });
+      expect(unset.status).toBe(200);
+      expect(await unset.json()).toMatchObject({ write_frozen: false });
+
+      const enroll2 = await fetch(`${running.url}/lip/v1/members/enroll`, {
+        method: "POST",
+        headers: { authorization: "Bearer maintenance-admin-key", "content-type": "application/json" },
+        body: JSON.stringify(makeEnroll("toggle-write-key-2"))
+      });
+      expect(enroll2.status).toBe(201);
+
+      const after = await (await fetch(`${running.url}/admin/api/v1/maintenance`, { headers: { cookie } })).json();
+      expect(after).toMatchObject({ write_frozen: false });
+    } finally {
+      await running.close();
+    }
+  });
+
+  it("rejects a maintenance write without admin authorization, leaving the flag unchanged", async () => {
+    const running = await startReferenceServer(new LoyaltyEngine(makeProgram()), {
+      apiKey: "maintenance-unauth-key"
+    });
+    try {
+      const res = await fetch(`${running.url}/admin/api/v1/maintenance`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ write_frozen: true })
+      });
+      expect([401, 403]).toContain(res.status);
+
+      // flag unchanged: a subsequent write still succeeds
+      const enroll = await fetch(`${running.url}/lip/v1/members/enroll`, {
+        method: "POST",
+        headers: { authorization: "Bearer maintenance-unauth-key", "content-type": "application/json" },
+        body: JSON.stringify(makeEnroll("maintenance-unauth-write-key"))
+      });
+      expect(enroll.status).toBe(201);
+    } finally {
+      await running.close();
+    }
+  });
+
   it("returns problem details for routes, methods, media types, JSON, and body limits", async () => {
     const running = await startReferenceServer(new LoyaltyEngine(makeProgram()), {
       apiKey: "server-test-key"
