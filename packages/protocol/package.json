@@ -1,6 +1,6 @@
 {
   "name": "@loyalty-interchange/protocol",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Normative schemas and validation for Loyalty Interchange Protocol.",
   "license": "Apache-2.0",
   "repository": { "type": "git", "url": "git+https://github.com/alvinjchoi/opensource-loyalty.git", "directory": "packages/protocol" },

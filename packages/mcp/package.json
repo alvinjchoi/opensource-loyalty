@@ -1,6 +1,6 @@
 {
   "name": "@loyalty-interchange/mcp",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Model Context Protocol server for Loyalty Interchange Protocol docs and validation.",
   "license": "Apache-2.0",
   "repository": { "type": "git", "url": "git+https://github.com/alvinjchoi/opensource-loyalty.git", "directory": "packages/mcp" },
@@ -34,7 +34,7 @@
     "prepack": "npm run build"
   },
   "dependencies": {
-    "@loyalty-interchange/protocol": "0.1.1",
+    "@loyalty-interchange/protocol": "0.1.2",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "yaml": "^2.9.0",
     "zod": "^3.25.76"

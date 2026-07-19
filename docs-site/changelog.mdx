@@ -3,6 +3,26 @@ title: "Changelog"
 description: "Release notes and product updates for the Loyalty Interchange Protocol"
 ---
 
+<Update label="0.1.2" description="2026-07-19">
+  ## Write-freeze / maintenance mode
+
+  Operators can now freeze LIP writes during a cutover window — independent of
+  the BFF. When frozen, every `/lip/v1` write returns a stable
+  `503 write_frozen` (RFC 9457) with a `Retry-After` header, while reads and
+  `/health` stay available.
+
+  - **Startup:** `lip serve --write-freeze` or `LIP_WRITE_FREEZE=true`.
+  - **Runtime:** `POST /admin/api/v1/maintenance {"write_frozen": true|false}`
+    (admin key + CSRF); `GET` returns the current state.
+  - `GET /health` reports `write_frozen` for canary checks.
+
+  ## `lip cloud-verify`
+
+  A new CLI command runs doctor, conformance, and optional member-balance
+  expectations against a deployed Cloud/staging host, so a cutover can be gated
+  on a green run.
+</Update>
+
 <Update label="0.1.1" description="2026-07-18">
   ## Idempotent replay fix
 
