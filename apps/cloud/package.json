@@ -14,9 +14,9 @@
     "start": "node dist/cli.js"
   },
   "dependencies": {
-    "@loyalty-interchange/identity": "0.1.1",
-    "@loyalty-interchange/reference": "0.1.1",
-    "@loyalty-interchange/server": "0.1.1",
+    "@loyalty-interchange/identity": "0.1.2",
+    "@loyalty-interchange/reference": "0.1.2",
+    "@loyalty-interchange/server": "0.1.2",
     "pg": "^8.22.0",
     "stripe": "^22.3.2"
   },

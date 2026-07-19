@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.1.2 - 2026-07-19
+
+- Add a server-side write-freeze / maintenance switch: freeze all `/lip/v1`
+  writes during a cutover window while reads and `/health` stay available.
+  Frozen writes return a stable `503 write_frozen` (RFC 9457) with a
+  `Retry-After` header. Set it at startup (`lip serve --write-freeze` /
+  `LIP_WRITE_FREEZE`) or at runtime via the admin
+  `POST /admin/api/v1/maintenance` endpoint; `GET /health` now reports
+  `write_frozen`.
+- Add `lip cloud-verify`: run doctor and conformance (plus optional member
+  expectations) against a deployed Cloud/staging LIP host to gate a cutover.
+
 ## 0.1.1 - 2026-07-18
 
 - Fix idempotent replay: a retry that reuses the idempotency key with a

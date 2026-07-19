@@ -1,6 +1,6 @@
 {
   "name": "@loyalty-interchange/cli",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Developer CLI for Loyalty Interchange Protocol.",
   "license": "Apache-2.0",
   "repository": { "type": "git", "url": "git+https://github.com/alvinjchoi/opensource-loyalty.git", "directory": "packages/cli" },
@@ -26,9 +26,9 @@
     "prepack": "npm run build"
   },
   "dependencies": {
-    "@loyalty-interchange/protocol": "0.1.1",
-    "@loyalty-interchange/reference": "0.1.1",
-    "@loyalty-interchange/server": "0.1.1",
+    "@loyalty-interchange/protocol": "0.1.2",
+    "@loyalty-interchange/reference": "0.1.2",
+    "@loyalty-interchange/server": "0.1.2",
     "commander": "^15.0.0"
   }
 }

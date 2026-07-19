@@ -1,6 +1,6 @@
 {
   "name": "@loyalty-interchange/storage-sqlite",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "SQLite state store for the Loyalty Interchange reference platform.",
   "license": "Apache-2.0",
   "repository": { "type": "git", "url": "git+https://github.com/alvinjchoi/opensource-loyalty.git", "directory": "packages/storage-sqlite" },
@@ -24,7 +24,7 @@
     "prepack": "npm run build"
   },
   "dependencies": {
-    "@loyalty-interchange/storage": "0.1.1",
+    "@loyalty-interchange/storage": "0.1.2",
     "better-sqlite3": "^12.11.1"
   },
   "devDependencies": {

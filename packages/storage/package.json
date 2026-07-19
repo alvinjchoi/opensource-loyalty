@@ -1,6 +1,6 @@
 {
   "name": "@loyalty-interchange/storage",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Persistence contracts for Loyalty Interchange reference platforms.",
   "license": "Apache-2.0",
   "repository": { "type": "git", "url": "git+https://github.com/alvinjchoi/opensource-loyalty.git", "directory": "packages/storage" },
