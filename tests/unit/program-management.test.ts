@@ -92,12 +92,12 @@ describe("program management", () => {
     }
   });
 
-  it("preserves member state while publishing live and across restart", () => {
+  it("preserves member state while publishing live and across restart", async () => {
     const directory = mkdtempSync(join(tmpdir(), "lip-program-platform-"));
     const databasePath = join(directory, "reference.db");
     const initial = makeProgram();
     try {
-      const first = createDemoPlatform({
+      const first = await createDemoPlatform({
         databasePath,
         reset: true,
         seed: false,
@@ -118,9 +118,9 @@ describe("program management", () => {
         },
         summary: { active_members: 1 }
       });
-      first.close();
+      await first.close();
 
-      const second = createDemoPlatform({
+      const second = await createDemoPlatform({
         databasePath,
         seed: false,
         program: initial
@@ -137,15 +137,15 @@ describe("program management", () => {
         program_id: initial.program_id,
         identity: makeEnroll().identity
       }).member?.member_id).toBe("member-001");
-      second.close();
+      await second.close();
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }
   });
 
-  it("publishes stamp-card policy changes without reinterpreting account units", () => {
+  it("publishes stamp-card policy changes without reinterpreting account units", async () => {
     const directory = mkdtempSync(join(tmpdir(), "lip-stamp-program-"));
-    const platform = createDemoPlatform({
+    const platform = await createDemoPlatform({
       databasePath: join(directory, "reference.db"),
       reset: true,
       seed: false,
@@ -172,7 +172,7 @@ describe("program management", () => {
       expect(() => platform.programs.publish(pointsDraft.draft!.version, "test-admin"))
         .toThrowError(/primary account unit/);
     } finally {
-      platform.close();
+      await platform.close();
       rmSync(directory, { recursive: true, force: true });
     }
   });

@@ -8,11 +8,11 @@ import {
   type LoyaltyEngineState,
   type ProgramDefinition
 } from "@loyalty-interchange/reference";
-import { SqliteStateStore } from "@loyalty-interchange/storage-sqlite";
+import { AsyncSqliteStateStore, SqliteStateStore } from "@loyalty-interchange/storage-sqlite";
 import { PostgresEngineRepository } from "@loyalty-interchange/storage-postgres";
 import { createDemoProgram, seedDemoData } from "./demo.js";
 import { CampaignService } from "./campaigns.js";
-import { MembershipService } from "./memberships.js";
+import { MembershipService, type MembershipAuditState } from "./memberships.js";
 import { AccessControlService } from "./access-control.js";
 import { EventedLoyaltyEngine } from "./evented-engine.js";
 import { EngagementService } from "./engagement.js";
@@ -51,7 +51,7 @@ export interface DemoPlatform {
   memberships: MembershipService;
   access: AccessControlService;
   engagement: EngagementService;
-  close(): void;
+  close(): Promise<void>;
 }
 
 export interface PostgresProtocolPlatform {
@@ -98,7 +98,7 @@ function discoverAdminAssetRoot(): string | undefined {
   return candidates.find((candidate) => existsSync(candidate));
 }
 
-export function createDemoPlatform(options: DemoPlatformOptions): DemoPlatform {
+export async function createDemoPlatform(options: DemoPlatformOptions): Promise<DemoPlatform> {
   const configuredProgram = options.program ?? createDemoProgram();
   const programs = new ProgramManagementService({
     path: options.databasePath,
@@ -170,8 +170,11 @@ export function createDemoPlatform(options: DemoPlatformOptions): DemoPlatform {
       schedulerIntervalMs: 30_000,
       ...(options.reset ? { reset: true } : {})
     });
-    memberships = new MembershipService({
-      path: options.databasePath,
+    memberships = await MembershipService.create({
+      store: new AsyncSqliteStateStore<MembershipAuditState>({
+        path: options.databasePath,
+        key: `${program.program_id}:memberships`
+      }),
       engine,
       persistEngine: (nextState) => store.save(nextState),
       schedulerIntervalMs: 30_000,
@@ -217,9 +220,9 @@ export function createDemoPlatform(options: DemoPlatformOptions): DemoPlatform {
       memberships,
       access,
       engagement,
-      close: () => {
+      close: async () => {
         campaigns?.close();
-        memberships?.close();
+        await memberships?.close();
         access?.close();
         engagement?.close();
         programs.close();
@@ -240,7 +243,7 @@ export function createDemoPlatform(options: DemoPlatformOptions): DemoPlatform {
     webhookHistory?.close();
     webhookSubscriptionStore?.close();
     campaigns?.close();
-    memberships?.close();
+    await memberships?.close();
     access?.close();
     engagement?.close();
     programs.close();

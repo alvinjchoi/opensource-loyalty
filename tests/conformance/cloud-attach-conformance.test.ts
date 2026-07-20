@@ -35,7 +35,7 @@ describe("Cloud attach -> cloud-verify conformance", () => {
   it("creates an environment, attaches a real reference LIP host, and verifies it end to end", async () => {
     const directory = mkdtempSync(join(tmpdir(), "lip-cloud-verify-conformance-"));
     const databasePath = join(directory, "reference.db");
-    const platform = createDemoPlatform({ databasePath, reset: true, seed: false });
+    const platform = await createDemoPlatform({ databasePath, reset: true, seed: false });
     const lipApiKey = "lip_sk_conformance_0123456789abcdef";
 
     // Seed a known member so the doctor/conformance/member checks below have
@@ -121,7 +121,7 @@ describe("Cloud attach -> cloud-verify conformance", () => {
       await running.close();
       await cloud.close();
       await lipServer.close();
-      platform.close();
+      await platform.close();
       rmSync(directory, { recursive: true, force: true });
     }
   });

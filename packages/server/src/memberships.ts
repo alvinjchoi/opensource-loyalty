@@ -5,7 +5,7 @@ import {
   type LoyaltyEngineState,
   type ReferenceMembership
 } from "@loyalty-interchange/reference";
-import { SqliteStateStore } from "@loyalty-interchange/storage-sqlite";
+import type { AsyncStateStore } from "@loyalty-interchange/storage";
 
 export interface MembershipAuditEntry {
   audit_id: string;
@@ -21,41 +21,59 @@ export interface MembershipSnapshot {
   audit: MembershipAuditEntry[];
 }
 
-interface MembershipAuditState {
+export interface MembershipAuditState {
   version: 1;
   audit: MembershipAuditEntry[];
+}
+
+export interface MembershipServiceOptions {
+  store: AsyncStateStore<MembershipAuditState>;
+  engine: LoyaltyEngine;
+  persistEngine: (state: LoyaltyEngineState) => void;
+  reset?: boolean;
+  schedulerIntervalMs?: number | false;
 }
 
 export class MembershipService {
   private readonly engine: LoyaltyEngine;
   private readonly persistEngine: (state: LoyaltyEngineState) => void;
-  private readonly store: SqliteStateStore<MembershipAuditState>;
+  private readonly store: AsyncStateStore<MembershipAuditState>;
   private readonly scheduler: NodeJS.Timeout | undefined;
   private state: MembershipAuditState;
+  private revision: number;
 
-  public constructor(options: {
-    path: string;
-    engine: LoyaltyEngine;
-    persistEngine: (state: LoyaltyEngineState) => void;
-    reset?: boolean;
-    schedulerIntervalMs?: number | false;
-  }) {
+  private constructor(
+    options: MembershipServiceOptions,
+    state: MembershipAuditState,
+    revision: number
+  ) {
     this.engine = options.engine;
     this.persistEngine = options.persistEngine;
-    this.store = new SqliteStateStore<MembershipAuditState>({
-      path: options.path,
-      key: `${options.engine.getProgramDefinition().program_id}:memberships`
-    });
-    if (options.reset) this.store.clear();
-    this.state = this.store.load() ?? { version: 1, audit: [] };
-    if (this.state.version !== 1) {
-      this.store.close();
-      throw new Error(`Unsupported membership state version: ${String(this.state.version)}`);
-    }
+    this.store = options.store;
+    this.state = state;
+    this.revision = revision;
     this.scheduler = options.schedulerIntervalMs
-      ? setInterval(() => this.lapseExpired("scheduler"), options.schedulerIntervalMs).unref()
+      ? setInterval(() => {
+          this.lapseExpired("scheduler").catch((error: unknown) => {
+            console.error(
+              `[lip] membership scheduler failed: ${error instanceof Error ? error.message : String(error)}`
+            );
+          });
+        }, options.schedulerIntervalMs).unref()
       : undefined;
-    this.save();
+  }
+
+  public static async create(options: MembershipServiceOptions): Promise<MembershipService> {
+    if (options.reset) await options.store.clear();
+    const loaded = await options.store.load();
+    const state = loaded?.state ?? { version: 1 as const, audit: [] };
+    if (state.version !== 1) {
+      await options.store.close();
+      throw new Error(`Unsupported membership state version: ${String(state.version)}`);
+    }
+    const service = new MembershipService(options, state, loaded?.revision ?? 0);
+    await service.save();
+    return service;
   }
 
   public snapshot(): MembershipSnapshot {
@@ -70,13 +88,13 @@ export class MembershipService {
     };
   }
 
-  public grant(input: {
+  public async grant(input: {
     member_id: string;
     plan_id: string;
     valid_from?: string;
     valid_until: string;
     billing_reference?: string;
-  }, actor: string): ReferenceMembership {
+  }, actor: string): Promise<ReferenceMembership> {
     const plan = this.engine.getProgramDefinition().membership_policy?.plans.find((candidate) =>
       candidate.plan_id === input.plan_id
     );
@@ -98,20 +116,20 @@ export class MembershipService {
     };
     this.engine.setMemberMembership(input.member_id, membership);
     this.persistEngine(this.engine.exportState());
-    this.audit(input.member_id, membership.plan_id, "membership.granted", actor);
+    await this.audit(input.member_id, membership.plan_id, "membership.granted", actor);
     return structuredClone(membership);
   }
 
-  public changeStatus(
+  public async changeStatus(
     memberId: string,
     status: "lapsed" | "cancelled",
     actor: string
-  ): ReferenceMembership {
+  ): Promise<ReferenceMembership> {
     const membership = this.membershipFor(memberId);
     const updated: ReferenceMembership = { ...membership, status };
     this.engine.setMemberMembership(memberId, updated);
     this.persistEngine(this.engine.exportState());
-    this.audit(
+    await this.audit(
       memberId,
       updated.plan_id,
       status === "lapsed" ? "membership.lapsed" : "membership.cancelled",
@@ -120,11 +138,11 @@ export class MembershipService {
     return structuredClone(updated);
   }
 
-  public lapseExpired(actor = "scheduler", at = new Date()): number {
+  public async lapseExpired(actor = "scheduler", at = new Date()): Promise<number> {
     let count = 0;
     for (const { member_id: memberId, membership } of this.snapshot().memberships) {
       if (membership.status === "active" && Date.parse(membership.valid_until) <= at.getTime()) {
-        this.changeStatus(memberId, "lapsed", actor);
+        await this.changeStatus(memberId, "lapsed", actor);
         count += 1;
       }
     }
@@ -145,9 +163,9 @@ export class MembershipService {
     }
   }
 
-  public close(): void {
+  public async close(): Promise<void> {
     if (this.scheduler) clearInterval(this.scheduler);
-    this.store.close();
+    await this.store.close();
   }
 
   private membershipFor(memberId: string): ReferenceMembership {
@@ -160,25 +178,28 @@ export class MembershipService {
     return structuredClone(value) as ReferenceMembership;
   }
 
-  private audit(
+  private async audit(
     memberId: string,
     planId: string,
     action: MembershipAuditEntry["action"],
     actor: string
-  ): void {
-    this.state.audit.unshift({
+  ): Promise<void> {
+    const entry: MembershipAuditEntry = {
       audit_id: `membership-audit_${randomUUID()}`,
       member_id: memberId,
       plan_id: planId,
       action,
       actor,
       occurred_at: new Date().toISOString()
-    });
-    this.state.audit = this.state.audit.slice(0, 200);
-    this.save();
+    };
+    this.state = {
+      ...this.state,
+      audit: [entry, ...this.state.audit].slice(0, 200)
+    };
+    await this.save();
   }
 
-  private save(): void {
-    this.store.save(this.state);
+  private async save(): Promise<void> {
+    this.revision = await this.store.save(this.state, this.revision);
   }
 }

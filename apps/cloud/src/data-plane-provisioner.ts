@@ -201,7 +201,7 @@ export class LocalDataPlaneProvisioner implements CloudProvisioner {
           program,
           seed: false
         })
-      : createDemoPlatform({
+      : await createDemoPlatform({
           databasePath: join(
             resolve(this.options.dataDirectory),
             `${environment.tenant_id}.db`

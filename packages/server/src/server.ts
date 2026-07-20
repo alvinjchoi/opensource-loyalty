@@ -1211,7 +1211,7 @@ export function createReferenceServer(engine: LoyaltyEngine, options: ServerOpti
           ) {
             throw new TransportError(422, "validation_failed", "Request validation failed", "member_id, plan_id, and valid_until are required");
           }
-          sendJson(response, 200, memberships.grant({
+          sendJson(response, 200, await memberships.grant({
             member_id: values["member_id"],
             plan_id: values["plan_id"],
             valid_until: values["valid_until"],
@@ -1233,7 +1233,7 @@ export function createReferenceServer(engine: LoyaltyEngine, options: ServerOpti
         sendJson(
           response,
           200,
-          memberships.changeStatus(
+          await memberships.changeStatus(
             values["member_id"],
             values["status"] as "lapsed" | "cancelled",
             actor

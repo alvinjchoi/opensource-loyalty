@@ -514,7 +514,7 @@ describe("platform webhook wiring", () => {
     const received: Array<{ timestamp: string; signature: string; body: string }> = [];
     const receiver = await startReceiver(received);
     const directory = mkdtempSync(join(tmpdir(), "lip-webhooks-"));
-    const platform = createDemoPlatform({
+    const platform = await createDemoPlatform({
       databasePath: join(directory, "reference.db"),
       reset: true,
       seed: false,
@@ -537,36 +537,36 @@ describe("platform webhook wiring", () => {
       expect(event.type).toBe("org.loyalty-interchange.member.enrolled.v1");
       expect(validate(LoyaltyEventSchema, event).ok).toBe(true);
     } finally {
-      platform.close();
+      await platform.close();
       receiver.close();
       rmSync(directory, { recursive: true, force: true });
     }
   });
 
-  it("persists runtime subscription CRUD and secret rotation across restart", () => {
+  it("persists runtime subscription CRUD and secret rotation across restart", async () => {
     const directory = mkdtempSync(join(tmpdir(), "lip-webhook-subscriptions-"));
     const databasePath = join(directory, "reference.db");
     try {
-      const first = createDemoPlatform({ databasePath, reset: true, seed: false });
+      const first = await createDemoPlatform({ databasePath, reset: true, seed: false });
       expect(first.webhooks.listSubscriptions()).toEqual([]);
       const created = first.webhooks.upsertSubscription({
         url: "https://receiver.example/hooks",
         secret: "initial-secret-value"
       });
       expect(created).toMatchObject({ active: true, url: "https://receiver.example/hooks" });
-      first.close();
+      await first.close();
 
-      const second = createDemoPlatform({ databasePath, seed: false });
+      const second = await createDemoPlatform({ databasePath, seed: false });
       expect(second.webhooks.listSubscriptions()).toEqual([
         expect.objectContaining({ subscription_id: created.subscription_id })
       ]);
       second.webhooks.rotateSecret(created.subscription_id, "rotated-secret-value");
       expect(second.webhooks.removeSubscription(created.subscription_id)).toBe(true);
-      second.close();
+      await second.close();
 
-      const third = createDemoPlatform({ databasePath, seed: false });
+      const third = await createDemoPlatform({ databasePath, seed: false });
       expect(third.webhooks.listSubscriptions()).toEqual([]);
-      third.close();
+      await third.close();
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }

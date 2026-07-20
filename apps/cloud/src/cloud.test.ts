@@ -405,7 +405,7 @@ describe("Cloud control plane", () => {
   it("attaches a remote data-plane host synchronously via POST /attach", async () => {
     const directory = mkdtempSync(join(tmpdir(), "lip-cloud-attach-"));
     const databasePath = join(directory, "reference.db");
-    const platform = createDemoPlatform({ databasePath, reset: true, seed: false });
+    const platform = await createDemoPlatform({ databasePath, reset: true, seed: false });
     const lipApiKey = "lip_sk_attach_test_0123456789abcdef";
     const lipServer = await startReferenceServer(platform.engine, {
       apiKey: lipApiKey,
@@ -489,7 +489,7 @@ describe("Cloud control plane", () => {
       await running.close();
       await cloud.close();
       await lipServer.close();
-      platform.close();
+      await platform.close();
       rmSync(directory, { recursive: true, force: true });
     }
   });

@@ -6,11 +6,11 @@ import { createDemoPlatform } from "@loyalty-interchange/server";
 import { makeContext, makeEnroll } from "../fixtures.js";
 
 describe("campaign platform", () => {
-  it("persists static segments and idempotently issues rewards to their members", () => {
+  it("persists static segments and idempotently issues rewards to their members", async () => {
     const directory = mkdtempSync(join(tmpdir(), "lip-campaigns-"));
     const databasePath = join(directory, "reference.db");
     try {
-      const first = createDemoPlatform({ databasePath, reset: true, seed: false });
+      const first = await createDemoPlatform({ databasePath, reset: true, seed: false });
       first.engine.enroll(makeEnroll("campaign-enroll-1"));
       first.engine.enroll({
         ...makeEnroll("campaign-enroll-2"),
@@ -42,24 +42,24 @@ describe("campaign platform", () => {
         reward_id: "five-off",
         status: "issued"
       });
-      first.close();
+      await first.close();
 
-      const second = createDemoPlatform({ databasePath, seed: false });
+      const second = await createDemoPlatform({ databasePath, seed: false });
       expect(second.campaigns.snapshot()).toMatchObject({
         segments: [{ segment_id: segment.segment_id }],
         campaigns: [{ campaign_id: campaign.campaign_id, status: "completed" }],
         runs: [{ skipped: 2 }, { issued: 2 }]
       });
       expect(second.engine.inspectAdmin().issued_rewards).toHaveLength(2);
-      second.close();
+      await second.close();
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }
   });
 
-  it("validates references and prevents deleting an in-use segment", () => {
+  it("validates references and prevents deleting an in-use segment", async () => {
     const directory = mkdtempSync(join(tmpdir(), "lip-campaign-validation-"));
-    const platform = createDemoPlatform({
+    const platform = await createDemoPlatform({
       databasePath: join(directory, "reference.db"),
       reset: true,
       seed: false
@@ -117,7 +117,7 @@ describe("campaign platform", () => {
         expect.objectContaining({ mode: "dynamic" })
       ]);
     } finally {
-      platform.close();
+      await platform.close();
       rmSync(directory, { recursive: true, force: true });
     }
   });

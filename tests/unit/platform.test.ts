@@ -5,11 +5,11 @@ import { describe, expect, it } from "vitest";
 import { createDemoPlatform } from "@loyalty-interchange/server";
 
 describe("seeded reference platform", () => {
-  it("creates the restaurant demo once and hydrates it from SQLite on restart", () => {
+  it("creates the restaurant demo once and hydrates it from SQLite on restart", async () => {
     const directory = mkdtempSync(join(tmpdir(), "lip-platform-"));
     const databasePath = join(directory, "reference.db");
     try {
-      const first = createDemoPlatform({ databasePath, reset: true, seed: true });
+      const first = await createDemoPlatform({ databasePath, reset: true, seed: true });
       const initial = first.engine.inspectAdmin();
       expect(initial.summary).toEqual({
         active_members: 6,
@@ -32,9 +32,9 @@ describe("seeded reference platform", () => {
         ["regular", 2],
         ["vip", 2]
       ]);
-      first.close();
+      await first.close();
 
-      const second = createDemoPlatform({ databasePath, seed: false });
+      const second = await createDemoPlatform({ databasePath, seed: false });
       expect(second.engine.inspectAdmin()).toMatchObject({
         summary: initial.summary,
         members: expect.arrayContaining([
@@ -48,7 +48,7 @@ describe("seeded reference platform", () => {
         ])
       });
       expect(second.engine.getLedger()).toHaveLength(9);
-      second.close();
+      await second.close();
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }

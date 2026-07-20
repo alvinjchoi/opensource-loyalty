@@ -545,7 +545,7 @@ describe("reference HTTP server", () => {
   it("protects live program draft, publish, and rollback writes with CSRF", async () => {
     const directory = mkdtempSync(join(tmpdir(), "lip-program-admin-"));
     const databasePath = join(directory, "reference.db");
-    const platform = createDemoPlatform({
+    const platform = await createDemoPlatform({
       databasePath,
       reset: true,
       seed: false,
@@ -821,7 +821,7 @@ describe("reference HTTP server", () => {
       });
     } finally {
       await running.close();
-      platform.close();
+      await platform.close();
       rmSync(directory, { recursive: true, force: true });
     }
   });
