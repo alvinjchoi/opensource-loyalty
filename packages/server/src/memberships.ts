@@ -30,6 +30,11 @@ export interface MembershipServiceOptions {
   store: AsyncStateStore<MembershipAuditState>;
   engine: LoyaltyEngine;
   persistEngine: (state: LoyaltyEngineState) => void;
+  /**
+   * Runs an engine mutation inside an external storage transaction (Postgres
+   * mode); defaults to a passthrough for the single-writer SQLite runtime.
+   */
+  executeEngineOperation?: <T>(operation: () => T | Promise<T>) => Promise<T>;
   reset?: boolean;
   schedulerIntervalMs?: number | false;
 }
@@ -37,6 +42,7 @@ export interface MembershipServiceOptions {
 export class MembershipService {
   private readonly engine: LoyaltyEngine;
   private readonly persistEngine: (state: LoyaltyEngineState) => void;
+  private readonly executeEngineOperation: <T>(operation: () => T | Promise<T>) => Promise<T>;
   private readonly store: AsyncStateStore<MembershipAuditState>;
   private readonly scheduler: NodeJS.Timeout | undefined;
   private state: MembershipAuditState;
@@ -49,6 +55,8 @@ export class MembershipService {
   ) {
     this.engine = options.engine;
     this.persistEngine = options.persistEngine;
+    this.executeEngineOperation =
+      options.executeEngineOperation ?? (async (operation) => operation());
     this.store = options.store;
     this.state = state;
     this.revision = revision;
@@ -114,8 +122,10 @@ export class MembershipService {
       valid_until: new Date(input.valid_until).toISOString(),
       ...(input.billing_reference ? { billing_reference: input.billing_reference } : {})
     };
-    this.engine.setMemberMembership(input.member_id, membership);
-    this.persistEngine(this.engine.exportState());
+    await this.executeEngineOperation(() => {
+      this.engine.setMemberMembership(input.member_id, membership);
+      this.persistEngine(this.engine.exportState());
+    });
     await this.audit(input.member_id, membership.plan_id, "membership.granted", actor);
     return structuredClone(membership);
   }
@@ -127,8 +137,10 @@ export class MembershipService {
   ): Promise<ReferenceMembership> {
     const membership = this.membershipFor(memberId);
     const updated: ReferenceMembership = { ...membership, status };
-    this.engine.setMemberMembership(memberId, updated);
-    this.persistEngine(this.engine.exportState());
+    await this.executeEngineOperation(() => {
+      this.engine.setMemberMembership(memberId, updated);
+      this.persistEngine(this.engine.exportState());
+    });
     await this.audit(
       memberId,
       updated.plan_id,

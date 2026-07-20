@@ -61,11 +61,22 @@ inside the operation are buffered and released only after commit.
 single-run schedulers and background jobs. `PostgresJsonStateStore` provides
 optimistic revisions for tenant-scoped extension state.
 
-The bundled Admin in Postgres mode currently exposes engine snapshots and
-runtime webhook controls. Program publishing, campaign scheduling, membership
-operations, and access-directory writes remain enabled in the full SQLite
-reference runtime until those service stores are moved to asynchronous
-Postgres repositories.
+The bundled Admin in Postgres mode now runs the complete service suite —
+program publishing, campaign scheduling, memberships, engagement, access
+directory, and durable webhook journals — against tenant-scoped
+`PostgresJsonStateStore` rows sharing one pool. Engine-mutating admin
+operations (membership grants, campaign runs, program publishes) run inside
+`executeEngineOperation`, so they commit through the same transactional
+revision flow as protocol traffic.
+
+> [!IMPORTANT]
+> **Run at most one platform instance per tenant.** The engine repository is
+> multi-instance-safe, but the Admin extension services cache state with
+> per-process revisions (a concurrent writer surfaces as
+> `StateRevisionConflictError`) and the webhook journals persist
+> last-writer-wins snapshots under a single-dispatcher assumption. Multi-
+> instance Admin/webhook serving needs per-delivery revisioned rows or a
+> `withLease`-guarded singleton dispatcher — tracked as follow-up work.
 
 ## Integration test
 

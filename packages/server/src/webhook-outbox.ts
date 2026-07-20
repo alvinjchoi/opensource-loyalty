@@ -1,41 +1,42 @@
-import { AsyncSqliteStateStore } from "@loyalty-interchange/storage-sqlite";
+import type { AsyncStateStore } from "@loyalty-interchange/storage";
 import type { WebhookOutboxEntry, WebhookOutboxStore } from "./webhooks.js";
 
-interface WebhookOutboxState {
+export interface WebhookOutboxState {
   version: 1;
   deliveries: WebhookOutboxEntry[];
 }
 
 /**
- * Persists pending webhook deliveries in the same SQLite database as the
- * reference engine, under a separate state key. Writes are serialized in call
- * order; the dispatcher is the single writer, so saves are unconditional
- * (last-writer-wins) snapshots of the in-memory outbox.
+ * Persists pending webhook deliveries in an injected AsyncStateStore (SQLite
+ * in the demo platform, tenant-scoped Postgres in cluster mode). Writes are
+ * serialized in call order; the dispatcher is the single writer, so saves are
+ * unconditional (last-writer-wins) snapshots of the in-memory outbox.
  */
-export class SqliteWebhookOutbox implements WebhookOutboxStore {
-  private readonly store: AsyncSqliteStateStore<WebhookOutboxState>;
+export class WebhookOutboxJournal implements WebhookOutboxStore {
+  private readonly store: AsyncStateStore<WebhookOutboxState>;
   private readonly entries: Map<string, WebhookOutboxEntry>;
   private tail: Promise<void> = Promise.resolve();
 
   private constructor(
-    store: AsyncSqliteStateStore<WebhookOutboxState>,
+    store: AsyncStateStore<WebhookOutboxState>,
     entries: Map<string, WebhookOutboxEntry>
   ) {
     this.store = store;
     this.entries = entries;
   }
 
-  public static async create(options: { path: string; key: string }): Promise<SqliteWebhookOutbox> {
-    const store = new AsyncSqliteStateStore<WebhookOutboxState>(options);
-    const loaded = await store.load();
+  public static async create(options: {
+    store: AsyncStateStore<WebhookOutboxState>;
+  }): Promise<WebhookOutboxJournal> {
+    const loaded = await options.store.load();
     if (loaded && loaded.state.version !== 1) {
-      await store.close();
+      await options.store.close();
       throw new Error(`Unsupported webhook outbox version: ${String(loaded.state.version)}`);
     }
     const entries = new Map(
       (loaded?.state.deliveries ?? []).map((entry) => [entry.delivery_id, entry])
     );
-    return new SqliteWebhookOutbox(store, entries);
+    return new WebhookOutboxJournal(options.store, entries);
   }
 
   public async list(): Promise<WebhookOutboxEntry[]> {

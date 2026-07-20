@@ -228,9 +228,10 @@ response without logging API keys or request bodies. The authenticated
 text format.
 
 > [!WARNING]
-> The Postgres protocol runtime coordinates engine mutations across instances.
-> The complete Admin service suite still uses SQLite-backed extension stores;
-> production Admin deployments must port those stores and add location scoping.
+> The Postgres protocol runtime coordinates engine mutations across instances,
+> and the full Admin service suite now runs on tenant-scoped Postgres stores.
+> Location/franchisee scoping for admin queries and reporting is still pending;
+> production multi-location deployments must add it before rollout.
 
 ### Install from npm 📦
 
@@ -335,7 +336,6 @@ Current priorities are tracked in [PLAN.md](PLAN.md). Near-term focus:
 - Program-as-code configuration drafts with validation, preview, publish, and rollback
 - Reward wallet and reward management APIs
 - Webhook subscription management
-- Async Postgres stores for the remaining Admin extension services
 - Cloud provisioning worker, direct OIDC validation, and Stripe billing adapter
 - More SDK examples and machine-readable docs
 

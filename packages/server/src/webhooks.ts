@@ -476,12 +476,23 @@ export class WebhookDispatcher {
     const backoffMs = subscription.retry_policy?.backoff_ms ?? this.backoffMs;
     const timeoutMs = subscription.retry_policy?.timeout_ms ?? this.timeoutMs;
     let lastError = "delivery was not attempted";
+    let current = entry;
+    // Each attempt replaces the queued entry with a fresh snapshot; the
+    // snapshot handed to persist() is never mutated afterwards, so what lands
+    // in the outbox is the state at enqueue time.
+    const advance = (next: WebhookOutboxEntry): void => {
+      current = next;
+      this.queued.set(next.delivery_id, next);
+      this.persist(() => this.outbox.put(next));
+    };
     for (let cycleAttempt = 1; cycleAttempt <= maxAttempts; cycleAttempt += 1) {
       if (cycleAttempt > 1) await sleep(backoffMs * 2 ** (cycleAttempt - 2));
-      entry.attempts += 1;
-      entry.updated_at = this.now().toISOString();
-      delete entry.last_error;
-      this.persist(() => this.outbox.put(structuredClone(entry)));
+      const { last_error: _cleared, ...rest } = current;
+      advance({
+        ...rest,
+        attempts: current.attempts + 1,
+        updated_at: this.now().toISOString()
+      });
       const timestamp = Math.floor(this.now().getTime() / 1000);
       try {
         const response = await this.fetchImpl(subscription.url, {
@@ -495,15 +506,16 @@ export class WebhookDispatcher {
           signal: AbortSignal.timeout(timeoutMs)
         });
         if (response.ok) {
-          this.queued.delete(entry.delivery_id);
-          this.persist(() => this.outbox.remove(entry.delivery_id));
+          this.queued.delete(current.delivery_id);
+          const deliveredId = current.delivery_id;
+          this.persist(() => this.outbox.remove(deliveredId));
           this.record({
-            delivery_id: entry.delivery_id,
-            event: structuredClone(entry.event),
-            event_id: entry.event.id,
-            event_type: entry.event.type,
+            delivery_id: current.delivery_id,
+            event: structuredClone(current.event),
+            event_id: current.event.id,
+            event_type: current.event.type,
             url: subscription.url,
-            attempts: entry.attempts,
+            attempts: current.attempts,
             status: "delivered",
             completed_at: this.now().toISOString()
           });
@@ -513,17 +525,19 @@ export class WebhookDispatcher {
       } catch (error) {
         lastError = error instanceof Error ? error.message : String(error);
       }
-      entry.last_error = lastError;
-      entry.updated_at = this.now().toISOString();
-      this.persist(() => this.outbox.put(structuredClone(entry)));
+      advance({
+        ...current,
+        last_error: lastError,
+        updated_at: this.now().toISOString()
+      });
     }
     this.record({
-      delivery_id: entry.delivery_id,
-      event: structuredClone(entry.event),
-      event_id: entry.event.id,
-      event_type: entry.event.type,
+      delivery_id: current.delivery_id,
+      event: structuredClone(current.event),
+      event_id: current.event.id,
+      event_type: current.event.type,
       url: subscription.url,
-      attempts: entry.attempts,
+      attempts: current.attempts,
       status: "failed",
       completed_at: this.now().toISOString(),
       last_error: lastError
