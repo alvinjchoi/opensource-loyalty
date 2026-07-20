@@ -1,21 +1,22 @@
-import { AsyncSqliteStateStore } from "@loyalty-interchange/storage-sqlite";
+import type { AsyncStateStore } from "@loyalty-interchange/storage";
 import type { WebhookDeliveryArchiveEntry, WebhookHistoryStore } from "./webhooks.js";
 
-interface WebhookHistoryState {
+export interface WebhookHistoryState {
   version: 1;
   deliveries: WebhookDeliveryArchiveEntry[];
 }
 
 /**
- * Durable archive of completed webhook deliveries. Saves are serialized,
- * unconditional snapshots — the dispatcher is the single writer.
+ * Durable archive of completed webhook deliveries over an injected
+ * AsyncStateStore. Saves are serialized, unconditional snapshots — the
+ * dispatcher is the single writer.
  */
-export class SqliteWebhookHistoryStore implements WebhookHistoryStore {
-  private readonly store: AsyncSqliteStateStore<WebhookHistoryState>;
+export class WebhookHistoryJournal implements WebhookHistoryStore {
+  private readonly store: AsyncStateStore<WebhookHistoryState>;
   private tail: Promise<void> = Promise.resolve();
 
-  public constructor(options: { path: string; key: string }) {
-    this.store = new AsyncSqliteStateStore<WebhookHistoryState>(options);
+  public constructor(options: { store: AsyncStateStore<WebhookHistoryState> }) {
+    this.store = options.store;
   }
 
   public async list(): Promise<WebhookDeliveryArchiveEntry[]> {

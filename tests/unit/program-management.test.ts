@@ -56,7 +56,7 @@ describe("program management", () => {
       reset: true
     });
     const applied: unknown[] = [];
-    service.bindPublisher((program) => applied.push(program));
+    service.bindPublisher((program) => { applied.push(program); });
     try {
       const invalid = await service.saveDraft({ ...initial, currency: "dollars" }, "test-admin");
       expect(invalid.draft?.validation).toMatchObject({ ok: false });

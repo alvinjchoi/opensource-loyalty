@@ -1373,7 +1373,12 @@ export function createReferenceServer(engine: LoyaltyEngine, options: ServerOpti
             "member_id is required"
           );
         }
-        sendJson(response, 200, { member: engine.cancelMember(values["member_id"]) });
+        const memberId = values["member_id"];
+        const cancelled = options.executeEngineOperation
+          ? await options.executeEngineOperation(() => engine.cancelMember(memberId))
+          : engine.cancelMember(memberId);
+        if (!options.executeEngineOperation) options.persistState?.(engine.exportState());
+        sendJson(response, 200, { member: cancelled });
         return;
       }
 

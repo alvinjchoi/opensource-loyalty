@@ -1,3 +1,4 @@
+import { AsyncSqliteStateStore } from "@loyalty-interchange/storage-sqlite";
 import { mkdtempSync, rmSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -7,8 +8,10 @@ import { describe, expect, it } from "vitest";
 import { LoyaltyEventSchema, validate, type LoyaltyEvent } from "@loyalty-interchange/protocol";
 import {
   EventedLoyaltyEngine,
-  SqliteWebhookHistoryStore,
-  SqliteWebhookOutbox,
+  WebhookHistoryJournal,
+  WebhookOutboxJournal,
+  type WebhookHistoryState,
+  type WebhookOutboxState,
   WebhookDispatcher,
   createDemoPlatform,
   webhookSubscriptionsFromEnv
@@ -262,9 +265,11 @@ describe("WebhookDispatcher", () => {
     const databasePath = join(directory, "reference.db");
     const captured: CapturedRequest[] = [];
     try {
-      const firstStore = new SqliteWebhookHistoryStore({
-        path: databasePath,
-        key: "webhook-history"
+      const firstStore = new WebhookHistoryJournal({
+        store: new AsyncSqliteStateStore<WebhookHistoryState>({
+          path: databasePath,
+          key: "webhook-history"
+        })
       });
       const first = await WebhookDispatcher.create({
         subscriptions: [{ url: "https://receiver.example/hooks", secret: "hook-secret" }],
@@ -274,11 +279,13 @@ describe("WebhookDispatcher", () => {
       first.emit(makeEvent());
       await first.flush();
       const deliveryId = first.deliveries()[0]!.delivery_id;
-      firstStore.close();
+      await firstStore.close();
 
-      const secondStore = new SqliteWebhookHistoryStore({
-        path: databasePath,
-        key: "webhook-history"
+      const secondStore = new WebhookHistoryJournal({
+        store: new AsyncSqliteStateStore<WebhookHistoryState>({
+          path: databasePath,
+          key: "webhook-history"
+        })
       });
       const second = await WebhookDispatcher.create({
         subscriptions: [{ url: "https://receiver.example/hooks", secret: "hook-secret" }],
@@ -320,7 +327,7 @@ describe("WebhookDispatcher", () => {
     const outboxKey = "demo-foodservice:webhook-outbox";
     try {
       const firstAttempts: CapturedRequest[] = [];
-      const firstOutbox = await SqliteWebhookOutbox.create({ path: databasePath, key: outboxKey });
+      const firstOutbox = await WebhookOutboxJournal.create({ store: new AsyncSqliteStateStore<WebhookOutboxState>({ path: databasePath, key: outboxKey }) });
       const first = await WebhookDispatcher.create({
         subscriptions: [{ url: "https://receiver.example/hooks", secret: "hook-secret" }],
         outbox: firstOutbox,
@@ -341,7 +348,7 @@ describe("WebhookDispatcher", () => {
       await firstOutbox.close();
 
       const resumedAttempts: CapturedRequest[] = [];
-      const secondOutbox = await SqliteWebhookOutbox.create({ path: databasePath, key: outboxKey });
+      const secondOutbox = await WebhookOutboxJournal.create({ store: new AsyncSqliteStateStore<WebhookOutboxState>({ path: databasePath, key: outboxKey }) });
       const second = await WebhookDispatcher.create({
         subscriptions: [{ url: "https://receiver.example/hooks", secret: "hook-secret" }],
         outbox: secondOutbox,

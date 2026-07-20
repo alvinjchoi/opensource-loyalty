@@ -61,6 +61,18 @@ function json(value: unknown): string {
   return JSON.stringify(value);
 }
 
+/**
+ * Creates a standalone pg pool for callers that wire several Postgres-backed
+ * stores against one shared pool (pass it via PostgresStorageOptions.pool and
+ * end it after every store is closed).
+ */
+export function createPostgresPool(options: Omit<PostgresStorageOptions, "pool"> = {}): Pool {
+  return new Pool({
+    ...(options.poolConfig ?? {}),
+    ...(options.connectionString ? { connectionString: options.connectionString } : {})
+  });
+}
+
 function createPool(options: PostgresStorageOptions): { pool: Pool; ownsPool: boolean } {
   if (options.pool) return { pool: options.pool, ownsPool: false };
   return {
