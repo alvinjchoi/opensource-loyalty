@@ -5,7 +5,7 @@ import {
   type LoyaltyEngineState,
   type ProgramDefinition
 } from "@loyalty-interchange/reference";
-import { SqliteStateStore } from "@loyalty-interchange/storage-sqlite";
+import type { AsyncStateStore } from "@loyalty-interchange/storage";
 
 export interface StaticSegment {
   segment_id: string;
@@ -59,8 +59,16 @@ export interface CampaignSnapshot {
   runs: CampaignRun[];
 }
 
-interface CampaignState extends CampaignSnapshot {
+export interface CampaignState extends CampaignSnapshot {
   version: 1;
+}
+
+export interface CampaignServiceOptions {
+  store: AsyncStateStore<CampaignState>;
+  engine: LoyaltyEngine;
+  persistEngine: (state: LoyaltyEngineState) => void;
+  reset?: boolean;
+  schedulerIntervalMs?: number | false;
 }
 
 function timestamp(): string {
@@ -74,45 +82,58 @@ function required(value: string, name: string): string {
 }
 
 export class CampaignService {
-  private readonly store: SqliteStateStore<CampaignState>;
+  private readonly store: AsyncStateStore<CampaignState>;
   private readonly engine: LoyaltyEngine;
   private readonly persistEngine: (state: LoyaltyEngineState) => void;
   private readonly scheduler: NodeJS.Timeout | undefined;
   private state: CampaignState;
+  private revision: number;
 
-  public constructor(options: {
-    path: string;
-    engine: LoyaltyEngine;
-    persistEngine: (state: LoyaltyEngineState) => void;
-    reset?: boolean;
-    schedulerIntervalMs?: number | false;
-  }) {
-    this.store = new SqliteStateStore<CampaignState>({
-      path: options.path,
-      key: `${options.engine.getProgramDefinition().program_id}:campaigns`
-    });
-    if (options.reset) this.store.clear();
+  private constructor(
+    options: CampaignServiceOptions,
+    state: CampaignState,
+    revision: number
+  ) {
+    this.store = options.store;
     this.engine = options.engine;
     this.persistEngine = options.persistEngine;
-    this.state = this.store.load() ?? { version: 1, segments: [], campaigns: [], runs: [] };
-    if (this.state.version !== 1) {
-      this.store.close();
-      throw new Error(`Unsupported campaign state version: ${String(this.state.version)}`);
-    }
-    this.state.segments = this.state.segments.map((segment) => ({
-      ...segment,
-      mode: segment.mode ?? (segment.rules ? "dynamic" : "static")
-    }));
+    this.state = state;
+    this.revision = revision;
     this.scheduler = options.schedulerIntervalMs
       ? setInterval(() => {
-          try {
-            this.runDueCampaigns("scheduler");
-          } catch {
+          this.runDueCampaigns("scheduler").catch((error: unknown) => {
             // Individual campaign/member failures are retained in run outcomes.
-          }
+            console.error(
+              `[lip] campaign scheduler failed: ${error instanceof Error ? error.message : String(error)}`
+            );
+          });
         }, options.schedulerIntervalMs).unref()
       : undefined;
-    this.save();
+  }
+
+  public static async create(options: CampaignServiceOptions): Promise<CampaignService> {
+    if (options.reset) await options.store.clear();
+    const loaded = await options.store.load();
+    const stored = loaded?.state ?? {
+      version: 1 as const,
+      segments: [],
+      campaigns: [],
+      runs: []
+    };
+    if (stored.version !== 1) {
+      await options.store.close();
+      throw new Error(`Unsupported campaign state version: ${String(stored.version)}`);
+    }
+    const state: CampaignState = {
+      ...stored,
+      segments: stored.segments.map((segment) => ({
+        ...segment,
+        mode: segment.mode ?? (segment.rules ? "dynamic" : "static")
+      }))
+    };
+    const service = new CampaignService(options, state, loaded?.revision ?? 0);
+    await service.save();
+    return service;
   }
 
   public snapshot(): CampaignSnapshot {
@@ -131,12 +152,12 @@ export class CampaignService {
     return this.resolveSegmentMembers(segment);
   }
 
-  public upsertSegment(input: {
+  public async upsertSegment(input: {
     segment_id?: string;
     name: string;
     member_ids?: string[];
     rules?: StaticSegment["rules"];
-  }): StaticSegment {
+  }): Promise<StaticSegment> {
     const now = timestamp();
     const segmentId = input.segment_id ?? `segment_${randomUUID()}`;
     const memberIds = [...new Set(
@@ -167,25 +188,31 @@ export class CampaignService {
       created_at: existing?.created_at ?? now,
       updated_at: now
     };
-    if (existing) Object.assign(existing, segment);
-    else this.state.segments.unshift(segment);
-    this.save();
+    this.state = {
+      ...this.state,
+      segments: existing
+        ? this.state.segments.map((candidate) =>
+            candidate.segment_id === segmentId ? segment : candidate
+          )
+        : [segment, ...this.state.segments]
+    };
+    await this.save();
     return structuredClone(segment);
   }
 
-  public deleteSegment(segmentId: string): void {
+  public async deleteSegment(segmentId: string): Promise<void> {
     if (this.state.campaigns.some((campaign) => campaign.segment_id === segmentId)) {
       throw new EngineError("conflict", "Segment is used by a campaign", 409);
     }
-    const length = this.state.segments.length;
-    this.state.segments = this.state.segments.filter((segment) => segment.segment_id !== segmentId);
-    if (this.state.segments.length === length) {
+    const segments = this.state.segments.filter((segment) => segment.segment_id !== segmentId);
+    if (segments.length === this.state.segments.length) {
       throw new EngineError("not_found", "Segment was not found", 404);
     }
-    this.save();
+    this.state = { ...this.state, segments };
+    await this.save();
   }
 
-  public upsertCampaign(input: {
+  public async upsertCampaign(input: {
     campaign_id?: string;
     name: string;
     reward_id: string;
@@ -193,7 +220,7 @@ export class CampaignService {
     issued_reward_ttl_seconds?: number;
     starts_at?: string;
     ends_at?: string;
-  }): RewardCampaign {
+  }): Promise<RewardCampaign> {
     if (!this.state.segments.some((segment) => segment.segment_id === input.segment_id)) {
       throw new EngineError("not_found", "Campaign segment was not found", 404);
     }
@@ -243,32 +270,37 @@ export class CampaignService {
       ...(input.starts_at ? { starts_at: new Date(startsAt!).toISOString() } : {}),
       ...(input.ends_at ? { ends_at: new Date(endsAt!).toISOString() } : {})
     };
-    if (existing) Object.assign(existing, campaign);
-    else this.state.campaigns.unshift(campaign);
-    this.save();
+    this.state = {
+      ...this.state,
+      campaigns: existing
+        ? this.state.campaigns.map((candidate) =>
+            candidate.campaign_id === campaignId ? campaign : candidate
+          )
+        : [campaign, ...this.state.campaigns]
+    };
+    await this.save();
     return structuredClone(campaign);
   }
 
-  public deleteCampaign(campaignId: string): void {
-    const length = this.state.campaigns.length;
-    this.state.campaigns = this.state.campaigns.filter((campaign) =>
+  public async deleteCampaign(campaignId: string): Promise<void> {
+    const campaigns = this.state.campaigns.filter((campaign) =>
       campaign.campaign_id !== campaignId
     );
-    if (this.state.campaigns.length === length) {
+    if (campaigns.length === this.state.campaigns.length) {
       throw new EngineError("not_found", "Campaign was not found", 404);
     }
-    this.save();
+    this.state = { ...this.state, campaigns };
+    await this.save();
   }
 
-  public runCampaign(campaignId: string, actor: string): CampaignRun {
+  public async runCampaign(campaignId: string, actor: string): Promise<CampaignRun> {
     const campaign = this.state.campaigns.find((candidate) =>
       candidate.campaign_id === campaignId
     );
     if (!campaign) throw new EngineError("not_found", "Campaign was not found", 404);
     if (campaign.ends_at && Date.parse(campaign.ends_at) <= Date.now()) {
-      campaign.status = "expired";
-      campaign.updated_at = timestamp();
-      this.save();
+      this.replaceCampaign({ ...campaign, status: "expired", updated_at: timestamp() });
+      await this.save();
       throw new EngineError("expired", "Campaign has ended", 409);
     }
     const segment = this.state.segments.find((candidate) =>
@@ -333,30 +365,44 @@ export class CampaignService {
       failed: outcomes.filter(({ status }) => status === "failed").length,
       outcomes
     };
-    campaign.status = "completed";
-    campaign.last_run_at = completedAt;
-    campaign.updated_at = completedAt;
-    this.state.runs.unshift(run);
-    this.state.runs = this.state.runs.slice(0, 100);
-    this.save();
+    this.state = {
+      ...this.state,
+      campaigns: this.state.campaigns.map((candidate) =>
+        candidate.campaign_id === campaignId
+          ? {
+              ...candidate,
+              status: "completed" as const,
+              last_run_at: completedAt,
+              updated_at: completedAt
+            }
+          : candidate
+      ),
+      runs: [run, ...this.state.runs].slice(0, 100)
+    };
+    await this.save();
     return structuredClone(run);
   }
 
-  public runDueCampaigns(actor = "scheduler", at = new Date()): CampaignRun[] {
+  public async runDueCampaigns(actor = "scheduler", at = new Date()): Promise<CampaignRun[]> {
     const nowMs = at.getTime();
     const runs: CampaignRun[] = [];
-    for (const campaign of this.state.campaigns) {
-      if (campaign.status !== "scheduled") continue;
+    const scheduledIds = this.state.campaigns
+      .filter((campaign) => campaign.status === "scheduled")
+      .map((campaign) => campaign.campaign_id);
+    for (const campaignId of scheduledIds) {
+      const campaign = this.state.campaigns.find((candidate) =>
+        candidate.campaign_id === campaignId
+      );
+      if (!campaign || campaign.status !== "scheduled") continue;
       if (campaign.ends_at && Date.parse(campaign.ends_at) <= nowMs) {
-        campaign.status = "expired";
-        campaign.updated_at = at.toISOString();
+        this.replaceCampaign({ ...campaign, status: "expired", updated_at: at.toISOString() });
         continue;
       }
       if (!campaign.starts_at || Date.parse(campaign.starts_at) <= nowMs) {
-        runs.push(this.runCampaign(campaign.campaign_id, actor));
+        runs.push(await this.runCampaign(campaign.campaign_id, actor));
       }
     }
-    this.save();
+    await this.save();
     return runs;
   }
 
@@ -374,13 +420,22 @@ export class CampaignService {
     }
   }
 
-  public close(): void {
+  public async close(): Promise<void> {
     if (this.scheduler) clearInterval(this.scheduler);
-    this.store.close();
+    await this.store.close();
   }
 
-  private save(): void {
-    this.store.save(this.state);
+  private replaceCampaign(campaign: RewardCampaign): void {
+    this.state = {
+      ...this.state,
+      campaigns: this.state.campaigns.map((candidate) =>
+        candidate.campaign_id === campaign.campaign_id ? campaign : candidate
+      )
+    };
+  }
+
+  private async save(): Promise<void> {
+    this.revision = await this.store.save(this.state, this.revision);
   }
 
   private resolveSegmentMembers(segment: StaticSegment): string[] {

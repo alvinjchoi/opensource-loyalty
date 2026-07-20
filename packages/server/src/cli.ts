@@ -28,7 +28,7 @@ const platform = databaseUrl
       seed: process.env.LIP_SEED_DEMO !== "false",
       reset: process.env.LIP_RESET === "true"
     })
-  : createDemoPlatform({ databasePath, seed: process.env.LIP_SEED_DEMO !== "false" });
+  : await createDemoPlatform({ databasePath, seed: process.env.LIP_SEED_DEMO !== "false" });
 
 const ansi = {
   reset: "\u001B[0m",

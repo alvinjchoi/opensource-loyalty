@@ -8,15 +8,15 @@ import {
   type LoyaltyEngineState,
   type ProgramDefinition
 } from "@loyalty-interchange/reference";
-import { SqliteStateStore } from "@loyalty-interchange/storage-sqlite";
+import { AsyncSqliteStateStore, SqliteStateStore } from "@loyalty-interchange/storage-sqlite";
 import { PostgresEngineRepository } from "@loyalty-interchange/storage-postgres";
 import { createDemoProgram, seedDemoData } from "./demo.js";
-import { CampaignService } from "./campaigns.js";
-import { MembershipService } from "./memberships.js";
-import { AccessControlService } from "./access-control.js";
+import { CampaignService, type CampaignState } from "./campaigns.js";
+import { MembershipService, type MembershipAuditState } from "./memberships.js";
+import { AccessControlService, type AccessControlState } from "./access-control.js";
 import { EventedLoyaltyEngine } from "./evented-engine.js";
-import { EngagementService } from "./engagement.js";
-import { ProgramManagementService } from "./program-management.js";
+import { EngagementService, type EngagementState } from "./engagement.js";
+import { ProgramManagementService, type ProgramManagementState } from "./program-management.js";
 import { SqliteWebhookOutbox } from "./webhook-outbox.js";
 import { SqliteWebhookHistoryStore } from "./webhook-history.js";
 import { SqliteWebhookSubscriptionStore } from "./webhook-subscriptions.js";
@@ -51,7 +51,7 @@ export interface DemoPlatform {
   memberships: MembershipService;
   access: AccessControlService;
   engagement: EngagementService;
-  close(): void;
+  close(): Promise<void>;
 }
 
 export interface PostgresProtocolPlatform {
@@ -98,10 +98,13 @@ function discoverAdminAssetRoot(): string | undefined {
   return candidates.find((candidate) => existsSync(candidate));
 }
 
-export function createDemoPlatform(options: DemoPlatformOptions): DemoPlatform {
+export async function createDemoPlatform(options: DemoPlatformOptions): Promise<DemoPlatform> {
   const configuredProgram = options.program ?? createDemoProgram();
-  const programs = new ProgramManagementService({
-    path: options.databasePath,
+  const programs = await ProgramManagementService.create({
+    store: new AsyncSqliteStateStore<ProgramManagementState>({
+      path: options.databasePath,
+      key: "reference:program-management"
+    }),
     initialProgram: configuredProgram,
     ...(options.reset ? { reset: true } : {})
   });
@@ -131,22 +134,22 @@ export function createDemoPlatform(options: DemoPlatformOptions): DemoPlatform {
       path: options.databasePath,
       key: `${program.program_id}:webhook-subscriptions`
     });
-    if (options.reset) webhookSubscriptionStore.clear();
+    if (options.reset) await webhookSubscriptionStore.clear();
     const subscriptions =
-      webhookSubscriptionStore.load() ??
+      await webhookSubscriptionStore.load() ??
       options.webhooks ??
       webhookSubscriptionsFromEnv();
-    webhookOutbox = new SqliteWebhookOutbox({
+    webhookOutbox = await SqliteWebhookOutbox.create({
       path: options.databasePath,
       key: `${program.program_id}:webhook-outbox`
     });
-    if (options.reset) webhookOutbox.clear();
+    if (options.reset) await webhookOutbox.clear();
     webhookHistory = new SqliteWebhookHistoryStore({
       path: options.databasePath,
       key: `${program.program_id}:webhook-history`
     });
-    if (options.reset) webhookHistory.clear();
-    const dispatcher = new WebhookDispatcher({
+    if (options.reset) await webhookHistory.clear();
+    const dispatcher = await WebhookDispatcher.create({
       subscriptions,
       outbox: webhookOutbox,
       historyStore: webhookHistory,
@@ -163,28 +166,40 @@ export function createDemoPlatform(options: DemoPlatformOptions): DemoPlatform {
     });
     if (!state && options.seed !== false && !options.program) seedDemoData(engine);
     armed = true;
-    campaigns = new CampaignService({
-      path: options.databasePath,
+    campaigns = await CampaignService.create({
+      store: new AsyncSqliteStateStore<CampaignState>({
+        path: options.databasePath,
+        key: `${program.program_id}:campaigns`
+      }),
       engine,
       persistEngine: (nextState) => store.save(nextState),
       schedulerIntervalMs: 30_000,
       ...(options.reset ? { reset: true } : {})
     });
-    memberships = new MembershipService({
-      path: options.databasePath,
+    memberships = await MembershipService.create({
+      store: new AsyncSqliteStateStore<MembershipAuditState>({
+        path: options.databasePath,
+        key: `${program.program_id}:memberships`
+      }),
       engine,
       persistEngine: (nextState) => store.save(nextState),
       schedulerIntervalMs: 30_000,
       ...(options.reset ? { reset: true } : {})
     });
-    access = new AccessControlService({
-      path: options.databasePath,
+    access = await AccessControlService.create({
+      store: new AsyncSqliteStateStore<AccessControlState>({
+        path: options.databasePath,
+        key: `${program.program_id}:access-control`
+      }),
       tenantId: program.program_id,
       tenantName: program.name ?? program.program_id,
       ...(options.reset ? { reset: true } : {})
     });
-    engagement = new EngagementService({
-      path: options.databasePath,
+    engagement = await EngagementService.create({
+      store: new AsyncSqliteStateStore<EngagementState>({
+        path: options.databasePath,
+        key: `${program.program_id}:engagement`
+      }),
       engine,
       campaigns,
       schedulerIntervalMs: 30_000,
@@ -217,33 +232,35 @@ export function createDemoPlatform(options: DemoPlatformOptions): DemoPlatform {
       memberships,
       access,
       engagement,
-      close: () => {
-        campaigns?.close();
-        memberships?.close();
-        access?.close();
-        engagement?.close();
-        programs.close();
+      close: async () => {
+        await campaigns?.close();
+        await memberships?.close();
+        await access?.close();
+        await engagement?.close();
+        await programs.close();
         store.close();
-        webhookSubscriptionStore?.close();
-        webhookHistory?.close();
+        await webhookSubscriptionStore?.close();
+        await webhookHistory?.close();
         if (!webhookOutbox) return;
         const outboxToClose = webhookOutbox;
         if (dispatcher.inFlightDeliveries() === 0) {
-          outboxToClose.close();
+          await outboxToClose.close();
           return;
         }
-        void dispatcher.flush().finally(() => outboxToClose.close());
+        void dispatcher.flush().finally(() => {
+          void outboxToClose.close();
+        });
       }
     };
   } catch (error) {
-    webhookOutbox?.close();
-    webhookHistory?.close();
-    webhookSubscriptionStore?.close();
-    campaigns?.close();
-    memberships?.close();
-    access?.close();
-    engagement?.close();
-    programs.close();
+    await webhookOutbox?.close();
+    await webhookHistory?.close();
+    await webhookSubscriptionStore?.close();
+    await campaigns?.close();
+    await memberships?.close();
+    await access?.close();
+    await engagement?.close();
+    await programs.close();
     store.close();
     throw error;
   }
@@ -271,7 +288,7 @@ export async function createPostgresProtocolPlatform(
       "Postgres engine state uses a different program definition; publish a compatible migration or reset explicitly"
     );
   }
-  const dispatcher = new WebhookDispatcher({
+  const dispatcher = await WebhookDispatcher.create({
     subscriptions: options.webhooks ?? webhookSubscriptionsFromEnv(),
     onError: (message) => console.error(`[lip] ${message}`)
   });

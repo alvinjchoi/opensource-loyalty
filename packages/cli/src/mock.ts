@@ -36,7 +36,7 @@ async function loadProgram(path: string): Promise<ProgramDefinition> {
 
 export async function startMockServer(options: MockOptions): Promise<RunningServer> {
   const program = options.programPath ? await loadProgram(options.programPath) : undefined;
-  const platform = createDemoPlatform({
+  const platform = await createDemoPlatform({
     databasePath: options.databasePath ?? ":memory:",
     ...(options.reset ? { reset: true } : {}),
     ...(options.seed === false ? { seed: false } : {}),
@@ -68,7 +68,7 @@ export async function startMockServer(options: MockOptions): Promise<RunningServ
     ...running,
     close: async () => {
       await running.close();
-      platform.close();
+      await platform.close();
     }
   };
 }

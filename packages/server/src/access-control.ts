@@ -5,7 +5,7 @@ import {
   timingSafeEqual
 } from "node:crypto";
 import { EngineError } from "@loyalty-interchange/reference";
-import { SqliteStateStore } from "@loyalty-interchange/storage-sqlite";
+import type { AsyncStateStore } from "@loyalty-interchange/storage";
 
 export type TenantRole = "owner" | "admin" | "operator" | "developer" | "viewer" | "integration";
 export type TenantPermission =
@@ -83,7 +83,7 @@ export interface TenantAuditEntry {
   occurred_at: string;
 }
 
-interface AccessControlState {
+export interface AccessControlState {
   version: 1;
   tenant: Tenant;
   users: TenantUser[];
@@ -97,6 +97,13 @@ export interface AccessControlSnapshot {
   api_keys: Array<Omit<TenantApiKey, "secret_hash">>;
   audit: TenantAuditEntry[];
   role_permissions: Record<TenantRole, TenantPermission[]>;
+}
+
+export interface AccessControlServiceOptions {
+  store: AsyncStateStore<AccessControlState>;
+  tenantId: string;
+  tenantName: string;
+  reset?: boolean;
 }
 
 function hashSecret(secret: string): string {
@@ -114,40 +121,41 @@ function now(): string {
 }
 
 export class AccessControlService {
-  private readonly store: SqliteStateStore<AccessControlState>;
+  private readonly store: AsyncStateStore<AccessControlState>;
   private state: AccessControlState;
+  private revision: number;
 
-  public constructor(options: {
-    path: string;
-    tenantId: string;
-    tenantName: string;
-    reset?: boolean;
-  }) {
-    this.store = new SqliteStateStore<AccessControlState>({
-      path: options.path,
-      key: `${options.tenantId}:access-control`
-    });
-    if (options.reset) this.store.clear();
-    const timestamp = now();
-    this.state = this.store.load() ?? {
-      version: 1,
+  private constructor(
+    options: AccessControlServiceOptions,
+    state: AccessControlState,
+    revision: number
+  ) {
+    this.store = options.store;
+    this.state = state;
+    this.revision = revision;
+  }
+
+  public static async create(options: AccessControlServiceOptions): Promise<AccessControlService> {
+    if (options.reset) await options.store.clear();
+    const loaded = await options.store.load();
+    const state = loaded?.state ?? {
+      version: 1 as const,
       tenant: {
         tenant_id: options.tenantId,
         name: options.tenantName,
-        created_at: timestamp
+        created_at: now()
       },
       users: [],
       api_keys: [],
       audit: []
     };
-    if (
-      this.state.version !== 1 ||
-      this.state.tenant.tenant_id !== options.tenantId
-    ) {
-      this.store.close();
+    if (state.version !== 1 || state.tenant.tenant_id !== options.tenantId) {
+      await options.store.close();
       throw new Error("Access-control state is incompatible with this tenant");
     }
-    this.save();
+    const service = new AccessControlService(options, state, loaded?.revision ?? 0);
+    await service.save();
+    return service;
   }
 
   public rootPrincipal(): TenantPrincipal {
@@ -160,7 +168,7 @@ export class AccessControlService {
     };
   }
 
-  public authenticate(secret: string): TenantPrincipal | undefined {
+  public async authenticate(secret: string): Promise<TenantPrincipal | undefined> {
     const candidateHash = hashSecret(secret);
     const key = this.state.api_keys.find((candidate) =>
       candidate.active &&
@@ -168,14 +176,20 @@ export class AccessControlService {
       secretsEqual(candidate.secret_hash, candidateHash)
     );
     if (!key) return undefined;
-    key.last_used_at = now();
-    this.save();
+    const used: TenantApiKey = { ...key, last_used_at: now() };
+    this.state = {
+      ...this.state,
+      api_keys: this.state.api_keys.map((candidate) =>
+        candidate.key_id === used.key_id ? used : candidate
+      )
+    };
+    await this.save();
     return {
-      tenant_id: key.tenant_id,
-      actor_id: key.key_id,
+      tenant_id: used.tenant_id,
+      actor_id: used.key_id,
       actor_type: "api_key",
-      role: key.role,
-      permissions: [...rolePermissions[key.role]]
+      role: used.role,
+      permissions: [...rolePermissions[used.role]]
     };
   }
 
@@ -211,13 +225,13 @@ export class AccessControlService {
     };
   }
 
-  public upsertUser(input: {
+  public async upsertUser(input: {
     user_id?: string;
     email: string;
     name?: string;
     role: TenantRole;
     active?: boolean;
-  }, principal: TenantPrincipal): TenantUser {
+  }, principal: TenantPrincipal): Promise<TenantUser> {
     this.requirePermission(principal, "access:manage");
     const email = input.email.trim().toLowerCase();
     if (!email.includes("@")) {
@@ -241,23 +255,29 @@ export class AccessControlService {
       updated_at: timestamp,
       ...(input.name?.trim() ? { name: input.name.trim() } : {})
     };
-    if (existing) Object.assign(existing, user);
-    else this.state.users.unshift(user);
-    this.recordAudit(principal, "access.user.upserted", "user", userId, {
+    this.state = {
+      ...this.state,
+      users: existing
+        ? this.state.users.map((candidate) =>
+            candidate.user_id === userId ? user : candidate
+          )
+        : [user, ...this.state.users]
+    };
+    await this.recordAudit(principal, "access.user.upserted", "user", userId, {
       role: user.role,
       active: user.active
     });
     return structuredClone(user);
   }
 
-  public createApiKey(input: {
+  public async createApiKey(input: {
     name: string;
     role: TenantRole;
     expires_at?: string;
-  }, principal: TenantPrincipal): {
+  }, principal: TenantPrincipal): Promise<{
     api_key: Omit<TenantApiKey, "secret_hash">;
     secret: string;
-  } {
+  }> {
     this.requirePermission(principal, "access:manage");
     this.assertRole(input.role);
     if (!input.name.trim()) {
@@ -285,8 +305,11 @@ export class AccessControlService {
         : {}),
       secret_hash: hashSecret(secret)
     };
-    this.state.api_keys.unshift(key);
-    this.recordAudit(principal, "access.api_key.created", "api_key", key.key_id, {
+    this.state = {
+      ...this.state,
+      api_keys: [key, ...this.state.api_keys]
+    };
+    await this.recordAudit(principal, "access.api_key.created", "api_key", key.key_id, {
       role: key.role,
       prefix: key.prefix
     });
@@ -294,25 +317,30 @@ export class AccessControlService {
     return { api_key: structuredClone(publicKey), secret };
   }
 
-  public revokeApiKey(keyId: string, principal: TenantPrincipal): void {
+  public async revokeApiKey(keyId: string, principal: TenantPrincipal): Promise<void> {
     this.requirePermission(principal, "access:manage");
     const key = this.state.api_keys.find((candidate) => candidate.key_id === keyId);
     if (!key) throw new EngineError("not_found", "API key was not found", 404);
     if (!key.active) return;
-    key.active = false;
-    key.revoked_at = now();
-    this.recordAudit(principal, "access.api_key.revoked", "api_key", keyId);
+    const revoked: TenantApiKey = { ...key, active: false, revoked_at: now() };
+    this.state = {
+      ...this.state,
+      api_keys: this.state.api_keys.map((candidate) =>
+        candidate.key_id === keyId ? revoked : candidate
+      )
+    };
+    await this.recordAudit(principal, "access.api_key.revoked", "api_key", keyId);
   }
 
-  public recordAudit(
+  public async recordAudit(
     principal: TenantPrincipal,
     action: string,
     resourceType: string,
     resourceId?: string,
     metadata?: Record<string, unknown>,
     requestId?: string
-  ): void {
-    this.state.audit.unshift({
+  ): Promise<void> {
+    const entry: TenantAuditEntry = {
       audit_id: `tenant-audit_${randomUUID()}`,
       tenant_id: this.state.tenant.tenant_id,
       actor_id: principal.actor_id,
@@ -323,13 +351,16 @@ export class AccessControlService {
       ...(resourceId ? { resource_id: resourceId } : {}),
       ...(metadata ? { metadata: structuredClone(metadata) } : {}),
       ...(requestId ? { request_id: requestId } : {})
-    });
-    this.state.audit = this.state.audit.slice(0, 1_000);
-    this.save();
+    };
+    this.state = {
+      ...this.state,
+      audit: [entry, ...this.state.audit].slice(0, 1_000)
+    };
+    await this.save();
   }
 
-  public close(): void {
-    this.store.close();
+  public async close(): Promise<void> {
+    await this.store.close();
   }
 
   private requirePermission(
@@ -347,7 +378,7 @@ export class AccessControlService {
     }
   }
 
-  private save(): void {
-    this.store.save(this.state);
+  private async save(): Promise<void> {
+    this.revision = await this.store.save(this.state, this.revision);
   }
 }

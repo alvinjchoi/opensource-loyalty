@@ -2,7 +2,7 @@ import { createHash, createHmac, randomUUID } from "node:crypto";
 import type { Member } from "@loyalty-interchange/protocol";
 import type { LoyaltyEngine } from "@loyalty-interchange/reference";
 import { EngineError } from "@loyalty-interchange/reference";
-import { SqliteStateStore } from "@loyalty-interchange/storage-sqlite";
+import type { AsyncStateStore } from "@loyalty-interchange/storage";
 import type { CampaignService } from "./campaigns.js";
 
 export interface MessagingConnector {
@@ -43,10 +43,19 @@ export interface MessageJob {
   deliveries: MessageDelivery[];
 }
 
-interface EngagementState {
+export interface EngagementState {
   version: 1;
   connectors: StoredMessagingConnector[];
   jobs: MessageJob[];
+}
+
+export interface EngagementServiceOptions {
+  store: AsyncStateStore<EngagementState>;
+  engine: LoyaltyEngine;
+  campaigns: CampaignService;
+  reset?: boolean;
+  schedulerIntervalMs?: number | false;
+  adapters?: MessagingConnectorAdapter[];
 }
 
 export interface EngagementSnapshot {
@@ -117,6 +126,15 @@ function fingerprint(value: unknown): string {
   return createHash("sha256").update(JSON.stringify(value)).digest("hex");
 }
 
+function withDelivery(job: MessageJob, delivery: MessageDelivery): MessageJob {
+  return {
+    ...job,
+    deliveries: job.deliveries.map((candidate) =>
+      candidate.delivery_id === delivery.delivery_id ? delivery : candidate
+    )
+  };
+}
+
 function validateUrl(value: unknown): string {
   if (typeof value !== "string") {
     throw new EngineError("validation_failed", "Connector URL is required", 422);
@@ -173,44 +191,51 @@ export class WebhookMessagingAdapter implements MessagingConnectorAdapter {
 }
 
 export class EngagementService {
-  private readonly store: SqliteStateStore<EngagementState>;
+  private readonly store: AsyncStateStore<EngagementState>;
   private readonly engine: LoyaltyEngine;
   private readonly campaigns: CampaignService;
   private readonly adapters = new Map<string, MessagingConnectorAdapter>();
   private readonly scheduler: NodeJS.Timeout | undefined;
   private state: EngagementState;
+  private revision: number;
   private running = false;
 
-  public constructor(options: {
-    path: string;
-    engine: LoyaltyEngine;
-    campaigns: CampaignService;
-    reset?: boolean;
-    schedulerIntervalMs?: number | false;
-    adapters?: MessagingConnectorAdapter[];
-  }) {
-    this.store = new SqliteStateStore({
-      path: options.path,
-      key: `${options.engine.getProgramDefinition().program_id}:engagement`
-    });
-    if (options.reset) this.store.clear();
+  private constructor(
+    options: EngagementServiceOptions,
+    state: EngagementState,
+    revision: number
+  ) {
+    this.store = options.store;
     this.engine = options.engine;
     this.campaigns = options.campaigns;
     for (const adapter of [new WebhookMessagingAdapter(), ...(options.adapters ?? [])]) {
       this.adapters.set(adapter.type, adapter);
     }
-    this.state = this.store.load() ?? { version: 1, connectors: [], jobs: [] };
-    if (this.state.version !== 1) {
-      this.store.close();
-      throw new EngineError("invalid_state", "Stored engagement state is incompatible", 500);
-    }
+    this.state = state;
+    this.revision = revision;
     if (options.schedulerIntervalMs !== false) {
-      this.scheduler = setInterval(
-        () => void this.runDueJobs().catch(() => undefined),
-        options.schedulerIntervalMs ?? 30_000
-      );
+      this.scheduler = setInterval(() => {
+        this.runDueJobs().catch((error: unknown) => {
+          console.error(
+            `[lip] engagement scheduler failed: ${error instanceof Error ? error.message : String(error)}`
+          );
+        });
+      }, options.schedulerIntervalMs ?? 30_000);
       this.scheduler.unref();
     }
+  }
+
+  public static async create(options: EngagementServiceOptions): Promise<EngagementService> {
+    if (options.reset) await options.store.clear();
+    const loaded = await options.store.load();
+    const state = loaded?.state ?? { version: 1 as const, connectors: [], jobs: [] };
+    if (state.version !== 1) {
+      await options.store.close();
+      throw new EngineError("invalid_state", "Stored engagement state is incompatible", 500);
+    }
+    const service = new EngagementService(options, state, loaded?.revision ?? 0);
+    await service.save();
+    return service;
   }
 
   public snapshot(): EngagementSnapshot {
@@ -223,14 +248,14 @@ export class EngagementService {
     };
   }
 
-  public upsertConnector(input: {
+  public async upsertConnector(input: {
     connector_id?: string;
     name: string;
     type: string;
     active?: boolean;
     configuration: Record<string, unknown>;
     secret?: string;
-  }): MessagingConnector {
+  }): Promise<MessagingConnector> {
     if (!input.name.trim()) {
       throw new EngineError("validation_failed", "Connector name is required", 422);
     }
@@ -258,9 +283,15 @@ export class EngagementService {
       created_at: existing?.created_at ?? now,
       updated_at: now
     };
-    if (existing) Object.assign(existing, connector);
-    else this.state.connectors.push(connector);
-    this.save();
+    this.state = {
+      ...this.state,
+      connectors: existing
+        ? this.state.connectors.map((candidate) =>
+            candidate.connector_id === connector.connector_id ? connector : candidate
+          )
+        : [...this.state.connectors, connector]
+    };
+    await this.save();
     return {
       connector_id: connector.connector_id,
       name: connector.name,
@@ -271,29 +302,29 @@ export class EngagementService {
     };
   }
 
-  public removeConnector(connectorId: string): boolean {
+  public async removeConnector(connectorId: string): Promise<boolean> {
     if (this.state.jobs.some((job) =>
       job.connector_id === connectorId && ["queued", "running", "partial"].includes(job.status)
     )) {
       throw new EngineError("conflict", "Connector has unfinished message jobs", 409);
     }
-    const before = this.state.connectors.length;
-    this.state.connectors = this.state.connectors.filter(
+    const connectors = this.state.connectors.filter(
       ({ connector_id }) => connector_id !== connectorId
     );
-    if (this.state.connectors.length === before) return false;
-    this.save();
+    if (connectors.length === this.state.connectors.length) return false;
+    this.state = { ...this.state, connectors };
+    await this.save();
     return true;
   }
 
-  public enqueue(input: {
+  public async enqueue(input: {
     idempotency_key: string;
     connector_id: string;
     segment_id: string;
     template_id: string;
     content: Record<string, unknown>;
     purpose?: MessageJob["purpose"];
-  }): MessageJob {
+  }): Promise<MessageJob> {
     if (!input.idempotency_key.trim() || !input.template_id.trim()) {
       throw new EngineError("validation_failed", "Idempotency key and template id are required", 422);
     }
@@ -357,9 +388,11 @@ export class EngagementService {
         : {}),
       deliveries
     };
-    this.state.jobs.unshift(job);
-    this.state.jobs = this.state.jobs.slice(0, 200);
-    this.save();
+    this.state = {
+      ...this.state,
+      jobs: [job, ...this.state.jobs].slice(0, 200)
+    };
+    await this.save();
     return structuredClone(job);
   }
 
@@ -374,14 +407,21 @@ export class EngagementService {
     }
     const adapter = this.adapters.get(connector.type);
     if (!adapter) throw new EngineError("invalid_state", "Message connector adapter is unavailable", 500);
-    job.status = "running";
-    this.save();
+    let workingJob: MessageJob = { ...structuredClone(job), status: "running" };
+    await this.saveJob(workingJob);
     const members = new Map(
       this.engine.inspectAdmin().members.map(({ member }) => [member.member_id, member])
     );
     const now = Date.now();
-    for (const delivery of job.deliveries) {
+    const deliveryIds = workingJob.deliveries.map(({ delivery_id }) => delivery_id);
+    for (const deliveryId of deliveryIds) {
+      // Re-read persisted state so a concurrent run's delivery outcomes are seen.
+      workingJob = this.currentJob(jobId) ?? workingJob;
+      const delivery = workingJob.deliveries.find(
+        ({ delivery_id }) => delivery_id === deliveryId
+      );
       if (
+        !delivery ||
         delivery.status === "delivered" ||
         delivery.status === "skipped" ||
         delivery.attempts >= 5 ||
@@ -389,11 +429,15 @@ export class EngagementService {
       ) continue;
       const member = members.get(delivery.member_id);
       if (!member) {
-        delivery.status = "skipped";
-        delivery.error = "member_not_found";
+        workingJob = withDelivery(workingJob, {
+          ...delivery,
+          status: "skipped",
+          error: "member_not_found"
+        });
+        await this.saveJob(workingJob);
         continue;
       }
-      delivery.attempts += 1;
+      const attempts = delivery.attempts + 1;
       try {
         await adapter.deliver({
           connector,
@@ -402,39 +446,48 @@ export class EngagementService {
           delivery: {
             message_id: delivery.delivery_id,
             member: structuredClone(member),
-            template_id: job.template_id,
-            content: structuredClone(job.content),
-            purpose: job.purpose,
+            template_id: workingJob.template_id,
+            content: structuredClone(workingJob.content),
+            purpose: workingJob.purpose,
             occurred_at: timestamp()
           }
         });
-        delivery.status = "delivered";
-        delivery.delivered_at = timestamp();
-        delete delivery.next_attempt_at;
-        delete delivery.error;
+        const { next_attempt_at: _nextAttemptAt, error: _error, ...delivered } = delivery;
+        workingJob = withDelivery(workingJob, {
+          ...delivered,
+          attempts,
+          status: "delivered",
+          delivered_at: timestamp()
+        });
       } catch (error) {
-        delivery.status = "failed";
-        delivery.error = error instanceof Error ? error.message.slice(0, 500) : "delivery_failed";
-        delivery.next_attempt_at = new Date(
-          Date.now() + Math.min(60_000, 1_000 * 2 ** (delivery.attempts - 1))
-        ).toISOString();
+        workingJob = withDelivery(workingJob, {
+          ...delivery,
+          attempts,
+          status: "failed",
+          error: error instanceof Error ? error.message.slice(0, 500) : "delivery_failed",
+          next_attempt_at: new Date(
+            Date.now() + Math.min(60_000, 1_000 * 2 ** (attempts - 1))
+          ).toISOString()
+        });
       }
-      this.save();
+      await this.saveJob(workingJob);
     }
-    const actionable = job.deliveries.filter(({ status }) => status !== "skipped");
-    if (actionable.every(({ status }) => status === "delivered")) {
-      job.status = "completed";
-      job.completed_at = timestamp();
-    } else if (actionable.some(({ status }) => status === "delivered")) {
-      job.status = "partial";
-    } else if (actionable.every(({ attempts }) => attempts >= 5)) {
-      job.status = "failed";
-      job.completed_at = timestamp();
-    } else {
-      job.status = "queued";
-    }
-    this.save();
-    return structuredClone(job);
+    workingJob = this.currentJob(jobId) ?? workingJob;
+    const actionable = workingJob.deliveries.filter(({ status }) => status !== "skipped");
+    const status: MessageJob["status"] = actionable.every(({ status: value }) => value === "delivered")
+      ? "completed"
+      : actionable.some(({ status: value }) => value === "delivered")
+        ? "partial"
+        : actionable.every(({ attempts }) => attempts >= 5)
+          ? "failed"
+          : "queued";
+    workingJob = {
+      ...workingJob,
+      status,
+      ...(status === "completed" || status === "failed" ? { completed_at: timestamp() } : {})
+    };
+    await this.saveJob(workingJob);
+    return structuredClone(workingJob);
   }
 
   public async runDueJobs(): Promise<number> {
@@ -456,13 +509,27 @@ export class EngagementService {
     }
   }
 
-  public close(): void {
+  public async close(): Promise<void> {
     if (this.scheduler) clearInterval(this.scheduler);
-    this.store.close();
+    await this.store.close();
   }
 
-  private save(): void {
-    this.store.save(this.state);
+  private currentJob(jobId: string): MessageJob | undefined {
+    return this.state.jobs.find(({ job_id }) => job_id === jobId);
+  }
+
+  private async saveJob(job: MessageJob): Promise<void> {
+    this.state = {
+      ...this.state,
+      jobs: this.state.jobs.map((candidate) =>
+        candidate.job_id === job.job_id ? structuredClone(job) : candidate
+      )
+    };
+    await this.save();
+  }
+
+  private async save(): Promise<void> {
+    this.revision = await this.store.save(this.state, this.revision);
   }
 }
 

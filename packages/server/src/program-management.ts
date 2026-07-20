@@ -5,7 +5,7 @@ import {
   programDefinitionFingerprint,
   type ProgramDefinition
 } from "@loyalty-interchange/reference";
-import { SqliteStateStore } from "@loyalty-interchange/storage-sqlite";
+import type { AsyncStateStore } from "@loyalty-interchange/storage";
 
 export interface ProgramValidationIssue {
   path: string;
@@ -51,8 +51,14 @@ export interface ProgramManagementSnapshot {
   audit: ProgramAuditEntry[];
 }
 
-interface ProgramManagementState extends ProgramManagementSnapshot {
+export interface ProgramManagementState extends ProgramManagementSnapshot {
   version: 1;
+}
+
+export interface ProgramManagementServiceOptions {
+  store: AsyncStateStore<ProgramManagementState>;
+  initialProgram: ProgramDefinition;
+  reset?: boolean;
 }
 
 const allowedProgramFields = new Set([
@@ -146,26 +152,33 @@ export function validateProgramDefinition(program: unknown): ProgramValidationRe
 }
 
 export class ProgramManagementService {
-  private readonly store: SqliteStateStore<ProgramManagementState>;
+  private readonly store: AsyncStateStore<ProgramManagementState>;
   private state: ProgramManagementState;
+  private revision: number;
   private applyProgram?: (program: ProgramDefinition) => void;
 
-  public constructor(options: {
-    path: string;
-    initialProgram: ProgramDefinition;
-    reset?: boolean;
-  }) {
-    this.store = new SqliteStateStore<ProgramManagementState>({
-      path: options.path,
-      key: "reference:program-management"
-    });
-    if (options.reset) this.store.clear();
-    const stored = this.store.load();
-    if (stored && stored.version !== 1) {
-      this.store.close();
-      throw new Error(`Unsupported program-management state version: ${String(stored.version)}`);
+  private constructor(
+    options: ProgramManagementServiceOptions,
+    state: ProgramManagementState,
+    revision: number
+  ) {
+    this.store = options.store;
+    this.state = state;
+    this.revision = revision;
+  }
+
+  public static async create(
+    options: ProgramManagementServiceOptions
+  ): Promise<ProgramManagementService> {
+    if (options.reset) await options.store.clear();
+    const loaded = await options.store.load();
+    if (loaded && loaded.state.version !== 1) {
+      await options.store.close();
+      throw new Error(
+        `Unsupported program-management state version: ${String(loaded.state.version)}`
+      );
     }
-    this.state = stored ?? (() => {
+    const state = loaded?.state ?? (() => {
       const timestamp = now();
       return {
         version: 1 as const,
@@ -177,16 +190,18 @@ export class ProgramManagementService {
         audit: []
       };
     })();
-    const validation = validateProgramDefinition(this.state.active_program);
+    const validation = validateProgramDefinition(state.active_program);
     if (!validation.ok) {
-      this.store.close();
+      await options.store.close();
       throw new EngineError(
         "invalid_program",
         `Published program is invalid: ${validation.issues.map((issue) => issue.message).join("; ")}`,
         500
       );
     }
-    this.save();
+    const service = new ProgramManagementService(options, state, loaded?.revision ?? 0);
+    await service.save();
+    return service;
   }
 
   public snapshot(): ProgramManagementSnapshot {
@@ -207,15 +222,18 @@ export class ProgramManagementService {
     return match ? clone(match) : undefined;
   }
 
-  public saveDraft(program: unknown, actor: string): ProgramManagementSnapshot {
+  public async saveDraft(program: unknown, actor: string): Promise<ProgramManagementSnapshot> {
     const timestamp = now();
     const draftVersion = (this.state.draft?.version ?? this.state.active_revision) + 1;
-    this.state.draft = {
-      version: draftVersion,
-      updated_at: timestamp,
-      updated_by: actor,
-      program: clone(program),
-      validation: validateProgramDefinition(program)
+    this.state = {
+      ...this.state,
+      draft: {
+        version: draftVersion,
+        updated_at: timestamp,
+        updated_by: actor,
+        program: clone(program),
+        validation: validateProgramDefinition(program)
+      }
     };
     this.recordAudit({
       audit_id: `audit_${crypto.randomUUID()}`,
@@ -224,11 +242,11 @@ export class ProgramManagementService {
       occurred_at: timestamp,
       draft_version: draftVersion
     });
-    this.save();
+    await this.save();
     return this.snapshot();
   }
 
-  public upsertReward(reward: unknown, actor: string): ProgramManagementSnapshot {
+  public async upsertReward(reward: unknown, actor: string): Promise<ProgramManagementSnapshot> {
     if (!reward || typeof reward !== "object" || Array.isArray(reward)) {
       throw new EngineError("validation_failed", "Reward must be an object", 422);
     }
@@ -251,7 +269,7 @@ export class ProgramManagementService {
     return this.saveDraft({ ...program, rewards }, actor);
   }
 
-  public deleteReward(rewardId: string, actor: string): ProgramManagementSnapshot {
+  public async deleteReward(rewardId: string, actor: string): Promise<ProgramManagementSnapshot> {
     const program = this.draftProgramObject();
     const rewards = Array.isArray(program["rewards"]) ? program["rewards"] : [];
     const nextRewards = rewards.filter((candidate) =>
@@ -266,20 +284,25 @@ export class ProgramManagementService {
     return this.saveDraft({ ...program, rewards: nextRewards }, actor);
   }
 
-  public validateDraft(): ProgramValidationResult {
+  public async validateDraft(): Promise<ProgramValidationResult> {
     const draft = this.state.draft;
     if (!draft) {
       return { ok: false, issues: [{ path: "/", message: "No program draft exists" }] };
     }
-    draft.validation = validateProgramDefinition(draft.program);
-    this.save();
-    return clone(draft.validation);
+    const validation = validateProgramDefinition(draft.program);
+    this.state = {
+      ...this.state,
+      draft: { ...draft, validation }
+    };
+    await this.save();
+    return clone(validation);
   }
 
-  public discardDraft(actor: string): ProgramManagementSnapshot {
+  public async discardDraft(actor: string): Promise<ProgramManagementSnapshot> {
     if (!this.state.draft) throw new EngineError("not_found", "No program draft exists", 404);
     const draftVersion = this.state.draft.version;
-    delete this.state.draft;
+    const { draft: _draft, ...remaining } = this.state;
+    this.state = remaining;
     this.recordAudit({
       audit_id: `audit_${crypto.randomUUID()}`,
       action: "draft.discarded",
@@ -287,7 +310,7 @@ export class ProgramManagementService {
       occurred_at: now(),
       draft_version: draftVersion
     });
-    this.save();
+    await this.save();
     return this.snapshot();
   }
 
@@ -295,10 +318,10 @@ export class ProgramManagementService {
     this.applyProgram = apply;
   }
 
-  public publish(
+  public async publish(
     expectedDraftVersion: number,
     actor: string
-  ): ProgramManagementSnapshot {
+  ): Promise<ProgramManagementSnapshot> {
     const draft = this.state.draft;
     if (!draft) throw new EngineError("not_found", "No program draft exists", 404);
     if (draft.version !== expectedDraftVersion) {
@@ -306,8 +329,11 @@ export class ProgramManagementService {
     }
     const validation = validateProgramDefinition(draft.program);
     if (!validation.ok) {
-      draft.validation = validation;
-      this.save();
+      this.state = {
+        ...this.state,
+        draft: { ...draft, validation }
+      };
+      await this.save();
       throw new EngineError(
         "invalid_program",
         validation.issues.map((issue) => `${issue.path} ${issue.message}`).join("; "),
@@ -319,42 +345,47 @@ export class ProgramManagementService {
     return this.applyPublishedProgram(nextProgram, actor, "program.published");
   }
 
-  public rollback(
+  public async rollback(
     revision: number,
     actor: string
-  ): ProgramManagementSnapshot {
+  ): Promise<ProgramManagementSnapshot> {
     const target = this.state.history.find((candidate) => candidate.revision === revision);
     if (!target) throw new EngineError("not_found", `Program revision ${revision} was not found`, 404);
     assertCompatibleProgramUpdate(this.state.active_program, target.program);
     return this.applyPublishedProgram(target.program, actor, "program.rolled_back");
   }
 
-  public close(): void {
-    this.store.close();
+  public async close(): Promise<void> {
+    await this.store.close();
   }
 
-  private applyPublishedProgram(
+  private async applyPublishedProgram(
     program: ProgramDefinition,
     actor: string,
     action: "program.published" | "program.rolled_back"
-  ): ProgramManagementSnapshot {
+  ): Promise<ProgramManagementSnapshot> {
     const apply = this.applyProgram;
     if (!apply) throw new Error("Program publisher is not bound");
     const previous = clone(this.state);
     const timestamp = now();
     const revision = this.state.active_revision + 1;
-    this.state.history.unshift({
-      revision: this.state.active_revision,
-      published_at: this.state.active_published_at,
-      published_by: this.state.active_published_by,
-      program: clone(this.state.active_program)
-    });
-    this.state.history = this.state.history.slice(0, 20);
-    this.state.active_revision = revision;
-    this.state.active_published_at = timestamp;
-    this.state.active_published_by = actor;
-    this.state.active_program = clone(program);
-    delete this.state.draft;
+    const { draft: _draft, ...remaining } = this.state;
+    this.state = {
+      ...remaining,
+      history: [
+        {
+          revision: this.state.active_revision,
+          published_at: this.state.active_published_at,
+          published_by: this.state.active_published_by,
+          program: clone(this.state.active_program)
+        },
+        ...this.state.history
+      ].slice(0, 20),
+      active_revision: revision,
+      active_published_at: timestamp,
+      active_published_by: actor,
+      active_program: clone(program)
+    };
     this.recordAudit({
       audit_id: `audit_${crypto.randomUUID()}`,
       action,
@@ -364,20 +395,22 @@ export class ProgramManagementService {
     });
     // Persist intent first. Startup can safely retarget the previous engine
     // snapshot to this compatible published definition after an interrupted write.
-    this.save();
+    await this.save();
     try {
       apply(clone(program));
     } catch (error) {
       this.state = previous;
-      this.save();
+      await this.save();
       throw error;
     }
     return this.snapshot();
   }
 
   private recordAudit(entry: ProgramAuditEntry): void {
-    this.state.audit.unshift(entry);
-    this.state.audit = this.state.audit.slice(0, 100);
+    this.state = {
+      ...this.state,
+      audit: [entry, ...this.state.audit].slice(0, 100)
+    };
   }
 
   private draftProgramObject(): Record<string, unknown> {
@@ -388,7 +421,7 @@ export class ProgramManagementService {
     return clone(value as Record<string, unknown>);
   }
 
-  private save(): void {
-    this.store.save(this.state);
+  private async save(): Promise<void> {
+    this.revision = await this.store.save(this.state, this.revision);
   }
 }

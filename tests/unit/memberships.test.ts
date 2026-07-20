@@ -11,11 +11,11 @@ import {
 } from "../fixtures.js";
 
 describe("paid membership platform", () => {
-  it("persists membership, applies its multiplier, and gates configured rewards", () => {
+  it("persists membership, applies its multiplier, and gates configured rewards", async () => {
     const directory = mkdtempSync(join(tmpdir(), "lip-memberships-"));
     const databasePath = join(directory, "reference.db");
     try {
-      const first = createDemoPlatform({
+      const first = await createDemoPlatform({
         databasePath,
         reset: true,
         seed: false,
@@ -33,7 +33,7 @@ describe("paid membership platform", () => {
           unavailable_reasons: expect.arrayContaining(["membership_required"])
         });
 
-      first.memberships.grant({
+      await first.memberships.grant({
         member_id: "member-001",
         plan_id: "premium",
         valid_until: "2099-01-01T00:00:00.000Z",
@@ -44,23 +44,23 @@ describe("paid membership platform", () => {
         member_id: "member-002",
         identity: { type: "token", value: "membership-member-002" }
       });
-      expect(() => first.memberships.grant({
+      await expect(first.memberships.grant({
         member_id: "member-002",
         plan_id: "missing-plan",
         valid_until: "2099-01-01T00:00:00.000Z"
-      }, "test-admin")).toThrowError(/plan/);
-      expect(() => first.memberships.grant({
+      }, "test-admin")).rejects.toThrowError(/plan/);
+      await expect(first.memberships.grant({
         member_id: "member-002",
         plan_id: "premium",
         valid_from: "2099-01-02T00:00:00.000Z",
         valid_until: "2099-01-01T00:00:00.000Z"
-      }, "test-admin")).toThrowError(/window/);
-      first.memberships.grant({
+      }, "test-admin")).rejects.toThrowError(/window/);
+      await first.memberships.grant({
         member_id: "member-002",
         plan_id: "premium",
         valid_until: "2099-01-01T00:00:00.000Z"
       }, "test-admin");
-      expect(first.memberships.changeStatus("member-002", "cancelled", "test-admin").status)
+      expect((await first.memberships.changeStatus("member-002", "cancelled", "test-admin")).status)
         .toBe("cancelled");
       expect(() => first.memberships.assertCompatibleProgram([])).toThrowError(/active members/);
       const preview = first.engine.evaluate({
@@ -80,9 +80,9 @@ describe("paid membership platform", () => {
         order: makeOrder({ order_id: "membership-next-order" })
       }).rewards.find(({ reward_id }) => reward_id === "one-dollar-off"))
         .toMatchObject({ status: "available" });
-      first.close();
+      await first.close();
 
-      const second = createDemoPlatform({
+      const second = await createDemoPlatform({
         databasePath,
         seed: false,
         program: makeMembershipProgram()
@@ -95,14 +95,14 @@ describe("paid membership platform", () => {
         })
       ]));
       expect(restored.audit.map(({ action }) => action)).toContain("membership.granted");
-      expect(second.memberships.lapseExpired(
+      expect(await second.memberships.lapseExpired(
         "test-scheduler",
         new Date("2100-01-01T00:00:00.000Z")
       )).toBe(1);
       expect(second.memberships.snapshot().memberships.find(({ member_id: memberId }) =>
         memberId === "member-001"
       )?.membership.status).toBe("lapsed");
-      second.close();
+      await second.close();
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }

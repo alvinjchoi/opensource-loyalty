@@ -82,10 +82,10 @@ describe("WebhookDispatcher", () => {
   it("validates and updates managed subscriptions without exposing secrets", async () => {
     const persisted: unknown[] = [];
     const captured: CapturedRequest[] = [];
-    const dispatcher = new WebhookDispatcher({
+    const dispatcher = await WebhookDispatcher.create({
       subscriptions: [],
       fetch: capturingFetch(captured, [204]),
-      onSubscriptionsChanged: (subscriptions) => persisted.push(subscriptions)
+      onSubscriptionsChanged: (subscriptions) => { persisted.push(subscriptions); }
     });
     expect(() => dispatcher.upsertSubscription({
       url: "ftp://receiver.example/hooks",
@@ -137,7 +137,7 @@ describe("WebhookDispatcher", () => {
 
   it("signs deliveries so SDK receivers can verify them", async () => {
     const captured: CapturedRequest[] = [];
-    const dispatcher = new WebhookDispatcher({
+    const dispatcher = await WebhookDispatcher.create({
       subscriptions: [{ url: "https://receiver.example/hooks", secret: "hook-secret" }],
       fetch: capturingFetch(captured)
     });
@@ -183,7 +183,7 @@ describe("WebhookDispatcher", () => {
   });
 
   it("reports unhealthy delivery when recent deliveries failed", async () => {
-    const dispatcher = new WebhookDispatcher({
+    const dispatcher = await WebhookDispatcher.create({
       subscriptions: [{ url: "https://receiver.example/hooks", secret: "hook-secret" }],
       fetch: capturingFetch([], [500, 500, 500]),
       maxAttempts: 1,
@@ -199,7 +199,7 @@ describe("WebhookDispatcher", () => {
       healthy: false
     });
     expect(
-      new WebhookDispatcher({ subscriptions: [] }).deliveryHealth()
+      (await WebhookDispatcher.create({ subscriptions: [] })).deliveryHealth()
     ).toMatchObject({
       enabled: false,
       pending_count: 0,
@@ -211,7 +211,7 @@ describe("WebhookDispatcher", () => {
 
   it("retries failed deliveries with backoff and gives up after max attempts", async () => {
     const retried: CapturedRequest[] = [];
-    const recovering = new WebhookDispatcher({
+    const recovering = await WebhookDispatcher.create({
       subscriptions: [{ url: "https://receiver.example/hooks", secret: "hook-secret" }],
       fetch: capturingFetch(retried, [500, 503, 200]),
       backoffMs: 1
@@ -225,7 +225,7 @@ describe("WebhookDispatcher", () => {
 
     const exhausted: CapturedRequest[] = [];
     const errors: string[] = [];
-    const failing = new WebhookDispatcher({
+    const failing = await WebhookDispatcher.create({
       subscriptions: [{ url: "https://receiver.example/hooks", secret: "hook-secret" }],
       fetch: capturingFetch(exhausted, [500, 500, 500]),
       backoffMs: 1,
@@ -244,7 +244,7 @@ describe("WebhookDispatcher", () => {
     expect(errors).toHaveLength(1);
 
     const policyAttempts: CapturedRequest[] = [];
-    const policyDispatcher = new WebhookDispatcher({
+    const policyDispatcher = await WebhookDispatcher.create({
       subscriptions: [{
         url: "https://receiver.example/policy",
         secret: "hook-secret",
@@ -266,7 +266,7 @@ describe("WebhookDispatcher", () => {
         path: databasePath,
         key: "webhook-history"
       });
-      const first = new WebhookDispatcher({
+      const first = await WebhookDispatcher.create({
         subscriptions: [{ url: "https://receiver.example/hooks", secret: "hook-secret" }],
         fetch: capturingFetch(captured, [204]),
         historyStore: firstStore
@@ -280,7 +280,7 @@ describe("WebhookDispatcher", () => {
         path: databasePath,
         key: "webhook-history"
       });
-      const second = new WebhookDispatcher({
+      const second = await WebhookDispatcher.create({
         subscriptions: [{ url: "https://receiver.example/hooks", secret: "hook-secret" }],
         fetch: capturingFetch(captured, [204]),
         historyStore: secondStore
@@ -299,7 +299,7 @@ describe("WebhookDispatcher", () => {
 
   it("respects per-subscription event-type filters", async () => {
     const captured: CapturedRequest[] = [];
-    const dispatcher = new WebhookDispatcher({
+    const dispatcher = await WebhookDispatcher.create({
       subscriptions: [
         {
           url: "https://receiver.example/redemptions",
@@ -320,8 +320,8 @@ describe("WebhookDispatcher", () => {
     const outboxKey = "demo-foodservice:webhook-outbox";
     try {
       const firstAttempts: CapturedRequest[] = [];
-      const firstOutbox = new SqliteWebhookOutbox({ path: databasePath, key: outboxKey });
-      const first = new WebhookDispatcher({
+      const firstOutbox = await SqliteWebhookOutbox.create({ path: databasePath, key: outboxKey });
+      const first = await WebhookDispatcher.create({
         subscriptions: [{ url: "https://receiver.example/hooks", secret: "hook-secret" }],
         outbox: firstOutbox,
         fetch: capturingFetch(firstAttempts, [503]),
@@ -338,11 +338,11 @@ describe("WebhookDispatcher", () => {
           last_error: "receiver responded with HTTP 503"
         })
       ]);
-      firstOutbox.close();
+      await firstOutbox.close();
 
       const resumedAttempts: CapturedRequest[] = [];
-      const secondOutbox = new SqliteWebhookOutbox({ path: databasePath, key: outboxKey });
-      const second = new WebhookDispatcher({
+      const secondOutbox = await SqliteWebhookOutbox.create({ path: databasePath, key: outboxKey });
+      const second = await WebhookDispatcher.create({
         subscriptions: [{ url: "https://receiver.example/hooks", secret: "hook-secret" }],
         outbox: secondOutbox,
         fetch: capturingFetch(resumedAttempts),
@@ -360,8 +360,8 @@ describe("WebhookDispatcher", () => {
           attempts: 2
         })
       ]);
-      expect(secondOutbox.list()).toEqual([]);
-      secondOutbox.close();
+      expect(await secondOutbox.list()).toEqual([]);
+      await secondOutbox.close();
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }
@@ -514,7 +514,7 @@ describe("platform webhook wiring", () => {
     const received: Array<{ timestamp: string; signature: string; body: string }> = [];
     const receiver = await startReceiver(received);
     const directory = mkdtempSync(join(tmpdir(), "lip-webhooks-"));
-    const platform = createDemoPlatform({
+    const platform = await createDemoPlatform({
       databasePath: join(directory, "reference.db"),
       reset: true,
       seed: false,
@@ -537,36 +537,36 @@ describe("platform webhook wiring", () => {
       expect(event.type).toBe("org.loyalty-interchange.member.enrolled.v1");
       expect(validate(LoyaltyEventSchema, event).ok).toBe(true);
     } finally {
-      platform.close();
+      await platform.close();
       receiver.close();
       rmSync(directory, { recursive: true, force: true });
     }
   });
 
-  it("persists runtime subscription CRUD and secret rotation across restart", () => {
+  it("persists runtime subscription CRUD and secret rotation across restart", async () => {
     const directory = mkdtempSync(join(tmpdir(), "lip-webhook-subscriptions-"));
     const databasePath = join(directory, "reference.db");
     try {
-      const first = createDemoPlatform({ databasePath, reset: true, seed: false });
+      const first = await createDemoPlatform({ databasePath, reset: true, seed: false });
       expect(first.webhooks.listSubscriptions()).toEqual([]);
       const created = first.webhooks.upsertSubscription({
         url: "https://receiver.example/hooks",
         secret: "initial-secret-value"
       });
       expect(created).toMatchObject({ active: true, url: "https://receiver.example/hooks" });
-      first.close();
+      await first.close();
 
-      const second = createDemoPlatform({ databasePath, seed: false });
+      const second = await createDemoPlatform({ databasePath, seed: false });
       expect(second.webhooks.listSubscriptions()).toEqual([
         expect.objectContaining({ subscription_id: created.subscription_id })
       ]);
       second.webhooks.rotateSecret(created.subscription_id, "rotated-secret-value");
       expect(second.webhooks.removeSubscription(created.subscription_id)).toBe(true);
-      second.close();
+      await second.close();
 
-      const third = createDemoPlatform({ databasePath, seed: false });
+      const third = await createDemoPlatform({ databasePath, seed: false });
       expect(third.webhooks.listSubscriptions()).toEqual([]);
-      third.close();
+      await third.close();
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }
