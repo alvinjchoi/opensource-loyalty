@@ -1050,7 +1050,7 @@ export function createReferenceServer(engine: LoyaltyEngine, options: ServerOpti
           ) {
             throw new TransportError(422, "validation_failed", "Validation Failed", "Connector fields are invalid");
           }
-          sendJson(response, 200, engagement.upsertConnector({
+          sendJson(response, 200, await engagement.upsertConnector({
             ...(typeof values["connector_id"] === "string"
               ? { connector_id: values["connector_id"] }
               : {}),
@@ -1066,7 +1066,7 @@ export function createReferenceServer(engine: LoyaltyEngine, options: ServerOpti
           if (typeof values["connector_id"] !== "string") {
             throw new TransportError(422, "validation_failed", "Validation Failed", "connector_id is required");
           }
-          sendJson(response, 200, { removed: engagement.removeConnector(values["connector_id"]) });
+          sendJson(response, 200, { removed: await engagement.removeConnector(values["connector_id"]) });
           return;
         }
         if (method === "POST" && path === "/admin/api/v1/engagement/messages") {
@@ -1081,7 +1081,7 @@ export function createReferenceServer(engine: LoyaltyEngine, options: ServerOpti
           ) {
             throw new TransportError(422, "validation_failed", "Validation Failed", "Message fields are invalid");
           }
-          sendJson(response, 201, engagement.enqueue({
+          sendJson(response, 201, await engagement.enqueue({
             idempotency_key: values["idempotency_key"],
             connector_id: values["connector_id"],
             segment_id: values["segment_id"],
@@ -1270,7 +1270,7 @@ export function createReferenceServer(engine: LoyaltyEngine, options: ServerOpti
           if (typeof values["name"] !== "string") {
             throw new TransportError(422, "validation_failed", "Request validation failed", "name is required");
           }
-          sendJson(response, 200, campaigns.upsertSegment({
+          sendJson(response, 200, await campaigns.upsertSegment({
             ...(typeof values["segment_id"] === "string"
               ? { segment_id: values["segment_id"] }
               : {}),
@@ -1292,7 +1292,7 @@ export function createReferenceServer(engine: LoyaltyEngine, options: ServerOpti
           if (typeof values["segment_id"] !== "string") {
             throw new TransportError(422, "validation_failed", "Request validation failed", "segment_id is required");
           }
-          campaigns.deleteSegment(values["segment_id"]);
+          await campaigns.deleteSegment(values["segment_id"]);
           sendJson(response, 200, { deleted: true });
           return;
         }
@@ -1304,7 +1304,7 @@ export function createReferenceServer(engine: LoyaltyEngine, options: ServerOpti
           ) {
             throw new TransportError(422, "validation_failed", "Request validation failed", "name, reward_id, and segment_id are required");
           }
-          sendJson(response, 200, campaigns.upsertCampaign({
+          sendJson(response, 200, await campaigns.upsertCampaign({
             ...(typeof values["campaign_id"] === "string"
               ? { campaign_id: values["campaign_id"] }
               : {}),
@@ -1323,7 +1323,7 @@ export function createReferenceServer(engine: LoyaltyEngine, options: ServerOpti
           if (typeof values["campaign_id"] !== "string") {
             throw new TransportError(422, "validation_failed", "Request validation failed", "campaign_id is required");
           }
-          campaigns.deleteCampaign(values["campaign_id"]);
+          await campaigns.deleteCampaign(values["campaign_id"]);
           sendJson(response, 200, { deleted: true });
           return;
         }
@@ -1334,7 +1334,7 @@ export function createReferenceServer(engine: LoyaltyEngine, options: ServerOpti
           sendJson(
             response,
             200,
-            campaigns.runCampaign(
+            await campaigns.runCampaign(
               values["campaign_id"],
               await adminActor(request, options, adminSessions)
             )

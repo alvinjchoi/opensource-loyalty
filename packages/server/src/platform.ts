@@ -11,11 +11,11 @@ import {
 import { AsyncSqliteStateStore, SqliteStateStore } from "@loyalty-interchange/storage-sqlite";
 import { PostgresEngineRepository } from "@loyalty-interchange/storage-postgres";
 import { createDemoProgram, seedDemoData } from "./demo.js";
-import { CampaignService } from "./campaigns.js";
+import { CampaignService, type CampaignState } from "./campaigns.js";
 import { MembershipService, type MembershipAuditState } from "./memberships.js";
 import { AccessControlService, type AccessControlState } from "./access-control.js";
 import { EventedLoyaltyEngine } from "./evented-engine.js";
-import { EngagementService } from "./engagement.js";
+import { EngagementService, type EngagementState } from "./engagement.js";
 import { ProgramManagementService, type ProgramManagementState } from "./program-management.js";
 import { SqliteWebhookOutbox } from "./webhook-outbox.js";
 import { SqliteWebhookHistoryStore } from "./webhook-history.js";
@@ -166,8 +166,11 @@ export async function createDemoPlatform(options: DemoPlatformOptions): Promise<
     });
     if (!state && options.seed !== false && !options.program) seedDemoData(engine);
     armed = true;
-    campaigns = new CampaignService({
-      path: options.databasePath,
+    campaigns = await CampaignService.create({
+      store: new AsyncSqliteStateStore<CampaignState>({
+        path: options.databasePath,
+        key: `${program.program_id}:campaigns`
+      }),
       engine,
       persistEngine: (nextState) => store.save(nextState),
       schedulerIntervalMs: 30_000,
@@ -192,8 +195,11 @@ export async function createDemoPlatform(options: DemoPlatformOptions): Promise<
       tenantName: program.name ?? program.program_id,
       ...(options.reset ? { reset: true } : {})
     });
-    engagement = new EngagementService({
-      path: options.databasePath,
+    engagement = await EngagementService.create({
+      store: new AsyncSqliteStateStore<EngagementState>({
+        path: options.databasePath,
+        key: `${program.program_id}:engagement`
+      }),
       engine,
       campaigns,
       schedulerIntervalMs: 30_000,
@@ -227,10 +233,10 @@ export async function createDemoPlatform(options: DemoPlatformOptions): Promise<
       access,
       engagement,
       close: async () => {
-        campaigns?.close();
+        await campaigns?.close();
         await memberships?.close();
         await access?.close();
-        engagement?.close();
+        await engagement?.close();
         await programs.close();
         store.close();
         webhookSubscriptionStore?.close();
@@ -248,10 +254,10 @@ export async function createDemoPlatform(options: DemoPlatformOptions): Promise<
     webhookOutbox?.close();
     webhookHistory?.close();
     webhookSubscriptionStore?.close();
-    campaigns?.close();
+    await campaigns?.close();
     await memberships?.close();
     await access?.close();
-    engagement?.close();
+    await engagement?.close();
     await programs.close();
     store.close();
     throw error;

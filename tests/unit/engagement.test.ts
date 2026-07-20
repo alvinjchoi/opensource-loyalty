@@ -3,12 +3,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { LoyaltyEngine } from "@loyalty-interchange/reference";
+import { AsyncSqliteStateStore } from "@loyalty-interchange/storage-sqlite";
 import {
   CampaignService,
   EngagementService,
   engagementAnalytics,
   memberExport,
+  type CampaignState,
   type ConnectorDelivery,
+  type EngagementState,
   type MessagingConnectorAdapter
 } from "@loyalty-interchange/server";
 import { makeEnroll, makeProgram } from "../fixtures.js";
@@ -41,20 +44,28 @@ describe("engagement integrations", () => {
       marketing_consent: false
     };
     engine.enroll(unconsented);
-    const campaigns = new CampaignService({
-      path,
+    const campaigns = await CampaignService.create({
+      store: new AsyncSqliteStateStore<CampaignState>({
+        path,
+        key: `${engine.getProgramDefinition().program_id}:campaigns`
+      }),
       engine,
       persistEngine: () => undefined,
       reset: true
     });
-    campaigns.upsertSegment({
+    await campaigns.upsertSegment({
       segment_id: "all-members",
       name: "All members",
       member_ids: ["member-001", "member-002"]
     });
     const adapter = new RecordingAdapter();
-    let engagement = new EngagementService({
-      path,
+    const makeEngagementStore = (): AsyncSqliteStateStore<EngagementState> =>
+      new AsyncSqliteStateStore<EngagementState>({
+        path,
+        key: `${engine.getProgramDefinition().program_id}:engagement`
+      });
+    let engagement = await EngagementService.create({
+      store: makeEngagementStore(),
       engine,
       campaigns,
       reset: true,
@@ -62,7 +73,7 @@ describe("engagement integrations", () => {
       adapters: [adapter]
     });
     try {
-      const connector = engagement.upsertConnector({
+      const connector = await engagement.upsertConnector({
         connector_id: "crm",
         name: "CRM",
         type: "recording",
@@ -72,7 +83,7 @@ describe("engagement integrations", () => {
       expect(connector).not.toHaveProperty("secret");
       expect(JSON.stringify(engagement.snapshot())).not.toContain("sixteen-byte-secret");
 
-      const queued = engagement.enqueue({
+      const queued = await engagement.enqueue({
         idempotency_key: "message-once",
         connector_id: "crm",
         segment_id: "all-members",
@@ -87,7 +98,7 @@ describe("engagement integrations", () => {
           error: "marketing_consent_required"
         })
       ]));
-      const repeated = engagement.enqueue({
+      const repeated = await engagement.enqueue({
         idempotency_key: "message-once",
         connector_id: "crm",
         segment_id: "all-members",
@@ -95,13 +106,13 @@ describe("engagement integrations", () => {
         content: { text: "You earned points" }
       });
       expect(repeated.job_id).toBe(queued.job_id);
-      expect(() => engagement.enqueue({
+      await expect(engagement.enqueue({
         idempotency_key: "message-once",
         connector_id: "crm",
         segment_id: "all-members",
         template_id: "changed",
         content: { text: "Changed" }
-      })).toThrowError(/different facts/);
+      })).rejects.toThrowError(/different facts/);
 
       const completed = await engagement.runJob(queued.job_id);
       expect(completed.status).toBe("completed");
@@ -111,9 +122,9 @@ describe("engagement integrations", () => {
         purpose: "marketing"
       });
 
-      engagement.close();
-      engagement = new EngagementService({
-        path,
+      await engagement.close();
+      engagement = await EngagementService.create({
+        store: makeEngagementStore(),
         engine,
         campaigns,
         schedulerIntervalMs: false,
@@ -123,23 +134,26 @@ describe("engagement integrations", () => {
         job_id: queued.job_id,
         status: "completed"
       });
-      expect(() => engagement.removeConnector("crm")).not.toThrow();
+      await expect(engagement.removeConnector("crm")).resolves.toBe(true);
     } finally {
-      engagement.close();
-      campaigns.close();
+      await engagement.close();
+      await campaigns.close();
       rmSync(directory, { recursive: true, force: true });
     }
   });
 
-  it("aggregates engagement analytics and exports consent-safe CRM rows", () => {
+  it("aggregates engagement analytics and exports consent-safe CRM rows", async () => {
     const directory = mkdtempSync(join(tmpdir(), "lip-engagement-analytics-"));
     const path = join(directory, "reference.db");
     const engine = new LoyaltyEngine(makeProgram());
     const enrollment = makeEnroll("analytics-enroll");
     enrollment.attributes = { email: "+customer@example.com", marketing_consent: true };
     engine.enroll(enrollment);
-    const campaigns = new CampaignService({
-      path,
+    const campaigns = await CampaignService.create({
+      store: new AsyncSqliteStateStore<CampaignState>({
+        path,
+        key: `${engine.getProgramDefinition().program_id}:campaigns`
+      }),
       engine,
       persistEngine: () => undefined,
       reset: true
@@ -157,7 +171,7 @@ describe("engagement integrations", () => {
       const csv = memberExport(engine, { format: "csv", marketingOnly: true }) as string;
       expect(csv).toContain("\"'+customer@example.com\"");
     } finally {
-      campaigns.close();
+      await campaigns.close();
       rmSync(directory, { recursive: true, force: true });
     }
   });

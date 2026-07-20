@@ -17,21 +17,21 @@ describe("campaign platform", () => {
         member_id: "member-002",
         identity: { type: "token", value: "guest-token-002", issuer: "test-identity" }
       });
-      const segment = first.campaigns.upsertSegment({
+      const segment = await first.campaigns.upsertSegment({
         name: "Launch guests",
         member_ids: ["member-001", "member-002", "member-002"]
       });
-      const campaign = first.campaigns.upsertCampaign({
+      const campaign = await first.campaigns.upsertCampaign({
         name: "Launch reward",
         reward_id: "five-off",
         segment_id: segment.segment_id,
         issued_reward_ttl_seconds: 3600
       });
-      const run = first.campaigns.runCampaign(campaign.campaign_id, "test-admin");
+      const run = await first.campaigns.runCampaign(campaign.campaign_id, "test-admin");
       expect(run).toMatchObject({ issued: 2, skipped: 0, failed: 0 });
       expect(first.engine.inspectAdmin().issued_rewards).toHaveLength(2);
 
-      const replay = first.campaigns.runCampaign(campaign.campaign_id, "test-admin");
+      const replay = await first.campaigns.runCampaign(campaign.campaign_id, "test-admin");
       expect(replay).toMatchObject({ issued: 0, skipped: 2, failed: 0 });
       const wallet = first.engine.listIssuedRewards({
         context: makeContext("campaign-wallet"),
@@ -65,50 +65,51 @@ describe("campaign platform", () => {
       seed: false
     });
     try {
-      expect(() => platform.campaigns.upsertSegment({
+      await expect(platform.campaigns.upsertSegment({
         name: "Unknown",
         member_ids: ["missing-member"]
-      })).toThrowError(/Unknown/);
+      })).rejects.toThrowError(/Unknown/);
       platform.engine.enroll(makeEnroll("campaign-validation-enroll"));
-      const segment = platform.campaigns.upsertSegment({
+      const segment = await platform.campaigns.upsertSegment({
         name: "Known",
         member_ids: ["member-001"]
       });
-      expect(() => platform.campaigns.upsertCampaign({
+      await expect(platform.campaigns.upsertCampaign({
         name: "Unknown reward",
         reward_id: "missing",
         segment_id: segment.segment_id
-      })).toThrowError(/reward/);
-      const campaign = platform.campaigns.upsertCampaign({
+      })).rejects.toThrowError(/reward/);
+      const campaign = await platform.campaigns.upsertCampaign({
         name: "Known reward",
         reward_id: "five-off",
         segment_id: segment.segment_id
       });
-      expect(() => platform.campaigns.deleteSegment(segment.segment_id)).toThrowError(/used/);
-      platform.campaigns.deleteCampaign(campaign.campaign_id);
-      const expired = platform.campaigns.upsertCampaign({
+      await expect(platform.campaigns.deleteSegment(segment.segment_id))
+        .rejects.toThrowError(/used/);
+      await platform.campaigns.deleteCampaign(campaign.campaign_id);
+      const expired = await platform.campaigns.upsertCampaign({
         name: "Expired",
         reward_id: "free-entree",
         segment_id: segment.segment_id,
         starts_at: "2024-01-01T00:00:00.000Z",
         ends_at: "2024-01-02T00:00:00.000Z"
       });
-      expect(() => platform.campaigns.runCampaign(expired.campaign_id, "test-admin"))
-        .toThrowError(/ended/);
-      platform.campaigns.deleteCampaign(expired.campaign_id);
-      platform.campaigns.deleteSegment(segment.segment_id);
-      const dynamic = platform.campaigns.upsertSegment({
+      await expect(platform.campaigns.runCampaign(expired.campaign_id, "test-admin"))
+        .rejects.toThrowError(/ended/);
+      await platform.campaigns.deleteCampaign(expired.campaign_id);
+      await platform.campaigns.deleteSegment(segment.segment_id);
+      const dynamic = await platform.campaigns.upsertSegment({
         name: "Active members",
         rules: { statuses: ["active"], minimum_available_balance: 0 }
       });
-      const scheduled = platform.campaigns.upsertCampaign({
+      const scheduled = await platform.campaigns.upsertCampaign({
         name: "Scheduled reward",
         reward_id: "free-entree",
         segment_id: dynamic.segment_id,
         starts_at: "2099-01-01T00:00:00.000Z"
       });
       expect(scheduled.status).toBe("scheduled");
-      const runs = platform.campaigns.runDueCampaigns(
+      const runs = await platform.campaigns.runDueCampaigns(
         "test-scheduler",
         new Date("2099-01-01T00:00:01.000Z")
       );
