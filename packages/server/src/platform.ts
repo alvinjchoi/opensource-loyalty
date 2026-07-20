@@ -300,6 +300,7 @@ export async function createPostgresProtocolPlatform(
   let memberships: MembershipService | undefined;
   let access: AccessControlService | undefined;
   let engagement: EngagementService | undefined;
+  let bootDispatcher: WebhookDispatcher | undefined;
   try {
     const migrator = new PostgresJsonStateStore({ pool, tenantId, key: "migration-probe" });
     await migrator.migrate();
@@ -356,6 +357,7 @@ export async function createPostgresProtocolPlatform(
       onSubscriptionsChanged: (next) => journal.save(next),
       onError: (message) => console.error(`[lip] ${message}`)
     });
+    bootDispatcher = dispatcher;
 
     let armed = false;
     let transactionEvents: LoyaltyEvent[] | undefined;
@@ -469,6 +471,7 @@ export async function createPostgresProtocolPlatform(
     await access?.close();
     await engagement?.close();
     await programs?.close();
+    await bootDispatcher?.flush();
     await subscriptionJournal?.close();
     await historyJournal?.close();
     await outboxJournal?.close();

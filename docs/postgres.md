@@ -69,6 +69,15 @@ operations (membership grants, campaign runs, program publishes) run inside
 `executeEngineOperation`, so they commit through the same transactional
 revision flow as protocol traffic.
 
+> [!IMPORTANT]
+> **Run at most one platform instance per tenant.** The engine repository is
+> multi-instance-safe, but the Admin extension services cache state with
+> per-process revisions (a concurrent writer surfaces as
+> `StateRevisionConflictError`) and the webhook journals persist
+> last-writer-wins snapshots under a single-dispatcher assumption. Multi-
+> instance Admin/webhook serving needs per-delivery revisioned rows or a
+> `withLease`-guarded singleton dispatcher — tracked as follow-up work.
+
 ## Integration test
 
 The default suite does not require a database. To run the live adapter test:
