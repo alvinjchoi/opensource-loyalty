@@ -36,8 +36,8 @@ export interface WebhookDeliveryArchiveEntry extends WebhookDeliveryRecord {
 }
 
 export interface WebhookHistoryStore {
-  list(): WebhookDeliveryArchiveEntry[];
-  save(entries: readonly WebhookDeliveryArchiveEntry[]): void;
+  list(): Promise<WebhookDeliveryArchiveEntry[]>;
+  save(entries: readonly WebhookDeliveryArchiveEntry[]): Promise<void>;
 }
 
 export interface WebhookOutboxEntry {
@@ -51,9 +51,9 @@ export interface WebhookOutboxEntry {
 }
 
 export interface WebhookOutboxStore {
-  list(): WebhookOutboxEntry[];
-  put(entry: WebhookOutboxEntry): void;
-  remove(deliveryId: string): void;
+  list(): Promise<WebhookOutboxEntry[]>;
+  put(entry: WebhookOutboxEntry): Promise<void>;
+  remove(deliveryId: string): Promise<void>;
 }
 
 export interface WebhookSubscriptionSummary {
@@ -105,7 +105,7 @@ export interface WebhookDispatcherOptions {
   fetch?: typeof globalThis.fetch;
   now?: () => Date;
   onError?: (message: string) => void;
-  onSubscriptionsChanged?: (subscriptions: readonly ManagedWebhookSubscription[]) => void;
+  onSubscriptionsChanged?: (subscriptions: readonly ManagedWebhookSubscription[]) => void | Promise<void>;
   /**
    * Durable storage for pending deliveries. Failed deliveries remain in the
    * outbox and are retried when `resumePending()` is called after restart.
@@ -136,15 +136,15 @@ function deliveryId(event: LoyaltyEvent, url: string): string {
 class MemoryWebhookOutbox implements WebhookOutboxStore {
   private readonly entries = new Map<string, WebhookOutboxEntry>();
 
-  public list(): WebhookOutboxEntry[] {
+  public async list(): Promise<WebhookOutboxEntry[]> {
     return [...this.entries.values()];
   }
 
-  public put(entry: WebhookOutboxEntry): void {
+  public async put(entry: WebhookOutboxEntry): Promise<void> {
     this.entries.set(entry.delivery_id, entry);
   }
 
-  public remove(deliveryIdValue: string): void {
+  public async remove(deliveryIdValue: string): Promise<void> {
     this.entries.delete(deliveryIdValue);
   }
 }
@@ -171,8 +171,9 @@ export class WebhookDispatcher {
   private readonly queued = new Map<string, WebhookOutboxEntry>();
   private readonly history: WebhookDeliveryArchiveEntry[] = [];
   private readonly pending = new Map<string, Promise<void>>();
+  private persistTail: Promise<void> = Promise.resolve();
 
-  public constructor(options: WebhookDispatcherOptions) {
+  private constructor(options: WebhookDispatcherOptions) {
     this.subscriptions = options.subscriptions.map((subscription) => ({
       ...subscription,
       subscription_id: subscription.subscription_id ?? `webhook_${deliveryId({
@@ -191,11 +192,33 @@ export class WebhookDispatcher {
     this.onSubscriptionsChanged = options.onSubscriptionsChanged;
     this.outbox = options.outbox ?? new MemoryWebhookOutbox();
     this.historyStore = options.historyStore;
-    this.history.push(...(this.historyStore?.list() ?? []).slice(-this.historyLimit));
-    for (const entry of this.outbox.list()) {
-      this.queued.set(entry.delivery_id, entry);
+  }
+
+  public static async create(options: WebhookDispatcherOptions): Promise<WebhookDispatcher> {
+    const dispatcher = new WebhookDispatcher(options);
+    dispatcher.history.push(
+      ...(await dispatcher.historyStore?.list() ?? []).slice(-dispatcher.historyLimit)
+    );
+    for (const entry of await dispatcher.outbox.list()) {
+      dispatcher.queued.set(entry.delivery_id, entry);
     }
-    this.persistSubscriptions();
+    dispatcher.persistSubscriptions();
+    return dispatcher;
+  }
+
+  /**
+   * Serializes durable writes in call order so the sync emit path can enqueue
+   * persistence without awaiting; failures surface through onError instead of
+   * breaking delivery.
+   */
+  private persist(operation: () => Promise<void>): void {
+    this.persistTail = this.persistTail
+      .then(operation)
+      .catch((error: unknown) => {
+        this.onError?.(
+          `webhook persistence failed: ${error instanceof Error ? error.message : String(error)}`
+        );
+      });
   }
 
   public emit(event: LoyaltyEvent): void {
@@ -214,7 +237,7 @@ export class WebhookDispatcher {
         updated_at: timestamp
       };
       this.queued.set(id, entry);
-      this.outbox.put(entry);
+      this.persist(() => this.outbox.put(entry));
       this.schedule(entry, subscription);
     }
   }
@@ -236,11 +259,15 @@ export class WebhookDispatcher {
     }
   }
 
-  /** Waits until every in-flight delivery has completed its current retry cycle. */
+  /**
+   * Waits until every in-flight delivery has completed its current retry cycle
+   * and every enqueued durable write has been persisted.
+   */
   public async flush(): Promise<void> {
     while (this.pending.size > 0) {
       await Promise.allSettled([...this.pending.values()]);
     }
+    await this.persistTail;
   }
 
   /** Persisted deliveries still awaiting a successful 2xx response. */
@@ -362,7 +389,8 @@ export class WebhookDispatcher {
     for (const entry of this.queued.values()) {
       if (entry.url !== subscription.url) continue;
       this.queued.delete(entry.delivery_id);
-      this.outbox.remove(entry.delivery_id);
+      const removedId = entry.delivery_id;
+      this.persist(() => this.outbox.remove(removedId));
     }
     this.persistSubscriptions();
     return true;
@@ -406,7 +434,7 @@ export class WebhookDispatcher {
       updated_at: timestamp
     };
     this.queued.set(entry.delivery_id, entry);
-    this.outbox.put(entry);
+    this.persist(() => this.outbox.put(entry));
     this.schedule(entry, subscription);
     return true;
   }
@@ -416,11 +444,18 @@ export class WebhookDispatcher {
     if (this.history.length > this.historyLimit) {
       this.history.splice(0, this.history.length - this.historyLimit);
     }
-    this.historyStore?.save(this.history);
+    if (!this.historyStore) return;
+    const historyStore = this.historyStore;
+    const snapshot = structuredClone(this.history);
+    this.persist(() => historyStore.save(snapshot));
   }
 
   private persistSubscriptions(): void {
-    this.onSubscriptionsChanged?.(structuredClone(this.subscriptions));
+    if (!this.onSubscriptionsChanged) return;
+    const snapshot = structuredClone(this.subscriptions);
+    this.persist(async () => {
+      await this.onSubscriptionsChanged?.(snapshot);
+    });
   }
 
   private schedule(entry: WebhookOutboxEntry, subscription: WebhookSubscription): void {
@@ -446,7 +481,7 @@ export class WebhookDispatcher {
       entry.attempts += 1;
       entry.updated_at = this.now().toISOString();
       delete entry.last_error;
-      this.outbox.put(entry);
+      this.persist(() => this.outbox.put(structuredClone(entry)));
       const timestamp = Math.floor(this.now().getTime() / 1000);
       try {
         const response = await this.fetchImpl(subscription.url, {
@@ -461,7 +496,7 @@ export class WebhookDispatcher {
         });
         if (response.ok) {
           this.queued.delete(entry.delivery_id);
-          this.outbox.remove(entry.delivery_id);
+          this.persist(() => this.outbox.remove(entry.delivery_id));
           this.record({
             delivery_id: entry.delivery_id,
             event: structuredClone(entry.event),
@@ -480,7 +515,7 @@ export class WebhookDispatcher {
       }
       entry.last_error = lastError;
       entry.updated_at = this.now().toISOString();
-      this.outbox.put(entry);
+      this.persist(() => this.outbox.put(structuredClone(entry)));
     }
     this.record({
       delivery_id: entry.delivery_id,

@@ -134,22 +134,22 @@ export async function createDemoPlatform(options: DemoPlatformOptions): Promise<
       path: options.databasePath,
       key: `${program.program_id}:webhook-subscriptions`
     });
-    if (options.reset) webhookSubscriptionStore.clear();
+    if (options.reset) await webhookSubscriptionStore.clear();
     const subscriptions =
-      webhookSubscriptionStore.load() ??
+      await webhookSubscriptionStore.load() ??
       options.webhooks ??
       webhookSubscriptionsFromEnv();
-    webhookOutbox = new SqliteWebhookOutbox({
+    webhookOutbox = await SqliteWebhookOutbox.create({
       path: options.databasePath,
       key: `${program.program_id}:webhook-outbox`
     });
-    if (options.reset) webhookOutbox.clear();
+    if (options.reset) await webhookOutbox.clear();
     webhookHistory = new SqliteWebhookHistoryStore({
       path: options.databasePath,
       key: `${program.program_id}:webhook-history`
     });
-    if (options.reset) webhookHistory.clear();
-    const dispatcher = new WebhookDispatcher({
+    if (options.reset) await webhookHistory.clear();
+    const dispatcher = await WebhookDispatcher.create({
       subscriptions,
       outbox: webhookOutbox,
       historyStore: webhookHistory,
@@ -239,21 +239,23 @@ export async function createDemoPlatform(options: DemoPlatformOptions): Promise<
         await engagement?.close();
         await programs.close();
         store.close();
-        webhookSubscriptionStore?.close();
-        webhookHistory?.close();
+        await webhookSubscriptionStore?.close();
+        await webhookHistory?.close();
         if (!webhookOutbox) return;
         const outboxToClose = webhookOutbox;
         if (dispatcher.inFlightDeliveries() === 0) {
-          outboxToClose.close();
+          await outboxToClose.close();
           return;
         }
-        void dispatcher.flush().finally(() => outboxToClose.close());
+        void dispatcher.flush().finally(() => {
+          void outboxToClose.close();
+        });
       }
     };
   } catch (error) {
-    webhookOutbox?.close();
-    webhookHistory?.close();
-    webhookSubscriptionStore?.close();
+    await webhookOutbox?.close();
+    await webhookHistory?.close();
+    await webhookSubscriptionStore?.close();
     await campaigns?.close();
     await memberships?.close();
     await access?.close();
@@ -286,7 +288,7 @@ export async function createPostgresProtocolPlatform(
       "Postgres engine state uses a different program definition; publish a compatible migration or reset explicitly"
     );
   }
-  const dispatcher = new WebhookDispatcher({
+  const dispatcher = await WebhookDispatcher.create({
     subscriptions: options.webhooks ?? webhookSubscriptionsFromEnv(),
     onError: (message) => console.error(`[lip] ${message}`)
   });
