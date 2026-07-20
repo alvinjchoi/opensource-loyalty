@@ -224,7 +224,7 @@ turning implementation-specific operations into normative LIP requirements.
 - [x] Docker volume persistence and package-level storage verification
 - [x] Tenant-aware normalized Postgres engine adapter, numbered migrations,
   optimistic revisions, advisory transaction locks, and scheduler leases
-- [ ] Move program, campaign, membership, access, and webhook extension stores
+- [x] Move program, campaign, membership, access, and webhook extension stores
   to the asynchronous Postgres state contract
 - [x] Scoped Admin users, roles, tenant API keys, and audit log
 - [x] Program configuration editor with validation and publish workflow
