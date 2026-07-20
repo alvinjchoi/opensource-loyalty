@@ -155,7 +155,7 @@ export class ProgramManagementService {
   private readonly store: AsyncStateStore<ProgramManagementState>;
   private state: ProgramManagementState;
   private revision: number;
-  private applyProgram?: (program: ProgramDefinition) => void;
+  private applyProgram?: (program: ProgramDefinition) => void | Promise<void>;
 
   private constructor(
     options: ProgramManagementServiceOptions,
@@ -314,7 +314,7 @@ export class ProgramManagementService {
     return this.snapshot();
   }
 
-  public bindPublisher(apply: (program: ProgramDefinition) => void): void {
+  public bindPublisher(apply: (program: ProgramDefinition) => void | Promise<void>): void {
     this.applyProgram = apply;
   }
 
@@ -397,7 +397,7 @@ export class ProgramManagementService {
     // snapshot to this compatible published definition after an interrupted write.
     await this.save();
     try {
-      apply(clone(program));
+      await apply(clone(program));
     } catch (error) {
       this.state = previous;
       await this.save();

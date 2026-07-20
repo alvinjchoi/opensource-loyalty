@@ -2,13 +2,17 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { AsyncSqliteStateStore } from "@loyalty-interchange/storage-sqlite";
 import {
-  SqliteWebhookHistoryStore,
-  SqliteWebhookOutbox,
-  SqliteWebhookSubscriptionStore,
+  WebhookHistoryJournal,
+  WebhookOutboxJournal,
+  WebhookSubscriptionJournal,
   type ManagedWebhookSubscription,
   type WebhookDeliveryArchiveEntry,
-  type WebhookOutboxEntry
+  type WebhookHistoryState,
+  type WebhookOutboxEntry,
+  type WebhookOutboxState,
+  type WebhookSubscriptionState
 } from "@loyalty-interchange/server";
 
 const makeOutboxEntry = (id: string): WebhookOutboxEntry => ({
@@ -43,34 +47,34 @@ describe("async webhook stores", () => {
 
   it("outbox persists puts and removes across reopen", async () => {
     const path = tempPath();
-    const outbox = await SqliteWebhookOutbox.create({ path, key: "demo:webhook-outbox" });
+    const outbox = await WebhookOutboxJournal.create({ store: new AsyncSqliteStateStore<WebhookOutboxState>({ path, key: "demo:webhook-outbox" }) });
     await outbox.put(makeOutboxEntry("a"));
     await outbox.put(makeOutboxEntry("b"));
     await outbox.remove("a");
-    expect((await outbox.list()).map((entry) => entry.delivery_id)).toEqual(["b"]);
+    expect((await outbox.list()).map((entry: WebhookOutboxEntry) => entry.delivery_id)).toEqual(["b"]);
     await outbox.close();
 
-    const reopened = await SqliteWebhookOutbox.create({ path, key: "demo:webhook-outbox" });
-    expect((await reopened.list()).map((entry) => entry.delivery_id)).toEqual(["b"]);
+    const reopened = await WebhookOutboxJournal.create({ store: new AsyncSqliteStateStore<WebhookOutboxState>({ path, key: "demo:webhook-outbox" }) });
+    expect((await reopened.list()).map((entry: WebhookOutboxEntry) => entry.delivery_id)).toEqual(["b"]);
     await reopened.close();
   });
 
   it("outbox preserves the order of un-awaited writes", async () => {
     const path = tempPath();
-    const outbox = await SqliteWebhookOutbox.create({ path, key: "demo:webhook-outbox" });
+    const outbox = await WebhookOutboxJournal.create({ store: new AsyncSqliteStateStore<WebhookOutboxState>({ path, key: "demo:webhook-outbox" }) });
     void outbox.put(makeOutboxEntry("first"));
     void outbox.put(makeOutboxEntry("second"));
     void outbox.remove("first");
     await outbox.close();
 
-    const reopened = await SqliteWebhookOutbox.create({ path, key: "demo:webhook-outbox" });
-    expect((await reopened.list()).map((entry) => entry.delivery_id)).toEqual(["second"]);
+    const reopened = await WebhookOutboxJournal.create({ store: new AsyncSqliteStateStore<WebhookOutboxState>({ path, key: "demo:webhook-outbox" }) });
+    expect((await reopened.list()).map((entry: WebhookOutboxEntry) => entry.delivery_id)).toEqual(["second"]);
     await reopened.close();
   });
 
   it("history round-trips archive entries", async () => {
     const path = tempPath();
-    const history = new SqliteWebhookHistoryStore({ path, key: "demo:webhook-history" });
+    const history = new WebhookHistoryJournal({ store: new AsyncSqliteStateStore<WebhookHistoryState>({ path, key: "demo:webhook-history" }) });
     const entry: WebhookDeliveryArchiveEntry = {
       ...makeOutboxEntry("archived"),
       event_id: "event-archived",
@@ -82,14 +86,14 @@ describe("async webhook stores", () => {
     await history.save([entry]);
     await history.close();
 
-    const reopened = new SqliteWebhookHistoryStore({ path, key: "demo:webhook-history" });
+    const reopened = new WebhookHistoryJournal({ store: new AsyncSqliteStateStore<WebhookHistoryState>({ path, key: "demo:webhook-history" }) });
     expect((await reopened.list()).map(({ delivery_id }) => delivery_id)).toEqual(["archived"]);
     await reopened.close();
   });
 
   it("subscription store round-trips subscriptions and reports absence as undefined", async () => {
     const path = tempPath();
-    const store = new SqliteWebhookSubscriptionStore({ path, key: "demo:webhook-subscriptions" });
+    const store = new WebhookSubscriptionJournal({ store: new AsyncSqliteStateStore<WebhookSubscriptionState>({ path, key: "demo:webhook-subscriptions" }) });
     expect(await store.load()).toBeUndefined();
     const subscription: ManagedWebhookSubscription = {
       subscription_id: "webhook_test",
@@ -100,7 +104,7 @@ describe("async webhook stores", () => {
     await store.save([subscription]);
     await store.close();
 
-    const reopened = new SqliteWebhookSubscriptionStore({ path, key: "demo:webhook-subscriptions" });
+    const reopened = new WebhookSubscriptionJournal({ store: new AsyncSqliteStateStore<WebhookSubscriptionState>({ path, key: "demo:webhook-subscriptions" }) });
     expect((await reopened.load())?.map(({ subscription_id }) => subscription_id)).toEqual(["webhook_test"]);
     await reopened.close();
   });

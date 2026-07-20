@@ -1,21 +1,22 @@
-import { AsyncSqliteStateStore } from "@loyalty-interchange/storage-sqlite";
+import type { AsyncStateStore } from "@loyalty-interchange/storage";
 import type { ManagedWebhookSubscription } from "./webhooks.js";
 
-interface WebhookSubscriptionState {
+export interface WebhookSubscriptionState {
   version: 1;
   subscriptions: ManagedWebhookSubscription[];
 }
 
 /**
- * Durable store for managed webhook subscriptions. Saves are serialized,
- * unconditional snapshots — the dispatcher is the single writer.
+ * Durable store for managed webhook subscriptions over an injected
+ * AsyncStateStore. Saves are serialized, unconditional snapshots — the
+ * dispatcher is the single writer.
  */
-export class SqliteWebhookSubscriptionStore {
-  private readonly store: AsyncSqliteStateStore<WebhookSubscriptionState>;
+export class WebhookSubscriptionJournal {
+  private readonly store: AsyncStateStore<WebhookSubscriptionState>;
   private tail: Promise<void> = Promise.resolve();
 
-  public constructor(options: { path: string; key: string }) {
-    this.store = new AsyncSqliteStateStore<WebhookSubscriptionState>(options);
+  public constructor(options: { store: AsyncStateStore<WebhookSubscriptionState> }) {
+    this.store = options.store;
   }
 
   public async load(): Promise<ManagedWebhookSubscription[] | undefined> {

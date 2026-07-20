@@ -67,6 +67,11 @@ export interface CampaignServiceOptions {
   store: AsyncStateStore<CampaignState>;
   engine: LoyaltyEngine;
   persistEngine: (state: LoyaltyEngineState) => void;
+  /**
+   * Runs an engine mutation inside an external storage transaction (Postgres
+   * mode); defaults to a passthrough for the single-writer SQLite runtime.
+   */
+  executeEngineOperation?: <T>(operation: () => T | Promise<T>) => Promise<T>;
   reset?: boolean;
   schedulerIntervalMs?: number | false;
 }
@@ -85,6 +90,7 @@ export class CampaignService {
   private readonly store: AsyncStateStore<CampaignState>;
   private readonly engine: LoyaltyEngine;
   private readonly persistEngine: (state: LoyaltyEngineState) => void;
+  private readonly executeEngineOperation: <T>(operation: () => T | Promise<T>) => Promise<T>;
   private readonly scheduler: NodeJS.Timeout | undefined;
   private state: CampaignState;
   private revision: number;
@@ -97,6 +103,8 @@ export class CampaignService {
     this.store = options.store;
     this.engine = options.engine;
     this.persistEngine = options.persistEngine;
+    this.executeEngineOperation =
+      options.executeEngineOperation ?? (async (operation) => operation());
     this.state = state;
     this.revision = revision;
     this.scheduler = options.schedulerIntervalMs
@@ -310,49 +318,51 @@ export class CampaignService {
     const startedAt = timestamp();
     const runId = `run_${randomUUID()}`;
     const outcomes: CampaignRun["outcomes"] = [];
-    for (const memberId of this.resolveSegmentMembers(segment)) {
-      const issuedRewardId = `${campaign.campaign_id}:${memberId}`;
-      try {
-        const existing = this.engine.inspectAdmin().issued_rewards.find((reward) =>
-          reward.issued_reward_id === issuedRewardId
-        );
-        if (existing) {
-          outcomes.push({ member_id: memberId, issued_reward_id: issuedRewardId, status: "skipped" });
-          continue;
+    await this.executeEngineOperation(() => {
+      for (const memberId of this.resolveSegmentMembers(segment)) {
+        const issuedRewardId = `${campaign.campaign_id}:${memberId}`;
+        try {
+          const existing = this.engine.inspectAdmin().issued_rewards.find((reward) =>
+            reward.issued_reward_id === issuedRewardId
+          );
+          if (existing) {
+            outcomes.push({ member_id: memberId, issued_reward_id: issuedRewardId, status: "skipped" });
+            continue;
+          }
+          const occurredAt = timestamp();
+          this.engine.issueReward({
+            context: {
+              protocol_version: "1.0",
+              profile: "foodservice/1.0",
+              request_id: `${runId}:${memberId}`,
+              idempotency_key: issuedRewardId,
+              occurred_at: occurredAt,
+              source: { system: "reference-campaigns", instance: actor }
+            },
+            issued_reward_id: issuedRewardId,
+            member_id: memberId,
+            program_id: this.engine.getProgramDefinition().program_id,
+            reward_id: campaign.reward_id,
+            ...(campaign.issued_reward_ttl_seconds
+              ? {
+                  expires_at: new Date(
+                    Date.parse(occurredAt) + campaign.issued_reward_ttl_seconds * 1000
+                  ).toISOString()
+                }
+              : {})
+          });
+          outcomes.push({ member_id: memberId, issued_reward_id: issuedRewardId, status: "issued" });
+        } catch (error) {
+          outcomes.push({
+            member_id: memberId,
+            issued_reward_id: issuedRewardId,
+            status: "failed",
+            error: error instanceof Error ? error.message : String(error)
+          });
         }
-        const occurredAt = timestamp();
-        this.engine.issueReward({
-          context: {
-            protocol_version: "1.0",
-            profile: "foodservice/1.0",
-            request_id: `${runId}:${memberId}`,
-            idempotency_key: issuedRewardId,
-            occurred_at: occurredAt,
-            source: { system: "reference-campaigns", instance: actor }
-          },
-          issued_reward_id: issuedRewardId,
-          member_id: memberId,
-          program_id: this.engine.getProgramDefinition().program_id,
-          reward_id: campaign.reward_id,
-          ...(campaign.issued_reward_ttl_seconds
-            ? {
-                expires_at: new Date(
-                  Date.parse(occurredAt) + campaign.issued_reward_ttl_seconds * 1000
-                ).toISOString()
-              }
-            : {})
-        });
-        outcomes.push({ member_id: memberId, issued_reward_id: issuedRewardId, status: "issued" });
-      } catch (error) {
-        outcomes.push({
-          member_id: memberId,
-          issued_reward_id: issuedRewardId,
-          status: "failed",
-          error: error instanceof Error ? error.message : String(error)
-        });
       }
-    }
-    this.persistEngine(this.engine.exportState());
+      this.persistEngine(this.engine.exportState());
+    });
     const completedAt = timestamp();
     const run: CampaignRun = {
       run_id: runId,
