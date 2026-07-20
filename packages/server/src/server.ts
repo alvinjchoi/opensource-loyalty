@@ -193,10 +193,10 @@ function rootPrincipal(options: ServerOptions): TenantPrincipal {
   };
 }
 
-function bearerPrincipal(
+async function bearerPrincipal(
   request: IncomingMessage,
   options: ServerOptions
-): TenantPrincipal | undefined {
+): Promise<TenantPrincipal | undefined> {
   const secret = bearerSecret(request);
   if (!secret) return undefined;
   if (equalSecret(secret, options.apiKey)) {
@@ -205,12 +205,12 @@ function bearerPrincipal(
   return options.admin?.access?.authenticate(secret);
 }
 
-function protocolAuthorized(
+async function protocolAuthorized(
   request: IncomingMessage,
   options: ServerOptions,
   permission: "protocol:read" | "protocol:write"
-): boolean {
-  const principal = bearerPrincipal(request, options);
+): Promise<boolean> {
+  const principal = await bearerPrincipal(request, options);
   return Boolean(
     principal &&
     (principal.actor_type === "root" ||
@@ -239,11 +239,11 @@ function adminStorage(options: ServerOptions): AdminStorageDescriptor {
   };
 }
 
-function adminBootstrapDocument(
+async function adminBootstrapDocument(
   options: ServerOptions,
   request: IncomingMessage,
   sessions: ReadonlyMap<string, AdminSession>
-): AdminBootstrapDocument {
+): Promise<AdminBootstrapDocument> {
   const usesDefaultLocalKey = options.apiKey === DEFAULT_LOCAL_API_KEY;
   return {
     admin_api_version: "0.4",
@@ -259,7 +259,7 @@ function adminBootstrapDocument(
         : "Copy the Admin/API key from the terminal that started this server. Docker users can run docker compose logs lip."
     },
     session: {
-      authenticated: isAdminAuthorized(request, options, sessions)
+      authenticated: await isAdminAuthorized(request, options, sessions)
     },
     platform: {
       protocol_version: "1.0",
@@ -404,12 +404,12 @@ function adminCookieAttributes(request: IncomingMessage): string {
   return isSecureRequest(request) ? "; SameSite=Strict; Secure" : "; SameSite=Strict";
 }
 
-function isAdminAuthorized(
+async function isAdminAuthorized(
   request: IncomingMessage,
   options: ServerOptions,
   sessions: ReadonlyMap<string, AdminSession>
-): boolean {
-  const principal = adminPrincipal(request, options, sessions);
+): Promise<boolean> {
+  const principal = await adminPrincipal(request, options, sessions);
   return Boolean(
     principal &&
     (principal.actor_type === "root" ||
@@ -417,13 +417,13 @@ function isAdminAuthorized(
   );
 }
 
-function isAdminWriteAuthorized(
+async function isAdminWriteAuthorized(
   request: IncomingMessage,
   options: ServerOptions,
   sessions: ReadonlyMap<string, AdminSession>,
   permission: TenantPermission = "admin:write"
-): boolean {
-  const bearer = bearerPrincipal(request, options);
+): Promise<boolean> {
+  const bearer = await bearerPrincipal(request, options);
   if (bearer) {
     return bearer.actor_type === "root" ||
       Boolean(options.admin?.access?.hasPermission(bearer, permission));
@@ -442,21 +442,21 @@ function isAdminWriteAuthorized(
   );
 }
 
-function adminPrincipal(
+async function adminPrincipal(
   request: IncomingMessage,
   options: ServerOptions,
   sessions: ReadonlyMap<string, AdminSession>
-): TenantPrincipal | undefined {
-  return bearerPrincipal(request, options) ??
+): Promise<TenantPrincipal | undefined> {
+  return await bearerPrincipal(request, options) ??
     sessions.get(cookieValue(request, "lip_admin_session") ?? "")?.principal;
 }
 
-function adminActor(
+async function adminActor(
   request: IncomingMessage,
   options: ServerOptions,
   sessions: ReadonlyMap<string, AdminSession>
-): string {
-  return adminPrincipal(request, options, sessions)?.actor_id ?? "unknown-admin";
+): Promise<string> {
+  return (await adminPrincipal(request, options, sessions))?.actor_id ?? "unknown-admin";
 }
 
 const contentTypes: Record<string, string> = {
@@ -751,21 +751,20 @@ export function createReferenceServer(engine: LoyaltyEngine, options: ServerOpti
         !["/admin/api/v1/session", "/admin/api/v1/logout"].includes(path) &&
         response.statusCode < 400
       ) {
-        const principal = adminPrincipal(request, options, adminSessions);
-        if (principal) {
-          try {
-            options.admin.access.recordAudit(
-              principal,
-              `admin.${method.toLowerCase()}`,
-              path,
-              undefined,
-              { status: response.statusCode },
-              requestId
-            );
-          } catch {
-            // Audit persistence must never change an already completed response.
-          }
-        }
+        void (async () => {
+          const principal = await adminPrincipal(request, options, adminSessions);
+          if (!principal) return;
+          await options.admin?.access?.recordAudit(
+            principal,
+            `admin.${method.toLowerCase()}`,
+            path,
+            undefined,
+            { status: response.statusCode },
+            requestId
+          );
+        })().catch(() => {
+          // Audit persistence must never change an already completed response.
+        });
       }
       if (
         options.admin?.access &&
@@ -773,21 +772,20 @@ export function createReferenceServer(engine: LoyaltyEngine, options: ServerOpti
         protocolPermission(path) === "protocol:write" &&
         response.statusCode < 400
       ) {
-        const principal = bearerPrincipal(request, options);
-        if (principal) {
-          try {
-            options.admin.access.recordAudit(
-              principal,
-              "protocol.write",
-              path,
-              undefined,
-              { status: response.statusCode },
-              requestId
-            );
-          } catch {
-            // Audit persistence must never change an already completed response.
-          }
-        }
+        void (async () => {
+          const principal = await bearerPrincipal(request, options);
+          if (!principal) return;
+          await options.admin?.access?.recordAudit(
+            principal,
+            "protocol.write",
+            path,
+            undefined,
+            { status: response.statusCode },
+            requestId
+          );
+        })().catch(() => {
+          // Audit persistence must never change an already completed response.
+        });
       }
       if (!options.requestLogger) return;
       const contentLength = response.getHeader("content-length");
@@ -837,7 +835,7 @@ export function createReferenceServer(engine: LoyaltyEngine, options: ServerOpti
       }
 
       if (metrics && method === "GET" && path === "/metrics") {
-        if (!protocolAuthorized(request, options, "protocol:read")) {
+        if (!(await protocolAuthorized(request, options, "protocol:read"))) {
           response.setHeader("www-authenticate", "Bearer");
           sendJson(response, 401, problem(401, "Unauthorized", "unauthorized"), "application/problem+json");
           return;
@@ -858,7 +856,7 @@ export function createReferenceServer(engine: LoyaltyEngine, options: ServerOpti
       }
 
       if (method === "GET" && path === "/lip/v1/capabilities") {
-        if (!protocolAuthorized(request, options, "protocol:read")) {
+        if (!(await protocolAuthorized(request, options, "protocol:read"))) {
           response.setHeader("www-authenticate", "Bearer");
           sendJson(response, 401, problem(401, "Unauthorized", "unauthorized"), "application/problem+json");
           return;
@@ -875,7 +873,7 @@ export function createReferenceServer(engine: LoyaltyEngine, options: ServerOpti
       }
 
       if (adminEnabled && method === "GET" && path === "/admin/api/v1/bootstrap") {
-        sendJson(response, 200, adminBootstrapDocument(options, request, adminSessions));
+        sendJson(response, 200, await adminBootstrapDocument(options, request, adminSessions));
         return;
       }
 
@@ -887,7 +885,7 @@ export function createReferenceServer(engine: LoyaltyEngine, options: ServerOpti
         const principal = typeof candidate === "string"
           ? (equalSecret(candidate, options.apiKey)
               ? rootPrincipal(options)
-              : options.admin?.access?.authenticate(candidate))
+              : await options.admin?.access?.authenticate(candidate))
           : undefined;
         if (
           !principal ||
@@ -929,7 +927,7 @@ export function createReferenceServer(engine: LoyaltyEngine, options: ServerOpti
       }
 
       if (adminEnabled && method === "GET" && path === "/admin/api/v1/snapshot") {
-        if (!isAdminAuthorized(request, options, adminSessions)) {
+        if (!(await isAdminAuthorized(request, options, adminSessions))) {
           sendJson(response, 401, problem(401, "Unauthorized", "unauthorized"), "application/problem+json");
           return;
         }
@@ -982,7 +980,7 @@ export function createReferenceServer(engine: LoyaltyEngine, options: ServerOpti
         method === "GET" &&
         ["/admin/api/v1/analytics", "/admin/api/v1/exports/members"].includes(path)
       ) {
-        if (!isAdminAuthorized(request, options, adminSessions)) {
+        if (!(await isAdminAuthorized(request, options, adminSessions))) {
           sendJson(response, 401, problem(401, "Unauthorized", "unauthorized"), "application/problem+json");
           return;
         }
@@ -1030,11 +1028,11 @@ export function createReferenceServer(engine: LoyaltyEngine, options: ServerOpti
         path.startsWith("/admin/api/v1/engagement/") &&
         ["PUT", "POST"].includes(method)
       ) {
-        if (!isAdminAuthorized(request, options, adminSessions)) {
+        if (!(await isAdminAuthorized(request, options, adminSessions))) {
           sendJson(response, 401, problem(401, "Unauthorized", "unauthorized"), "application/problem+json");
           return;
         }
-        if (!isAdminWriteAuthorized(request, options, adminSessions)) {
+        if (!(await isAdminWriteAuthorized(request, options, adminSessions))) {
           sendJson(response, 403, problem(403, "Forbidden", "forbidden"), "application/problem+json");
           return;
         }
@@ -1109,11 +1107,11 @@ export function createReferenceServer(engine: LoyaltyEngine, options: ServerOpti
         path.startsWith("/admin/api/v1/access/") &&
         ["PUT", "POST"].includes(method)
       ) {
-        if (!isAdminAuthorized(request, options, adminSessions)) {
+        if (!(await isAdminAuthorized(request, options, adminSessions))) {
           sendJson(response, 401, problem(401, "Unauthorized", "unauthorized"), "application/problem+json");
           return;
         }
-        if (!isAdminWriteAuthorized(request, options, adminSessions, "access:manage")) {
+        if (!(await isAdminWriteAuthorized(request, options, adminSessions, "access:manage"))) {
           sendJson(
             response,
             403,
@@ -1122,7 +1120,7 @@ export function createReferenceServer(engine: LoyaltyEngine, options: ServerOpti
           );
           return;
         }
-        const principal = adminPrincipal(request, options, adminSessions)!;
+        const principal = (await adminPrincipal(request, options, adminSessions))!;
         const body = await readBody(request);
         const values = body && typeof body === "object" && !Array.isArray(body)
           ? body as Record<string, unknown>
@@ -1136,7 +1134,7 @@ export function createReferenceServer(engine: LoyaltyEngine, options: ServerOpti
               "email and role are required"
             );
           }
-          sendJson(response, 200, access.upsertUser({
+          sendJson(response, 200, await access.upsertUser({
             ...(typeof values["user_id"] === "string" ? { user_id: values["user_id"] } : {}),
             email: values["email"],
             role: values["role"] as TenantRole,
@@ -1154,7 +1152,7 @@ export function createReferenceServer(engine: LoyaltyEngine, options: ServerOpti
               "name and role are required"
             );
           }
-          sendJson(response, 201, access.createApiKey({
+          sendJson(response, 201, await access.createApiKey({
             name: values["name"],
             role: values["role"] as TenantRole,
             ...(typeof values["expires_at"] === "string"
@@ -1172,7 +1170,7 @@ export function createReferenceServer(engine: LoyaltyEngine, options: ServerOpti
               "key_id is required"
             );
           }
-          access.revokeApiKey(values["key_id"], principal);
+          await access.revokeApiKey(values["key_id"], principal);
           sendJson(response, 200, { revoked: true });
           return;
         }
@@ -1185,11 +1183,11 @@ export function createReferenceServer(engine: LoyaltyEngine, options: ServerOpti
         ["/admin/api/v1/memberships/grant", "/admin/api/v1/memberships/status"].includes(path) &&
         method === "POST"
       ) {
-        if (!isAdminAuthorized(request, options, adminSessions)) {
+        if (!(await isAdminAuthorized(request, options, adminSessions))) {
           sendJson(response, 401, problem(401, "Unauthorized", "unauthorized"), "application/problem+json");
           return;
         }
-        if (!isAdminWriteAuthorized(request, options, adminSessions)) {
+        if (!(await isAdminWriteAuthorized(request, options, adminSessions))) {
           sendJson(
             response,
             403,
@@ -1202,7 +1200,7 @@ export function createReferenceServer(engine: LoyaltyEngine, options: ServerOpti
         const values = body && typeof body === "object" && !Array.isArray(body)
           ? body as Record<string, unknown>
           : {};
-        const actor = adminActor(request, options, adminSessions);
+        const actor = await adminActor(request, options, adminSessions);
         if (path === "/admin/api/v1/memberships/grant") {
           if (
             typeof values["member_id"] !== "string" ||
@@ -1251,11 +1249,11 @@ export function createReferenceServer(engine: LoyaltyEngine, options: ServerOpti
           "/admin/api/v1/campaigns/run"].includes(path) &&
         ["PUT", "POST"].includes(method)
       ) {
-        if (!isAdminAuthorized(request, options, adminSessions)) {
+        if (!(await isAdminAuthorized(request, options, adminSessions))) {
           sendJson(response, 401, problem(401, "Unauthorized", "unauthorized"), "application/problem+json");
           return;
         }
-        if (!isAdminWriteAuthorized(request, options, adminSessions)) {
+        if (!(await isAdminWriteAuthorized(request, options, adminSessions))) {
           sendJson(
             response,
             403,
@@ -1338,7 +1336,7 @@ export function createReferenceServer(engine: LoyaltyEngine, options: ServerOpti
             200,
             campaigns.runCampaign(
               values["campaign_id"],
-              adminActor(request, options, adminSessions)
+              await adminActor(request, options, adminSessions)
             )
           );
           return;
@@ -1350,11 +1348,11 @@ export function createReferenceServer(engine: LoyaltyEngine, options: ServerOpti
         method === "POST" &&
         path === "/admin/api/v1/members/cancel"
       ) {
-        if (!isAdminAuthorized(request, options, adminSessions)) {
+        if (!(await isAdminAuthorized(request, options, adminSessions))) {
           sendJson(response, 401, problem(401, "Unauthorized", "unauthorized"), "application/problem+json");
           return;
         }
-        if (!isAdminWriteAuthorized(request, options, adminSessions)) {
+        if (!(await isAdminWriteAuthorized(request, options, adminSessions))) {
           sendJson(
             response,
             403,
@@ -1380,7 +1378,7 @@ export function createReferenceServer(engine: LoyaltyEngine, options: ServerOpti
       }
 
       if (adminEnabled && method === "GET" && path === "/admin/api/v1/maintenance") {
-        if (!isAdminAuthorized(request, options, adminSessions)) {
+        if (!(await isAdminAuthorized(request, options, adminSessions))) {
           sendJson(response, 401, problem(401, "Unauthorized", "unauthorized"), "application/problem+json");
           return;
         }
@@ -1389,11 +1387,11 @@ export function createReferenceServer(engine: LoyaltyEngine, options: ServerOpti
       }
 
       if (adminEnabled && method === "POST" && path === "/admin/api/v1/maintenance") {
-        if (!isAdminAuthorized(request, options, adminSessions)) {
+        if (!(await isAdminAuthorized(request, options, adminSessions))) {
           sendJson(response, 401, problem(401, "Unauthorized", "unauthorized"), "application/problem+json");
           return;
         }
-        if (!isAdminWriteAuthorized(request, options, adminSessions)) {
+        if (!(await isAdminWriteAuthorized(request, options, adminSessions))) {
           sendJson(
             response,
             403,
@@ -1415,10 +1413,11 @@ export function createReferenceServer(engine: LoyaltyEngine, options: ServerOpti
           );
         }
         writeFrozen = values["write_frozen"];
-        const principal = bearerPrincipal(request, options) ?? adminPrincipal(request, options, adminSessions);
+        const principal = await bearerPrincipal(request, options) ??
+          await adminPrincipal(request, options, adminSessions);
         if (principal) {
           try {
-            options.admin?.access?.recordAudit(
+            await options.admin?.access?.recordAudit(
               principal,
               "maintenance.write_freeze.changed",
               "server",
@@ -1440,7 +1439,7 @@ export function createReferenceServer(engine: LoyaltyEngine, options: ServerOpti
         method === "GET" &&
         path === "/admin/api/v1/webhooks/health"
       ) {
-        if (!isAdminAuthorized(request, options, adminSessions)) {
+        if (!(await isAdminAuthorized(request, options, adminSessions))) {
           sendJson(response, 401, problem(401, "Unauthorized", "unauthorized"), "application/problem+json");
           return;
         }
@@ -1453,11 +1452,11 @@ export function createReferenceServer(engine: LoyaltyEngine, options: ServerOpti
         path.startsWith("/admin/api/v1/webhooks/") &&
         ["PUT", "POST"].includes(method)
       ) {
-        if (!isAdminAuthorized(request, options, adminSessions)) {
+        if (!(await isAdminAuthorized(request, options, adminSessions))) {
           sendJson(response, 401, problem(401, "Unauthorized", "unauthorized"), "application/problem+json");
           return;
         }
-        if (!isAdminWriteAuthorized(request, options, adminSessions)) {
+        if (!(await isAdminWriteAuthorized(request, options, adminSessions))) {
           sendJson(
             response,
             403,
@@ -1532,7 +1531,7 @@ export function createReferenceServer(engine: LoyaltyEngine, options: ServerOpti
         path.startsWith("/admin/api/v1/program/") &&
         ["PUT", "POST", "DELETE"].includes(method)
       ) {
-        if (!isAdminAuthorized(request, options, adminSessions)) {
+        if (!(await isAdminAuthorized(request, options, adminSessions))) {
           sendJson(response, 401, problem(401, "Unauthorized", "unauthorized"), "application/problem+json");
           return;
         }
@@ -1540,7 +1539,7 @@ export function createReferenceServer(engine: LoyaltyEngine, options: ServerOpti
           ["/admin/api/v1/program/publish", "/admin/api/v1/program/rollback"].includes(path)
             ? "program:publish"
             : "admin:write";
-        if (!isAdminWriteAuthorized(request, options, adminSessions, requiredPermission)) {
+        if (!(await isAdminWriteAuthorized(request, options, adminSessions, requiredPermission))) {
           sendJson(
             response,
             403,
@@ -1553,22 +1552,22 @@ export function createReferenceServer(engine: LoyaltyEngine, options: ServerOpti
         const values = body && typeof body === "object" && !Array.isArray(body)
           ? body as Record<string, unknown>
           : {};
-        const actor = adminActor(request, options, adminSessions);
+        const actor = await adminActor(request, options, adminSessions);
 
         if (method === "PUT" && path === "/admin/api/v1/program/draft") {
-          sendJson(response, 200, programManagement.saveDraft(values["program"], actor));
+          sendJson(response, 200, await programManagement.saveDraft(values["program"], actor));
           return;
         }
         if (method === "DELETE" && path === "/admin/api/v1/program/draft") {
-          sendJson(response, 200, programManagement.discardDraft(actor));
+          sendJson(response, 200, await programManagement.discardDraft(actor));
           return;
         }
         if (method === "POST" && path === "/admin/api/v1/program/draft/validate") {
-          sendJson(response, 200, programManagement.validateDraft());
+          sendJson(response, 200, await programManagement.validateDraft());
           return;
         }
         if (method === "PUT" && path === "/admin/api/v1/program/rewards") {
-          sendJson(response, 200, programManagement.upsertReward(values["reward"], actor));
+          sendJson(response, 200, await programManagement.upsertReward(values["reward"], actor));
           return;
         }
         if (method === "POST" && path === "/admin/api/v1/program/rewards/delete") {
@@ -1580,7 +1579,7 @@ export function createReferenceServer(engine: LoyaltyEngine, options: ServerOpti
               "reward_id is required"
             );
           }
-          sendJson(response, 200, programManagement.deleteReward(values["reward_id"], actor));
+          sendJson(response, 200, await programManagement.deleteReward(values["reward_id"], actor));
           return;
         }
         if (method === "POST" && path === "/admin/api/v1/program/publish") {
@@ -1593,7 +1592,7 @@ export function createReferenceServer(engine: LoyaltyEngine, options: ServerOpti
               "expected_draft_version must be a positive integer"
             );
           }
-          sendJson(response, 200, programManagement.publish(expectedVersion as number, actor));
+          sendJson(response, 200, await programManagement.publish(expectedVersion as number, actor));
           return;
         }
         if (method === "POST" && path === "/admin/api/v1/program/rollback") {
@@ -1606,7 +1605,7 @@ export function createReferenceServer(engine: LoyaltyEngine, options: ServerOpti
               "revision must be a positive integer"
             );
           }
-          sendJson(response, 200, programManagement.rollback(revision as number, actor));
+          sendJson(response, 200, await programManagement.rollback(revision as number, actor));
           return;
         }
       }
@@ -1633,7 +1632,7 @@ export function createReferenceServer(engine: LoyaltyEngine, options: ServerOpti
         return;
       }
 
-      if (!protocolAuthorized(request, options, protocolPermission(path))) {
+      if (!(await protocolAuthorized(request, options, protocolPermission(path)))) {
         response.setHeader("www-authenticate", "Bearer");
         sendJson(response, 401, problem(401, "Unauthorized", "unauthorized"), "application/problem+json");
         return;

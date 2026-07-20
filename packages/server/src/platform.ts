@@ -13,10 +13,10 @@ import { PostgresEngineRepository } from "@loyalty-interchange/storage-postgres"
 import { createDemoProgram, seedDemoData } from "./demo.js";
 import { CampaignService } from "./campaigns.js";
 import { MembershipService, type MembershipAuditState } from "./memberships.js";
-import { AccessControlService } from "./access-control.js";
+import { AccessControlService, type AccessControlState } from "./access-control.js";
 import { EventedLoyaltyEngine } from "./evented-engine.js";
 import { EngagementService } from "./engagement.js";
-import { ProgramManagementService } from "./program-management.js";
+import { ProgramManagementService, type ProgramManagementState } from "./program-management.js";
 import { SqliteWebhookOutbox } from "./webhook-outbox.js";
 import { SqliteWebhookHistoryStore } from "./webhook-history.js";
 import { SqliteWebhookSubscriptionStore } from "./webhook-subscriptions.js";
@@ -100,8 +100,11 @@ function discoverAdminAssetRoot(): string | undefined {
 
 export async function createDemoPlatform(options: DemoPlatformOptions): Promise<DemoPlatform> {
   const configuredProgram = options.program ?? createDemoProgram();
-  const programs = new ProgramManagementService({
-    path: options.databasePath,
+  const programs = await ProgramManagementService.create({
+    store: new AsyncSqliteStateStore<ProgramManagementState>({
+      path: options.databasePath,
+      key: "reference:program-management"
+    }),
     initialProgram: configuredProgram,
     ...(options.reset ? { reset: true } : {})
   });
@@ -180,8 +183,11 @@ export async function createDemoPlatform(options: DemoPlatformOptions): Promise<
       schedulerIntervalMs: 30_000,
       ...(options.reset ? { reset: true } : {})
     });
-    access = new AccessControlService({
-      path: options.databasePath,
+    access = await AccessControlService.create({
+      store: new AsyncSqliteStateStore<AccessControlState>({
+        path: options.databasePath,
+        key: `${program.program_id}:access-control`
+      }),
       tenantId: program.program_id,
       tenantName: program.name ?? program.program_id,
       ...(options.reset ? { reset: true } : {})
@@ -223,9 +229,9 @@ export async function createDemoPlatform(options: DemoPlatformOptions): Promise<
       close: async () => {
         campaigns?.close();
         await memberships?.close();
-        access?.close();
+        await access?.close();
         engagement?.close();
-        programs.close();
+        await programs.close();
         store.close();
         webhookSubscriptionStore?.close();
         webhookHistory?.close();
@@ -244,9 +250,9 @@ export async function createDemoPlatform(options: DemoPlatformOptions): Promise<
     webhookSubscriptionStore?.close();
     campaigns?.close();
     await memberships?.close();
-    access?.close();
+    await access?.close();
     engagement?.close();
-    programs.close();
+    await programs.close();
     store.close();
     throw error;
   }
