@@ -8,6 +8,8 @@ export * from "./customer-service.js";
 export * from "./customer-types.js";
 export * from "./data-plane-provisioner.js";
 export * from "./memory-repository.js";
+export * from "./migrate.js";
+export * from "./tenant-onboarding.js";
 export * from "./postgres-repository.js";
 export * from "./provisioning.js";
 export * from "./server.js";
