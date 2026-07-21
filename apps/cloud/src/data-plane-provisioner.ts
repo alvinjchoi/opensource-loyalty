@@ -218,7 +218,20 @@ export class LocalDataPlaneProvisioner implements CloudProvisioner {
         reservationTtlSeconds: program.reservation_ttl_seconds ?? 120,
         ...("executeEngineOperation" in platform
           ? { executeEngineOperation: platform.executeEngineOperation }
-          : { persistState: (state) => platform.store.save(state) })
+          : { persistState: (state) => platform.store.save(state) }),
+        // Credentials advertise admin_url, so wire the full Admin service
+        // suite the platform constructed (mirrors the server CLI wiring).
+        admin: {
+          ...(platform.adminAssetRoot ? { assetRoot: platform.adminAssetRoot } : {}),
+          storage: platform.store.status,
+          programs: platform.programs,
+          campaigns: platform.campaigns,
+          memberships: platform.memberships,
+          access: platform.access,
+          engagement: platform.engagement,
+          locations: platform.locations,
+          webhookManager: platform.webhooks
+        }
       });
     } catch (error) {
       await Promise.resolve(platform.close());

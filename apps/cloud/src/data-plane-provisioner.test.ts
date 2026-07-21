@@ -136,6 +136,21 @@ describe("LocalDataPlaneProvisioner", () => {
     });
     expect(unauthorized.status).toBe(401);
 
+    // The advertised admin_url is backed by the full Admin service suite.
+    const adminLocations = await fetch(`${ready!.api_url}/admin/api/v1/locations`, {
+      headers: { authorization: `Bearer ${runtime.api_key}` }
+    });
+    expect(adminLocations.status).toBe(200);
+    expect(await adminLocations.json()).toEqual({ locations: [] });
+    const adminSnapshot = await fetch(`${ready!.api_url}/admin/api/v1/snapshot`, {
+      headers: { authorization: `Bearer ${runtime.api_key}` }
+    });
+    expect(adminSnapshot.status).toBe(200);
+    expect(await adminSnapshot.json()).toMatchObject({
+      program_management: expect.objectContaining({ active_program: expect.anything() }),
+      access_control: expect.objectContaining({ tenant: expect.anything() })
+    });
+
     // The credential is delivered as an operator-readable 0600 file.
     expect(statSync(runtime.credentials_path).mode & 0o777).toBe(0o600);
 

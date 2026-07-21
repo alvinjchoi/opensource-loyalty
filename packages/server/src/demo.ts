@@ -1,5 +1,6 @@
 import type { FoodserviceOrder, RequestContext } from "@loyalty-interchange/protocol";
 import { LoyaltyEngine, type ProgramDefinition } from "@loyalty-interchange/reference";
+import type { LocationDirectoryService } from "./locations.js";
 
 export function createDemoProgram(): ProgramDefinition {
   return {
@@ -184,6 +185,20 @@ function demoOrder(
     },
     tenders: [{ tender_id: `${orderId}-tender`, type: "card", amount: money(eligibleSpend) }]
   };
+}
+
+/**
+ * Registers the location the seeded demo orders accrue at so demo location
+ * reports show a named, franchisee-attributed registry row. Idempotent: an
+ * already-populated registry is left untouched.
+ */
+export async function seedDemoLocations(locations: LocationDirectoryService): Promise<void> {
+  if (locations.listLocations().length > 0) return;
+  await locations.upsertLocation({
+    location_id: "location-014",
+    name: "West Market",
+    franchisee_id: "franchisee-west"
+  }, "lip-demo-seed");
 }
 
 export function seedDemoData(engine: LoyaltyEngine): void {

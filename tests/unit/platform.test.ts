@@ -48,6 +48,16 @@ describe("seeded reference platform", () => {
         ])
       });
       expect(second.engine.getLedger()).toHaveLength(9);
+      // Demo seeding registers the seeded order location so location reports
+      // show a named, franchisee-attributed row out of the box.
+      expect(second.locations.snapshot().locations).toEqual([
+        expect.objectContaining({
+          location_id: "location-014",
+          name: "West Market",
+          franchisee_id: "franchisee-west",
+          active: true
+        })
+      ]);
       await second.close();
     } finally {
       rmSync(directory, { recursive: true, force: true });

@@ -15,7 +15,7 @@ import {
   PostgresJsonStateStore,
   createPostgresPool
 } from "@loyalty-interchange/storage-postgres";
-import { createDemoProgram, seedDemoData } from "./demo.js";
+import { createDemoProgram, seedDemoData, seedDemoLocations } from "./demo.js";
 import { CampaignService, type CampaignState } from "./campaigns.js";
 import { MembershipService, type MembershipAuditState } from "./memberships.js";
 import { AccessControlService, type AccessControlState } from "./access-control.js";
@@ -232,6 +232,7 @@ export async function createDemoPlatform(options: DemoPlatformOptions): Promise<
       }),
       ...(options.reset ? { reset: true } : {})
     });
+    if (options.seed !== false && !options.program) await seedDemoLocations(locations);
     programs.bindPublisher((nextProgram) => {
       const previousProgram = engine.getProgramDefinition();
       try {
@@ -439,6 +440,7 @@ export async function createPostgresProtocolPlatform(
       store: stateStore<LocationDirectoryState>("locations"),
       ...(options.reset ? { reset: true } : {})
     });
+    if (options.seed !== false && !options.program) await seedDemoLocations(locations);
     const boundCampaigns = campaigns;
     const boundMemberships = memberships;
     programs.bindPublisher(async (nextProgram) => {
