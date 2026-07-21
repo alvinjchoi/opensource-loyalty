@@ -138,6 +138,7 @@ export const LedgerEntrySchema = Type.Object(
     expires_at: Type.Optional(DateTimeSchema),
     related_entry_id: Type.Optional(IdSchema),
     order_id: Type.Optional(IdSchema),
+    location_id: Type.Optional(IdSchema),
     adjustment_id: Type.Optional(IdSchema),
     reservation_id: Type.Optional(IdSchema),
     classification: Type.Optional(ManualAdjustmentClassificationSchema),
@@ -199,6 +200,7 @@ export const RedemptionReservationSchema = Type.Object(
     reward_id: IdSchema,
     issued_reward_id: Type.Optional(IdSchema),
     order_id: IdSchema,
+    location_id: Type.Optional(IdSchema),
     status: Type.Union([
       Type.Literal("reserved"),
       Type.Literal("captured"),

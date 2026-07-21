@@ -110,10 +110,11 @@ Admin supports:
 The shared development token is suitable for bootstrapping a local reference
 environment. The runtime also supports persisted tenant-scoped users and hashed
 API keys with role-based authorization, expiration, revocation, CSRF-protected
-Admin writes, and audit records. The Postgres protocol runtime coordinates
-engine writes across instances; hosted production still requires location
-scoping and asynchronous Postgres repositories for the remaining Admin
-extension services.
+Admin writes, and audit records. Users and API keys optionally carry
+`allowed_location_ids`, which scopes the location registry and the
+per-location report to a franchisee's own locations. The Postgres protocol
+runtime coordinates engine writes across instances, and the Admin extension
+services persist on tenant-scoped Postgres state rows.
 
 ## Operational guards
 

@@ -15,12 +15,13 @@ import {
   PostgresJsonStateStore,
   createPostgresPool
 } from "@loyalty-interchange/storage-postgres";
-import { createDemoProgram, seedDemoData } from "./demo.js";
+import { createDemoProgram, seedDemoData, seedDemoLocations } from "./demo.js";
 import { CampaignService, type CampaignState } from "./campaigns.js";
 import { MembershipService, type MembershipAuditState } from "./memberships.js";
 import { AccessControlService, type AccessControlState } from "./access-control.js";
 import { EventedLoyaltyEngine } from "./evented-engine.js";
 import { EngagementService, type EngagementState } from "./engagement.js";
+import { LocationDirectoryService, type LocationDirectoryState } from "./locations.js";
 import { ProgramManagementService, type ProgramManagementState } from "./program-management.js";
 import { WebhookOutboxJournal, type WebhookOutboxState } from "./webhook-outbox.js";
 import { WebhookHistoryJournal, type WebhookHistoryState } from "./webhook-history.js";
@@ -56,6 +57,7 @@ export interface DemoPlatform {
   memberships: MembershipService;
   access: AccessControlService;
   engagement: EngagementService;
+  locations: LocationDirectoryService;
   close(): Promise<void>;
 }
 
@@ -69,6 +71,7 @@ export interface PostgresProtocolPlatform {
   memberships: MembershipService;
   access: AccessControlService;
   engagement: EngagementService;
+  locations: LocationDirectoryService;
   executeEngineOperation<T>(operation: () => T | Promise<T>): Promise<T>;
   close(): Promise<void>;
 }
@@ -130,6 +133,7 @@ export async function createDemoPlatform(options: DemoPlatformOptions): Promise<
   let memberships: MembershipService | undefined;
   let access: AccessControlService | undefined;
   let engagement: EngagementService | undefined;
+  let locations: LocationDirectoryService | undefined;
   try {
     if (options.reset) store.clear();
     let state = store.load();
@@ -221,6 +225,14 @@ export async function createDemoPlatform(options: DemoPlatformOptions): Promise<
       schedulerIntervalMs: 30_000,
       ...(options.reset ? { reset: true } : {})
     });
+    locations = await LocationDirectoryService.create({
+      store: new AsyncSqliteStateStore<LocationDirectoryState>({
+        path: options.databasePath,
+        key: `${program.program_id}:locations`
+      }),
+      ...(options.reset ? { reset: true } : {})
+    });
+    if (options.seed !== false && !options.program) await seedDemoLocations(locations);
     programs.bindPublisher((nextProgram) => {
       const previousProgram = engine.getProgramDefinition();
       try {
@@ -248,11 +260,13 @@ export async function createDemoPlatform(options: DemoPlatformOptions): Promise<
       memberships,
       access,
       engagement,
+      locations,
       close: async () => {
         await campaigns?.close();
         await memberships?.close();
         await access?.close();
         await engagement?.close();
+        await locations?.close();
         await programs.close();
         store.close();
         await webhookSubscriptionStore?.close();
@@ -276,6 +290,7 @@ export async function createDemoPlatform(options: DemoPlatformOptions): Promise<
     await memberships?.close();
     await access?.close();
     await engagement?.close();
+    await locations?.close();
     await programs.close();
     store.close();
     throw error;
@@ -300,6 +315,7 @@ export async function createPostgresProtocolPlatform(
   let memberships: MembershipService | undefined;
   let access: AccessControlService | undefined;
   let engagement: EngagementService | undefined;
+  let locations: LocationDirectoryService | undefined;
   let bootDispatcher: WebhookDispatcher | undefined;
   try {
     const migrator = new PostgresJsonStateStore({ pool, tenantId, key: "migration-probe" });
@@ -420,6 +436,11 @@ export async function createPostgresProtocolPlatform(
       schedulerIntervalMs: 30_000,
       ...(options.reset ? { reset: true } : {})
     });
+    locations = await LocationDirectoryService.create({
+      store: stateStore<LocationDirectoryState>("locations"),
+      ...(options.reset ? { reset: true } : {})
+    });
+    if (options.seed !== false && !options.program) await seedDemoLocations(locations);
     const boundCampaigns = campaigns;
     const boundMemberships = memberships;
     programs.bindPublisher(async (nextProgram) => {
@@ -450,12 +471,14 @@ export async function createPostgresProtocolPlatform(
       memberships,
       access,
       engagement,
+      locations,
       executeEngineOperation,
       close: async () => {
         await campaigns?.close();
         await memberships?.close();
         await access?.close();
         await engagement?.close();
+        await locations?.close();
         await programs?.close();
         await dispatcher.flush();
         await subscriptionJournal?.close();
@@ -470,6 +493,7 @@ export async function createPostgresProtocolPlatform(
     await memberships?.close();
     await access?.close();
     await engagement?.close();
+    await locations?.close();
     await programs?.close();
     await bootDispatcher?.flush();
     await subscriptionJournal?.close();

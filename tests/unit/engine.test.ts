@@ -625,6 +625,34 @@ describe("LoyaltyEngine financial lifecycle", () => {
     })).toThrowError(/different facts/);
   });
 
+  it("stamps accrual ledger entries with the order's location for reporting", () => {
+    const engine = enrolledEngine();
+    const accrued = engine.postAccrual({
+      context: makeContext("location-accrual-key"),
+      member_id: "member-001",
+      order: makeOrder({ order_id: "order-location-42" })
+    });
+    expect(accrued.entry.location_id).toBe("location-42");
+
+    const restored = new LoyaltyEngine(makeProgram(), {
+      ids: sequentialIds(),
+      state: engine.exportState()
+    });
+    expect(restored.getLedger()[0]?.location_id).toBe("location-42");
+    expect(
+      engine.postManualAdjustment({
+        context: makeContext("location-manual-key"),
+        member_id: "member-001",
+        program_id: "demo-foodservice",
+        adjustment_id: "manual-location-001",
+        amount: 25,
+        classification: "bonus",
+        reason: "Location-less manual credit",
+        qualifies_for_tier: false
+      }).entry.location_id
+    ).toBeUndefined();
+  });
+
   it("echoes the retry's request_id on idempotent replay", () => {
     const engine = enrolledEngine();
     const request = {
@@ -1309,5 +1337,35 @@ describe("reward availability windows", () => {
       reward_id: "one-dollar-off",
       order: makeOrder({ order_id: "window-order-reserve-late" })
     })).toThrowError(/no longer available/);
+  });
+});
+
+describe("ledger inspection", () => {
+  it("exposes cloned ledger and reservation state without per-member metrics work", () => {
+    const engine = new LoyaltyEngine(makeProgram(), { ids: sequentialIds() });
+    engine.enroll(makeEnroll());
+    engine.postAccrual({
+      context: makeContext("inspect-ledger-accrual"),
+      member_id: "member-001",
+      order: makeOrder()
+    });
+    engine.reserve({
+      context: makeContext("inspect-ledger-reserve"),
+      redemption_id: "redemption-inspect-001",
+      member_id: "member-001",
+      reward_id: "one-dollar-off",
+      order: makeOrder()
+    });
+
+    const inspection = engine.inspectLedger();
+    const admin = engine.inspectAdmin();
+    expect(inspection.ledger).toEqual(admin.ledger);
+    expect(inspection.reservations).toEqual(admin.reservations);
+
+    // Returned values are clones: mutating them must not touch engine state.
+    inspection.ledger[0]!.amount = 999_999;
+    inspection.reservations[0]!.status = "reversed";
+    expect(engine.inspectAdmin().ledger[0]!.amount).not.toBe(999_999);
+    expect(engine.inspectAdmin().reservations[0]!.status).toBe("reserved");
   });
 });

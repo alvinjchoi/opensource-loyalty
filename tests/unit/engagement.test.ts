@@ -14,7 +14,7 @@ import {
   type EngagementState,
   type MessagingConnectorAdapter
 } from "@loyalty-interchange/server";
-import { makeEnroll, makeProgram } from "../fixtures.js";
+import { makeContext, makeEnroll, makeOrder, makeProgram, MutableClock } from "../fixtures.js";
 
 class RecordingAdapter implements MessagingConnectorAdapter {
   public readonly type = "recording";
@@ -170,6 +170,45 @@ describe("engagement integrations", () => {
       ]);
       const csv = memberExport(engine, { format: "csv", marketingOnly: true }) as string;
       expect(csv).toContain("\"'+customer@example.com\"");
+    } finally {
+      await campaigns.close();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("counts expired reservations in reward analytics", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "lip-engagement-expired-"));
+    const path = join(directory, "reference.db");
+    const clock = new MutableClock();
+    const engine = new LoyaltyEngine(makeProgram(), { clock });
+    engine.enroll(makeEnroll("analytics-expired-enroll"));
+    engine.postAccrual({
+      context: makeContext("analytics-expired-accrual"),
+      member_id: "member-001",
+      order: makeOrder()
+    });
+    engine.reserve({
+      context: makeContext("analytics-expired-reserve"),
+      redemption_id: "redemption-analytics-expired",
+      member_id: "member-001",
+      reward_id: "one-dollar-off",
+      order: makeOrder()
+    });
+    clock.advance(300);
+    const campaigns = await CampaignService.create({
+      store: new AsyncSqliteStateStore<CampaignState>({
+        path,
+        key: `${engine.getProgramDefinition().program_id}:campaigns`
+      }),
+      engine,
+      persistEngine: () => undefined,
+      reset: true
+    });
+    try {
+      const analytics = engagementAnalytics(engine, campaigns);
+      expect(analytics.rewards).toEqual([
+        { reward_id: "one-dollar-off", reserved: 0, captured: 0, reversed: 0, expired: 1 }
+      ]);
     } finally {
       await campaigns.close();
       rmSync(directory, { recursive: true, force: true });

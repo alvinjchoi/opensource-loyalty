@@ -3503,6 +3503,12 @@ components:
           pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
           description: Opaque, stable identifier within the owning system.
           type: string
+        location_id:
+          minLength: 1
+          maxLength: 128
+          pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
+          description: Opaque, stable identifier within the owning system.
+          type: string
         adjustment_id:
           minLength: 1
           maxLength: 128
@@ -3758,6 +3764,12 @@ components:
                 pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
                 description: Opaque, stable identifier within the owning system.
                 type: string
+              location_id:
+                minLength: 1
+                maxLength: 128
+                pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
+                description: Opaque, stable identifier within the owning system.
+                type: string
               adjustment_id:
                 minLength: 1
                 maxLength: 128
@@ -3909,6 +3921,12 @@ components:
               pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
               description: Opaque, stable identifier within the owning system.
               type: string
+            location_id:
+              minLength: 1
+              maxLength: 128
+              pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
+              description: Opaque, stable identifier within the owning system.
+              type: string
             adjustment_id:
               minLength: 1
               maxLength: 128
@@ -4020,6 +4038,12 @@ components:
                 description: Opaque, stable identifier within the owning system.
                 type: string
               order_id:
+                minLength: 1
+                maxLength: 128
+                pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
+                description: Opaque, stable identifier within the owning system.
+                type: string
+              location_id:
                 minLength: 1
                 maxLength: 128
                 pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
@@ -4348,6 +4372,12 @@ components:
                       pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
                       description: Opaque, stable identifier within the owning system.
                       type: string
+                    location_id:
+                      minLength: 1
+                      maxLength: 128
+                      pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
+                      description: Opaque, stable identifier within the owning system.
+                      type: string
                     adjustment_id:
                       minLength: 1
                       maxLength: 128
@@ -4430,6 +4460,12 @@ components:
                       description: Opaque, stable identifier within the owning system.
                       type: string
                     order_id:
+                      minLength: 1
+                      maxLength: 128
+                      pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
+                      description: Opaque, stable identifier within the owning system.
+                      type: string
+                    location_id:
                       minLength: 1
                       maxLength: 128
                       pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
@@ -8018,6 +8054,12 @@ components:
           pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
           description: Opaque, stable identifier within the owning system.
           type: string
+        location_id:
+          minLength: 1
+          maxLength: 128
+          pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
+          description: Opaque, stable identifier within the owning system.
+          type: string
         status:
           anyOf:
             - const: reserved
@@ -8317,6 +8359,12 @@ components:
               description: Opaque, stable identifier within the owning system.
               type: string
             order_id:
+              minLength: 1
+              maxLength: 128
+              pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
+              description: Opaque, stable identifier within the owning system.
+              type: string
+            location_id:
               minLength: 1
               maxLength: 128
               pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$

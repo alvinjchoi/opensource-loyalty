@@ -562,6 +562,7 @@ export class LoyaltyEngine {
           unit,
           amount,
           order_id: request.order.order_id,
+          location_id: request.order.scope.location_id,
           ...(amount > 0 && expiration ? {
             expires_at: this.pointExpirationIso(unit),
             create_point_lot: true
@@ -741,6 +742,7 @@ export class LoyaltyEngine {
         reward_id: reward.reward_id,
         ...(issuedReward ? { issued_reward_id: issuedReward.issued_reward_id } : {}),
         order_id: request.order.order_id,
+        location_id: request.order.scope.location_id,
         status: "reserved",
         cost: { unit: rewardCost.unit, amount: issuedReward ? 0 : rewardCost.amount },
         effect: clone(reward.effect),
@@ -793,6 +795,9 @@ export class LoyaltyEngine {
           unit,
           amount: -reservation.cost.amount,
           order_id: reservation.order_id,
+          // The redemption belongs to the reserving order's location, not the
+          // location that originally earned the balance.
+          ...(reservation.location_id ? { location_id: reservation.location_id } : {}),
           reservation_id: reservation.reservation_id
         });
       }
@@ -831,6 +836,7 @@ export class LoyaltyEngine {
             unit,
             amount: reservation.cost.amount,
             order_id: reservation.order_id,
+            ...(reservation.location_id ? { location_id: reservation.location_id } : {}),
             reservation_id: reservation.reservation_id
           });
           this.expirePointLots(reservation.member_id, unit);
@@ -1049,15 +1055,24 @@ export class LoyaltyEngine {
     this.hydrate(state);
   }
 
+  /**
+   * Ledger-only admin inspection: the cloned ledger (newest first) and
+   * reservations without the per-member balance/metric aggregation that
+   * `inspectAdmin()` performs. Reporting over raw entries should prefer this.
+   */
+  public inspectLedger(): { ledger: LedgerEntry[]; reservations: RedemptionReservation[] } {
+    this.expireAllReservations();
+    this.expirePointLots();
+    return {
+      ledger: this.sortedLedgerClone(),
+      reservations: [...this.reservations.values()].map(clone)
+    };
+  }
+
   public inspectAdmin(): ReferenceAdminSnapshot {
     this.expireAllReservations();
     this.expirePointLots();
-    const ledger = [...this.ledger.values()]
-      .sort((left, right) => {
-        const occurred = Date.parse(right.occurred_at) - Date.parse(left.occurred_at);
-        return occurred !== 0 ? occurred : right.entry_id.localeCompare(left.entry_id);
-      })
-      .map(clone);
+    const ledger = this.sortedLedgerClone();
     const members = [...this.members.values()]
       .map((member): ReferenceAdminMember => {
         const metrics = this.accountMetrics(member.member_id);
@@ -1117,6 +1132,16 @@ export class LoyaltyEngine {
       reservations: [...this.reservations.values()].map(clone),
       issued_rewards: [...this.issuedRewards.values()].map(clone)
     };
+  }
+
+  /** Cloned ledger entries, newest first with a stable entry-id tiebreak. */
+  private sortedLedgerClone(): LedgerEntry[] {
+    return [...this.ledger.values()]
+      .sort((left, right) => {
+        const occurred = Date.parse(right.occurred_at) - Date.parse(left.occurred_at);
+        return occurred !== 0 ? occurred : right.entry_id.localeCompare(left.entry_id);
+      })
+      .map(clone);
   }
 
   private hydrate(state: LoyaltyEngineState): void {
@@ -1969,6 +1994,7 @@ export class LoyaltyEngine {
     expires_at?: string;
     related_entry_id?: string;
     order_id?: string;
+    location_id?: string;
     adjustment_id?: string;
     reservation_id?: string;
     classification?: LedgerEntry["classification"];
@@ -1989,6 +2015,7 @@ export class LoyaltyEngine {
       ...(input.expires_at ? { expires_at: input.expires_at } : {}),
       ...(input.related_entry_id ? { related_entry_id: input.related_entry_id } : {}),
       ...(input.order_id ? { order_id: input.order_id } : {}),
+      ...(input.location_id ? { location_id: input.location_id } : {}),
       ...(input.adjustment_id ? { adjustment_id: input.adjustment_id } : {}),
       ...(input.reservation_id ? { reservation_id: input.reservation_id } : {}),
       ...(input.classification ? { classification: input.classification } : {}),

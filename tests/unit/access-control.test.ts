@@ -103,6 +103,220 @@ describe("tenant access control", () => {
     }
   });
 
+  it("scopes users and API keys to allowed locations", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "lip-access-locations-"));
+    const databasePath = join(directory, "reference.db");
+    const service = await AccessControlService.create({
+      store: makeStore(databasePath, "tenant-acme"),
+      tenantId: "tenant-acme",
+      tenantName: "Acme",
+      reset: true
+    });
+    try {
+      const root = service.rootPrincipal();
+      expect(service.locationScopeFor(root)).toBeUndefined();
+
+      const user = await service.upsertUser({
+        email: "franchisee@acme.example",
+        role: "operator",
+        allowed_location_ids: [" location-42 ", "location-42", "location-77"]
+      }, root);
+      expect(user.allowed_location_ids).toEqual(["location-42", "location-77"]);
+      const principal = service.principalForUser(user.user_id);
+      expect(principal?.allowed_location_ids).toEqual(["location-42", "location-77"]);
+      expect(service.locationScopeFor(principal!)).toEqual(["location-42", "location-77"]);
+
+      const unscoped = await service.upsertUser({
+        email: "hq@acme.example",
+        role: "admin"
+      }, root);
+      expect(unscoped.allowed_location_ids).toBeUndefined();
+      expect(service.locationScopeFor(service.principalForUser(unscoped.user_id)!))
+        .toBeUndefined();
+
+      await expect(service.upsertUser({
+        email: "empty-scope@acme.example",
+        role: "viewer",
+        allowed_location_ids: ["   "]
+      }, root)).rejects.toThrowError(/allowed_location_ids/);
+      await expect(service.upsertUser({
+        email: "no-scope@acme.example",
+        role: "viewer",
+        allowed_location_ids: []
+      }, root)).rejects.toThrowError(/allowed_location_ids/);
+
+      const scopedKey = await service.createApiKey({
+        name: "Franchisee dashboard",
+        role: "viewer",
+        allowed_location_ids: ["location-42"]
+      }, root);
+      expect(scopedKey.api_key.allowed_location_ids).toEqual(["location-42"]);
+      const keyPrincipal = await service.authenticate(scopedKey.secret);
+      expect(keyPrincipal?.allowed_location_ids).toEqual(["location-42"]);
+      expect(service.locationScopeFor(keyPrincipal!)).toEqual(["location-42"]);
+    } finally {
+      await service.close();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("preserves an omitted location scope on update and clears it only on explicit null", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "lip-access-preserve-"));
+    const databasePath = join(directory, "reference.db");
+    const service = await AccessControlService.create({
+      store: makeStore(databasePath, "tenant-acme"),
+      tenantId: "tenant-acme",
+      tenantName: "Acme",
+      reset: true
+    });
+    try {
+      const root = service.rootPrincipal();
+      const user = await service.upsertUser({
+        email: "franchisee@acme.example",
+        role: "operator",
+        allowed_location_ids: ["location-42", "location-77"]
+      }, root);
+
+      // Omitted scope on a partial update must not drop the stored scope.
+      const renamed = await service.upsertUser({
+        user_id: user.user_id,
+        email: user.email,
+        name: "Renamed Operator",
+        role: "operator"
+      }, root);
+      expect(renamed.allowed_location_ids).toEqual(["location-42", "location-77"]);
+
+      // Explicit null clears the scope and the audit trail records the clear.
+      const cleared = await service.upsertUser({
+        user_id: user.user_id,
+        email: user.email,
+        role: "operator",
+        allowed_location_ids: null
+      }, root);
+      expect(cleared.allowed_location_ids).toBeUndefined();
+      const clearAudit = service.snapshot().audit
+        .find((entry) => entry.action === "access.user.upserted");
+      expect(clearAudit?.metadata).toMatchObject({ allowed_location_ids: null });
+
+      // Empty arrays are still rejected rather than treated as a clear.
+      await expect(service.upsertUser({
+        user_id: user.user_id,
+        email: user.email,
+        role: "operator",
+        allowed_location_ids: []
+      }, root)).rejects.toThrowError(/allowed_location_ids/);
+    } finally {
+      await service.close();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects allowed location ids that violate the protocol id constraints", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "lip-access-idcheck-"));
+    const databasePath = join(directory, "reference.db");
+    const service = await AccessControlService.create({
+      store: makeStore(databasePath, "tenant-acme"),
+      tenantId: "tenant-acme",
+      tenantName: "Acme",
+      reset: true
+    });
+    try {
+      const root = service.rootPrincipal();
+      for (const invalid of ["-leading-dash", "spaced id", "bang!", `x${"y".repeat(128)}`]) {
+        await expect(service.upsertUser({
+          email: "invalid-location@acme.example",
+          role: "viewer",
+          allowed_location_ids: [invalid]
+        }, root), invalid).rejects.toThrowError(/allowed_location_ids/);
+        await expect(service.createApiKey({
+          name: "Invalid location key",
+          role: "viewer",
+          allowed_location_ids: [invalid]
+        }, root), invalid).rejects.toThrowError(/allowed_location_ids/);
+      }
+    } finally {
+      await service.close();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("prevents location-scoped principals from escalating beyond their own scope", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "lip-access-escape-"));
+    const databasePath = join(directory, "reference.db");
+    const service = await AccessControlService.create({
+      store: makeStore(databasePath, "tenant-acme"),
+      tenantId: "tenant-acme",
+      tenantName: "Acme",
+      reset: true
+    });
+    try {
+      const root = service.rootPrincipal();
+      const franchisee = await service.createApiKey({
+        name: "Franchisee admin",
+        role: "admin",
+        allowed_location_ids: ["location-42", "location-77"]
+      }, root);
+      const scoped = (await service.authenticate(franchisee.secret))!;
+
+      // Subset grants are allowed.
+      const staff = await service.upsertUser({
+        email: "staff@acme.example",
+        role: "viewer",
+        allowed_location_ids: ["location-42"]
+      }, scoped);
+      expect(staff.allowed_location_ids).toEqual(["location-42"]);
+      const subsetKey = await service.createApiKey({
+        name: "Location 77 kiosk",
+        role: "viewer",
+        allowed_location_ids: ["location-77"]
+      }, scoped);
+      expect(subsetKey.api_key.allowed_location_ids).toEqual(["location-77"]);
+
+      // Escaping to other locations, unscoped grants, and scope clears are not.
+      await expect(service.upsertUser({
+        email: "escape@acme.example",
+        role: "viewer",
+        allowed_location_ids: ["location-42", "location-99"]
+      }, scoped)).rejects.toThrowError(/scope/);
+      await expect(service.upsertUser({
+        email: "unscoped@acme.example",
+        role: "viewer"
+      }, scoped)).rejects.toThrowError(/scope/);
+      await expect(service.createApiKey({
+        name: "Unscoped key",
+        role: "viewer"
+      }, scoped)).rejects.toThrowError(/scope/);
+      await expect(service.upsertUser({
+        user_id: staff.user_id,
+        email: staff.email,
+        role: "viewer",
+        allowed_location_ids: null
+      }, scoped)).rejects.toThrowError(/scope/);
+
+      // A preserved wider scope on partial update is also an escape.
+      const wide = await service.upsertUser({
+        email: "wide@acme.example",
+        role: "viewer",
+        allowed_location_ids: ["location-42", "location-99"]
+      }, root);
+      await expect(service.upsertUser({
+        user_id: wide.user_id,
+        email: wide.email,
+        role: "viewer"
+      }, scoped)).rejects.toThrowError(/scope/);
+
+      // Unscoped creators remain unrestricted.
+      const hq = await service.upsertUser({
+        email: "hq2@acme.example",
+        role: "admin"
+      }, root);
+      expect(hq.allowed_location_ids).toBeUndefined();
+    } finally {
+      await service.close();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it("does not authenticate an API key against another tenant", async () => {
     const directory = mkdtempSync(join(tmpdir(), "lip-access-isolation-"));
     const databasePath = join(directory, "reference.db");

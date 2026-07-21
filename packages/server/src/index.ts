@@ -3,6 +3,8 @@ export * from "./access-control.js";
 export * from "./campaigns.js";
 export * from "./evented-engine.js";
 export * from "./engagement.js";
+export * from "./location-reports.js";
+export * from "./locations.js";
 export * from "./memberships.js";
 export * from "./migration.js";
 export * from "./platform.js";

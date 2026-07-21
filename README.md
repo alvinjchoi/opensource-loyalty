@@ -227,11 +227,16 @@ response without logging API keys or request bodies. The authenticated
 `/metrics` endpoint exports request counts and duration summaries in Prometheus
 text format.
 
-> [!WARNING]
+> [!NOTE]
 > The Postgres protocol runtime coordinates engine mutations across instances,
-> and the full Admin service suite now runs on tenant-scoped Postgres stores.
-> Location/franchisee scoping for admin queries and reporting is still pending;
-> production multi-location deployments must add it before rollout.
+> and the full Admin service suite runs on tenant-scoped Postgres stores.
+> Multi-location deployments get a per-tenant location registry, Admin
+> users/API keys scoped with `allowed_location_ids`, and per-location
+> reporting at `/admin/api/v1/reports/locations`. Location-scoped principals
+> fail closed: tenant-wide admin reads (snapshot, analytics, member exports)
+> return 403 for them — location-filtered variants of those views are
+> follow-up work. Franchise funding-share settlement math is not
+> implemented yet.
 
 ### Install from npm 📦
 

@@ -9,7 +9,7 @@ import {
   startReferenceServer,
   type StructuredRequestLog
 } from "@loyalty-interchange/server";
-import { makeContext, makeEnroll, makeProgram } from "../fixtures.js";
+import { makeContext, makeEnroll, makeOrder, makeProgram } from "../fixtures.js";
 
 describe("reference HTTP server", () => {
   it("requires a nontrivial API key", () => {
@@ -819,6 +819,369 @@ describe("reference HTTP server", () => {
       expect(await cancelMember.json()).toMatchObject({
         member: { member_id: "member-001", status: "closed" }
       });
+    } finally {
+      await running.close();
+      await platform.close();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("fails closed: location-scoped principals are denied tenant-wide admin reads", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "lip-scope-fail-closed-"));
+    const databasePath = join(directory, "reference.db");
+    const platform = await createDemoPlatform({
+      databasePath,
+      reset: true,
+      seed: false,
+      program: makeProgram()
+    });
+    const running = await startReferenceServer(platform.engine, {
+      apiKey: "fail-closed-key",
+      persistState: (state) => platform.store.save(state),
+      admin: {
+        programs: platform.programs,
+        campaigns: platform.campaigns,
+        memberships: platform.memberships,
+        access: platform.access,
+        engagement: platform.engagement,
+        locations: platform.locations,
+        storage: platform.store.status
+      }
+    });
+    try {
+      const scoped = await platform.access.createApiKey({
+        name: "Franchisee 42 dashboard",
+        role: "viewer",
+        allowed_location_ids: ["location-42"]
+      }, platform.access.rootPrincipal());
+      const scopedHeaders = { authorization: `Bearer ${scoped.secret}` };
+
+      for (const path of [
+        "/admin/api/v1/snapshot",
+        "/admin/api/v1/analytics",
+        "/admin/api/v1/exports/members",
+        "/admin/api/v1/maintenance"
+      ]) {
+        const denied = await fetch(`${running.url}${path}`, { headers: scopedHeaders });
+        expect(denied.status, path).toBe(403);
+        const body = await denied.json() as { code: string; detail?: string };
+        expect(body.code, path).toBe("location_scoped_forbidden");
+        expect(body.detail, path).toContain("/admin/api/v1/reports/locations");
+      }
+
+      const scopedReport = await fetch(`${running.url}/admin/api/v1/reports/locations`, {
+        headers: scopedHeaders
+      });
+      expect(scopedReport.status).toBe(200);
+      const scopedRegistry = await fetch(`${running.url}/admin/api/v1/locations`, {
+        headers: scopedHeaders
+      });
+      expect(scopedRegistry.status).toBe(200);
+
+      // Unscoped principals keep full tenant-wide access.
+      const rootHeaders = { authorization: "Bearer fail-closed-key" };
+      for (const path of [
+        "/admin/api/v1/snapshot",
+        "/admin/api/v1/analytics",
+        "/admin/api/v1/exports/members",
+        "/admin/api/v1/maintenance"
+      ]) {
+        const allowed = await fetch(`${running.url}${path}`, { headers: rootHeaders });
+        expect(allowed.status, path).toBe(200);
+      }
+      const unscoped = await platform.access.createApiKey({
+        name: "HQ dashboard",
+        role: "viewer"
+      }, platform.access.rootPrincipal());
+      const unscopedSnapshot = await fetch(`${running.url}/admin/api/v1/snapshot`, {
+        headers: { authorization: `Bearer ${unscoped.secret}` }
+      });
+      expect(unscopedSnapshot.status).toBe(200);
+    } finally {
+      await running.close();
+      await platform.close();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("validates scope payloads strictly and confines scoped principals' registry writes", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "lip-scope-writes-"));
+    const databasePath = join(directory, "reference.db");
+    const platform = await createDemoPlatform({
+      databasePath,
+      reset: true,
+      seed: false,
+      program: makeProgram()
+    });
+    const running = await startReferenceServer(platform.engine, {
+      apiKey: "scope-writes-key",
+      persistState: (state) => platform.store.save(state),
+      admin: {
+        programs: platform.programs,
+        campaigns: platform.campaigns,
+        memberships: platform.memberships,
+        access: platform.access,
+        engagement: platform.engagement,
+        locations: platform.locations,
+        storage: platform.store.status
+      }
+    });
+    const root = { authorization: "Bearer scope-writes-key", "content-type": "application/json" };
+    try {
+      // Mixed-type scope arrays are rejected, not silently filtered.
+      const mixedUser = await fetch(`${running.url}/admin/api/v1/access/users`, {
+        method: "PUT",
+        headers: root,
+        body: JSON.stringify({
+          email: "mixed@acme.example",
+          role: "viewer",
+          allowed_location_ids: ["location-42", 7]
+        })
+      });
+      expect(mixedUser.status).toBe(422);
+      const mixedKey = await fetch(`${running.url}/admin/api/v1/access/api-keys`, {
+        method: "POST",
+        headers: root,
+        body: JSON.stringify({
+          name: "Mixed key",
+          role: "viewer",
+          allowed_location_ids: [null]
+        })
+      });
+      expect(mixedKey.status).toBe(422);
+
+      // allowed_location_ids: null clears a user's stored scope over HTTP.
+      const created = await fetch(`${running.url}/admin/api/v1/access/users`, {
+        method: "PUT",
+        headers: root,
+        body: JSON.stringify({
+          email: "clearable@acme.example",
+          role: "viewer",
+          allowed_location_ids: ["location-42"]
+        })
+      });
+      expect(created.status).toBe(200);
+      const createdUser = await created.json() as { user_id: string };
+      const clearedResponse = await fetch(`${running.url}/admin/api/v1/access/users`, {
+        method: "PUT",
+        headers: root,
+        body: JSON.stringify({
+          user_id: createdUser.user_id,
+          email: "clearable@acme.example",
+          role: "viewer",
+          allowed_location_ids: null
+        })
+      });
+      expect(clearedResponse.status).toBe(200);
+      const cleared = await clearedResponse.json() as { allowed_location_ids?: string[] };
+      expect(cleared.allowed_location_ids).toBeUndefined();
+
+      // Registry writes validate location_id against protocol id constraints.
+      const badId = await fetch(`${running.url}/admin/api/v1/locations`, {
+        method: "PUT",
+        headers: root,
+        body: JSON.stringify({ location_id: "bad id!", name: "Invalid" })
+      });
+      expect(badId.status).toBe(422);
+
+      // A scoped principal may only touch registry rows inside its scope.
+      await fetch(`${running.url}/admin/api/v1/locations`, {
+        method: "PUT",
+        headers: root,
+        body: JSON.stringify({ location_id: "location-99", name: "HQ Pilot" })
+      });
+      const scopedOperator = await platform.access.createApiKey({
+        name: "Franchisee 42 operator",
+        role: "operator",
+        allowed_location_ids: ["location-42"]
+      }, platform.access.rootPrincipal());
+      const scoped = {
+        authorization: `Bearer ${scopedOperator.secret}`,
+        "content-type": "application/json"
+      };
+      const insideScope = await fetch(`${running.url}/admin/api/v1/locations`, {
+        method: "PUT",
+        headers: scoped,
+        body: JSON.stringify({ location_id: "location-42", name: "Downtown Drive-Thru" })
+      });
+      expect(insideScope.status).toBe(200);
+      const outsideScope = await fetch(`${running.url}/admin/api/v1/locations`, {
+        method: "PUT",
+        headers: scoped,
+        body: JSON.stringify({ location_id: "location-99", name: "Hijacked" })
+      });
+      expect(outsideScope.status).toBe(403);
+      const outsideDelete = await fetch(`${running.url}/admin/api/v1/locations/delete`, {
+        method: "POST",
+        headers: scoped,
+        body: JSON.stringify({ location_id: "location-99" })
+      });
+      expect(outsideDelete.status).toBe(403);
+      const insideDelete = await fetch(`${running.url}/admin/api/v1/locations/delete`, {
+        method: "POST",
+        headers: scoped,
+        body: JSON.stringify({ location_id: "location-42" })
+      });
+      expect(insideDelete.status).toBe(200);
+      expect(platform.locations.snapshot().locations.map(({ location_id }) => location_id))
+        .toEqual(["location-99"]);
+    } finally {
+      await running.close();
+      await platform.close();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("manages the location registry and serves location-scoped reports", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "lip-location-admin-"));
+    const databasePath = join(directory, "reference.db");
+    const platform = await createDemoPlatform({
+      databasePath,
+      reset: true,
+      seed: false,
+      program: makeProgram()
+    });
+    platform.engine.enroll(makeEnroll("location-admin-enroll"));
+    platform.engine.postAccrual({
+      context: makeContext("location-admin-accrual-42"),
+      member_id: "member-001",
+      order: makeOrder()
+    });
+    const otherLocation = makeOrder({ order_id: "order-location-77" });
+    otherLocation.scope.location_id = "location-77";
+    platform.engine.postAccrual({
+      context: makeContext("location-admin-accrual-77"),
+      member_id: "member-001",
+      order: otherLocation
+    });
+    const running = await startReferenceServer(platform.engine, {
+      apiKey: "location-admin-key",
+      persistState: (state) => platform.store.save(state),
+      admin: {
+        programs: platform.programs,
+        campaigns: platform.campaigns,
+        memberships: platform.memberships,
+        access: platform.access,
+        engagement: platform.engagement,
+        locations: platform.locations,
+        storage: platform.store.status
+      }
+    });
+    try {
+      const login = await fetch(`${running.url}/admin/api/v1/session`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ api_key: "location-admin-key" })
+      });
+      expect(login.status).toBe(204);
+      const setCookies = login.headers.getSetCookie();
+      const cookie = setCookies.map((value) => value.split(";", 1)[0]).join("; ");
+      const csrf = decodeURIComponent(
+        setCookies
+          .find((value) => value.startsWith("lip_admin_csrf="))!
+          .split(";", 1)[0]!
+          .slice("lip_admin_csrf=".length)
+      );
+
+      const missingName = await fetch(`${running.url}/admin/api/v1/locations`, {
+        method: "PUT",
+        headers: { cookie, "content-type": "application/json", "x-lip-csrf": csrf },
+        body: JSON.stringify({ location_id: "location-42" })
+      });
+      expect(missingName.status).toBe(422);
+
+      const noCsrf = await fetch(`${running.url}/admin/api/v1/locations`, {
+        method: "PUT",
+        headers: { cookie, "content-type": "application/json" },
+        body: JSON.stringify({ location_id: "location-42", name: "Downtown" })
+      });
+      expect(noCsrf.status).toBe(403);
+
+      const upserted = await fetch(`${running.url}/admin/api/v1/locations`, {
+        method: "PUT",
+        headers: { cookie, "content-type": "application/json", "x-lip-csrf": csrf },
+        body: JSON.stringify({
+          location_id: "location-42",
+          name: "Downtown Drive-Thru",
+          franchisee_id: "franchisee-7"
+        })
+      });
+      expect(upserted.status).toBe(200);
+      expect(await upserted.json()).toMatchObject({
+        location_id: "location-42",
+        franchisee_id: "franchisee-7",
+        active: true
+      });
+      await fetch(`${running.url}/admin/api/v1/locations`, {
+        method: "PUT",
+        headers: { cookie, "content-type": "application/json", "x-lip-csrf": csrf },
+        body: JSON.stringify({ location_id: "location-99", name: "Closed Pilot", active: false })
+      });
+
+      const listed = await fetch(`${running.url}/admin/api/v1/locations`, {
+        headers: { cookie }
+      });
+      expect(listed.status).toBe(200);
+      expect(await listed.json()).toMatchObject({
+        locations: [
+          expect.objectContaining({ location_id: "location-42" }),
+          expect.objectContaining({ location_id: "location-99", active: false })
+        ]
+      });
+
+      const fullReport = await fetch(`${running.url}/admin/api/v1/reports/locations`, {
+        headers: { cookie }
+      });
+      expect(fullReport.status).toBe(200);
+      const fullBody = await fullReport.json() as {
+        locations: Array<{ location_id: string }>;
+        unattributed?: unknown;
+      };
+      expect(fullBody.locations.map(({ location_id }) => location_id)).toEqual([
+        "location-42",
+        "location-77",
+        "location-99"
+      ]);
+      expect(fullBody.unattributed).toBeDefined();
+
+      const scopedKey = await fetch(`${running.url}/admin/api/v1/access/api-keys`, {
+        method: "POST",
+        headers: { cookie, "content-type": "application/json", "x-lip-csrf": csrf },
+        body: JSON.stringify({
+          name: "Franchisee 77 dashboard",
+          role: "viewer",
+          allowed_location_ids: ["location-77"]
+        })
+      });
+      expect(scopedKey.status).toBe(201);
+      const scoped = await scopedKey.json() as { secret: string };
+      const scopedReport = await fetch(`${running.url}/admin/api/v1/reports/locations`, {
+        headers: { authorization: `Bearer ${scoped.secret}` }
+      });
+      expect(scopedReport.status).toBe(200);
+      const scopedBody = await scopedReport.json() as {
+        locations: Array<{ location_id: string }>;
+        unattributed?: unknown;
+      };
+      expect(scopedBody.locations.map(({ location_id }) => location_id)).toEqual([
+        "location-77"
+      ]);
+      expect(scopedBody.unattributed).toBeUndefined();
+      const scopedRegistry = await fetch(`${running.url}/admin/api/v1/locations`, {
+        headers: { authorization: `Bearer ${scoped.secret}` }
+      });
+      expect(scopedRegistry.status).toBe(200);
+      expect(await scopedRegistry.json()).toEqual({ locations: [] });
+
+      const removed = await fetch(`${running.url}/admin/api/v1/locations/delete`, {
+        method: "POST",
+        headers: { cookie, "content-type": "application/json", "x-lip-csrf": csrf },
+        body: JSON.stringify({ location_id: "location-99" })
+      });
+      expect(removed.status).toBe(200);
+      expect(await removed.json()).toEqual({ deleted: true });
+      expect(platform.locations.snapshot().locations.map(({ location_id }) => location_id))
+        .toEqual(["location-42"]);
     } finally {
       await running.close();
       await platform.close();

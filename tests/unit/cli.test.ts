@@ -102,6 +102,25 @@ describe("lip diagnostics", () => {
     }
   });
 
+  it("serves the location registry admin surface from the mock server", async () => {
+    const running = await startMockServer({ host: "127.0.0.1", port: 0, apiKey: "cli-loc-key" });
+    try {
+      const listed = await fetch(`${running.url}/admin/api/v1/locations`, {
+        headers: { authorization: "Bearer cli-loc-key" }
+      });
+      expect(listed.status).toBe(200);
+      expect(await listed.json()).toMatchObject({
+        locations: [expect.objectContaining({ location_id: "location-014" })]
+      });
+      const report = await fetch(`${running.url}/admin/api/v1/reports/locations`, {
+        headers: { authorization: "Bearer cli-loc-key" }
+      });
+      expect(report.status).toBe(200);
+    } finally {
+      await running.close();
+    }
+  });
+
   it("returns actionable failures for a bad credential or unreachable server", async () => {
     const running = await startMockServer({ host: "127.0.0.1", port: 0, apiKey: "right-api-key" });
     try {
