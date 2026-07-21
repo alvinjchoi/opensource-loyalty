@@ -740,6 +740,7 @@ export function createReferenceServer(engine: LoyaltyEngine, options: ServerOpti
       allowedMethods.set("/admin/api/v1/access/users", ["PUT"]);
       allowedMethods.set("/admin/api/v1/access/api-keys", ["POST"]);
       allowedMethods.set("/admin/api/v1/access/api-keys/revoke", ["POST"]);
+      allowedMethods.set("/admin/api/v1/access/api-keys/rotate", ["POST"]);
     }
     if (options.admin?.programs) {
       allowedMethods.set("/admin/api/v1/program/draft", ["PUT", "DELETE"]);
@@ -1246,6 +1247,37 @@ export function createReferenceServer(engine: LoyaltyEngine, options: ServerOpti
               ? { expires_at: values["expires_at"] }
               : {}),
             ...(allowedLocationIds ? { allowed_location_ids: allowedLocationIds } : {})
+          }, principal));
+          return;
+        }
+        if (method === "POST" && path === "/admin/api/v1/access/api-keys/rotate") {
+          if (typeof values["key_id"] !== "string") {
+            throw new TransportError(
+              422,
+              "validation_failed",
+              "Request validation failed",
+              "key_id is required"
+            );
+          }
+          if (
+            values["overlap_seconds"] !== undefined &&
+            typeof values["overlap_seconds"] !== "number"
+          ) {
+            throw new TransportError(
+              422,
+              "validation_failed",
+              "Request validation failed",
+              "overlap_seconds must be a number"
+            );
+          }
+          sendJson(response, 200, await access.rotateApiKey({
+            key_id: values["key_id"],
+            ...(typeof values["overlap_seconds"] === "number"
+              ? { overlap_seconds: values["overlap_seconds"] }
+              : {}),
+            ...(typeof values["expires_at"] === "string"
+              ? { expires_at: values["expires_at"] }
+              : {})
           }, principal));
           return;
         }
