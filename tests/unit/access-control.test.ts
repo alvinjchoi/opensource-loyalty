@@ -103,6 +103,63 @@ describe("tenant access control", () => {
     }
   });
 
+  it("scopes users and API keys to allowed locations", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "lip-access-locations-"));
+    const databasePath = join(directory, "reference.db");
+    const service = await AccessControlService.create({
+      store: makeStore(databasePath, "tenant-acme"),
+      tenantId: "tenant-acme",
+      tenantName: "Acme",
+      reset: true
+    });
+    try {
+      const root = service.rootPrincipal();
+      expect(service.locationScopeFor(root)).toBeUndefined();
+
+      const user = await service.upsertUser({
+        email: "franchisee@acme.example",
+        role: "operator",
+        allowed_location_ids: [" location-42 ", "location-42", "location-77"]
+      }, root);
+      expect(user.allowed_location_ids).toEqual(["location-42", "location-77"]);
+      const principal = service.principalForUser(user.user_id);
+      expect(principal?.allowed_location_ids).toEqual(["location-42", "location-77"]);
+      expect(service.locationScopeFor(principal!)).toEqual(["location-42", "location-77"]);
+
+      const unscoped = await service.upsertUser({
+        email: "hq@acme.example",
+        role: "admin"
+      }, root);
+      expect(unscoped.allowed_location_ids).toBeUndefined();
+      expect(service.locationScopeFor(service.principalForUser(unscoped.user_id)!))
+        .toBeUndefined();
+
+      await expect(service.upsertUser({
+        email: "empty-scope@acme.example",
+        role: "viewer",
+        allowed_location_ids: ["   "]
+      }, root)).rejects.toThrowError(/allowed_location_ids/);
+      await expect(service.upsertUser({
+        email: "no-scope@acme.example",
+        role: "viewer",
+        allowed_location_ids: []
+      }, root)).rejects.toThrowError(/allowed_location_ids/);
+
+      const scopedKey = await service.createApiKey({
+        name: "Franchisee dashboard",
+        role: "viewer",
+        allowed_location_ids: ["location-42"]
+      }, root);
+      expect(scopedKey.api_key.allowed_location_ids).toEqual(["location-42"]);
+      const keyPrincipal = await service.authenticate(scopedKey.secret);
+      expect(keyPrincipal?.allowed_location_ids).toEqual(["location-42"]);
+      expect(service.locationScopeFor(keyPrincipal!)).toEqual(["location-42"]);
+    } finally {
+      await service.close();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it("does not authenticate an API key against another tenant", async () => {
     const directory = mkdtempSync(join(tmpdir(), "lip-access-isolation-"));
     const databasePath = join(directory, "reference.db");

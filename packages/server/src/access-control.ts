@@ -46,6 +46,8 @@ export interface TenantUser {
   active: boolean;
   created_at: string;
   updated_at: string;
+  /** Locations this user may see in scoped Admin views. Absent = all locations. */
+  allowed_location_ids?: string[];
 }
 
 export interface TenantApiKey {
@@ -59,6 +61,8 @@ export interface TenantApiKey {
   expires_at?: string;
   last_used_at?: string;
   revoked_at?: string;
+  /** Locations this key may see in scoped Admin views. Absent = all locations. */
+  allowed_location_ids?: string[];
   secret_hash: string;
 }
 
@@ -68,6 +72,8 @@ export interface TenantPrincipal {
   actor_type: "root" | "api_key" | "user";
   role: TenantRole;
   permissions: TenantPermission[];
+  /** Location scope resolved from the user or API key. Absent = all locations. */
+  allowed_location_ids?: string[];
 }
 
 export interface TenantAuditEntry {
@@ -118,6 +124,24 @@ function secretsEqual(left: string, right: string): boolean {
 
 function now(): string {
   return new Date().toISOString();
+}
+
+/**
+ * Normalizes an optional allowed-location list: trims entries, removes
+ * duplicates, and rejects lists that resolve to nothing (an empty scope would
+ * silently lock the principal out of every scoped view).
+ */
+function normalizeAllowedLocationIds(input: string[] | undefined): string[] | undefined {
+  if (input === undefined) return undefined;
+  const normalized = [...new Set(input.map((value) => value.trim()).filter((value) => value.length > 0))];
+  if (normalized.length === 0) {
+    throw new EngineError(
+      "validation_failed",
+      "allowed_location_ids must contain at least one non-empty location id",
+      422
+    );
+  }
+  return normalized;
 }
 
 export class AccessControlService {
@@ -189,7 +213,10 @@ export class AccessControlService {
       actor_id: used.key_id,
       actor_type: "api_key",
       role: used.role,
-      permissions: [...rolePermissions[used.role]]
+      permissions: [...rolePermissions[used.role]],
+      ...(used.allowed_location_ids
+        ? { allowed_location_ids: [...used.allowed_location_ids] }
+        : {})
     };
   }
 
@@ -221,8 +248,24 @@ export class AccessControlService {
       actor_id: user.user_id,
       actor_type: "user",
       role: user.role,
-      permissions: [...rolePermissions[user.role]]
+      permissions: [...rolePermissions[user.role]],
+      ...(user.allowed_location_ids
+        ? { allowed_location_ids: [...user.allowed_location_ids] }
+        : {})
     };
+  }
+
+  /**
+   * Location scope for Admin queries and reporting: undefined means the
+   * principal may see every location; otherwise only the returned location
+   * ids. Root principals and principals from another tenant are never scoped
+   * down here — cross-tenant callers are rejected by permission checks.
+   */
+  public locationScopeFor(principal: TenantPrincipal): string[] | undefined {
+    if (principal.actor_type === "root") return undefined;
+    return principal.allowed_location_ids
+      ? [...principal.allowed_location_ids]
+      : undefined;
   }
 
   public async upsertUser(input: {
@@ -231,6 +274,7 @@ export class AccessControlService {
     name?: string;
     role: TenantRole;
     active?: boolean;
+    allowed_location_ids?: string[];
   }, principal: TenantPrincipal): Promise<TenantUser> {
     this.requirePermission(principal, "access:manage");
     const email = input.email.trim().toLowerCase();
@@ -238,6 +282,7 @@ export class AccessControlService {
       throw new EngineError("validation_failed", "A valid user email is required", 422);
     }
     this.assertRole(input.role);
+    const allowedLocationIds = normalizeAllowedLocationIds(input.allowed_location_ids);
     const timestamp = now();
     const userId = input.user_id ?? `user_${randomUUID()}`;
     const existing = this.state.users.find((user) => user.user_id === userId);
@@ -253,7 +298,8 @@ export class AccessControlService {
       active: input.active ?? existing?.active ?? true,
       created_at: existing?.created_at ?? timestamp,
       updated_at: timestamp,
-      ...(input.name?.trim() ? { name: input.name.trim() } : {})
+      ...(input.name?.trim() ? { name: input.name.trim() } : {}),
+      ...(allowedLocationIds ? { allowed_location_ids: allowedLocationIds } : {})
     };
     this.state = {
       ...this.state,
@@ -265,7 +311,10 @@ export class AccessControlService {
     };
     await this.recordAudit(principal, "access.user.upserted", "user", userId, {
       role: user.role,
-      active: user.active
+      active: user.active,
+      ...(user.allowed_location_ids
+        ? { allowed_location_ids: user.allowed_location_ids }
+        : {})
     });
     return structuredClone(user);
   }
@@ -274,6 +323,7 @@ export class AccessControlService {
     name: string;
     role: TenantRole;
     expires_at?: string;
+    allowed_location_ids?: string[];
   }, principal: TenantPrincipal): Promise<{
     api_key: Omit<TenantApiKey, "secret_hash">;
     secret: string;
@@ -290,6 +340,7 @@ export class AccessControlService {
     ) {
       throw new EngineError("validation_failed", "API key expiration must be in the future", 422);
     }
+    const allowedLocationIds = normalizeAllowedLocationIds(input.allowed_location_ids);
     const secret = `lip_sk_${randomBytes(32).toString("base64url")}`;
     const timestamp = now();
     const key: TenantApiKey = {
@@ -303,6 +354,7 @@ export class AccessControlService {
       ...(input.expires_at
         ? { expires_at: new Date(input.expires_at).toISOString() }
         : {}),
+      ...(allowedLocationIds ? { allowed_location_ids: allowedLocationIds } : {}),
       secret_hash: hashSecret(secret)
     };
     this.state = {
@@ -311,7 +363,10 @@ export class AccessControlService {
     };
     await this.recordAudit(principal, "access.api_key.created", "api_key", key.key_id, {
       role: key.role,
-      prefix: key.prefix
+      prefix: key.prefix,
+      ...(key.allowed_location_ids
+        ? { allowed_location_ids: key.allowed_location_ids }
+        : {})
     });
     const { secret_hash: _secretHash, ...publicKey } = key;
     return { api_key: structuredClone(publicKey), secret };
