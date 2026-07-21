@@ -92,6 +92,9 @@ Enable MCP: [`mcp.json`](../mcp.json) · Skills: [`skills/README.md`](../skills/
   migrations, transaction locks, multi-instance serving, and scheduler leases.
 - [Cloud control plane](cloud.md): organizations, projects, environments,
   plans, subscriptions, provisioning jobs, and usage metering.
+- [Shared-cluster provisioning runbook](runbooks/shared-cluster-provisioning.md):
+  deploy one Postgres-backed multi-tenant cluster from `render.yaml`, onboard
+  brands as tenants, and operate backups, write-freeze, and monitoring.
 - [Customer identity integration](customer-identity.md)
 - [Cloud customer identity contract](cloud-customer-identity.md): managed Cloud CIAM boundary, consent, and LIP member linking: use Clerk, Auth0, or
   another OIDC provider while mapping stable customers to LIP members.

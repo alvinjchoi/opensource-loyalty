@@ -59,9 +59,17 @@ environment inside the control-plane process. Each `create` job:
 
 On control-plane startup the provisioner calls `restore()` and relaunches every
 credentialed environment on the same port and API key so BFF `LIP_URL` values
-survive restarts. Only `create` operations are supported; credentials remain
-files rather than an encrypted secret store. Regional adapters still replace
-this for production.
+survive restarts. Set `LIP_CLOUD_DATA_PLANE_HOST` to control the bind address
+and `LIP_CLOUD_DATA_PLANE_PUBLIC_HOST` to control the hostname written into
+each runtime's `api_url` (for example a private-network service name). Only
+`create` operations are supported; credentials remain files rather than an
+encrypted secret store. Regional adapters still replace this for production.
+
+`npm run cloud:migrate` applies the engine and control-plane schemas ahead of
+boot (for release/preDeploy steps), and `npm run cloud:provision` onboards one
+tenant end to end through the API surface below. Deployment and operations for
+the shared cluster are documented in
+[the shared-cluster provisioning runbook](runbooks/shared-cluster-provisioning.md).
 
 ## Attaching a data-plane host
 
