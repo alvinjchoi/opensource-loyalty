@@ -25,6 +25,24 @@ describe("reference HTTP server", () => {
     expect(() => assertStrongApiKey("a-strong-key-of-16ch")).not.toThrow();
   });
 
+  it("refuses weak keys when binding beyond loopback, regardless of storage backend", async () => {
+    const engine = new LoyaltyEngine(makeProgram());
+    // A non-loopback binding is network-exposed: the local default key and
+    // short keys must be rejected even for demo/SQLite runtimes.
+    await expect(startReferenceServer(engine, { apiKey: "lip-dev-key", host: "0.0.0.0" }))
+      .rejects.toThrowError(/lip-dev-key|default/);
+    await expect(startReferenceServer(engine, { apiKey: "weak-key-15ch-x", host: "::" }))
+      .rejects.toThrowError(/at least 16/);
+    // Loopback development bindings keep accepting the local default key.
+    for (const host of [undefined, "127.0.0.1", "localhost"]) {
+      const running = await startReferenceServer(engine, {
+        apiKey: "lip-dev-key",
+        ...(host ? { host } : {})
+      });
+      await running.close();
+    }
+  });
+
   it("commits protocol operations through an external transaction hook", async () => {
     const engine = new LoyaltyEngine(makeProgram());
     let executions = 0;
@@ -913,6 +931,17 @@ describe("reference HTTP server", () => {
         method: "POST",
         headers: rootHeaders,
         body: JSON.stringify({})
+      })).status).toBe(422);
+      // Non-string expires_at is rejected, never silently dropped.
+      expect((await fetch(`${running.url}/admin/api/v1/access/api-keys`, {
+        method: "POST",
+        headers: rootHeaders,
+        body: JSON.stringify({ name: "Typed", role: "integration", expires_at: 12345 })
+      })).status).toBe(422);
+      expect((await fetch(`${running.url}/admin/api/v1/access/api-keys/rotate`, {
+        method: "POST",
+        headers: rootHeaders,
+        body: JSON.stringify({ key_id: createdKey.api_key.key_id, expires_at: 12345 })
       })).status).toBe(422);
       expect((await fetch(`${running.url}/admin/api/v1/access/api-keys/rotate`, {
         method: "POST",

@@ -418,6 +418,63 @@ describe("tenant access control", () => {
     }
   });
 
+  it("inherits the existing expiry on rotation and only allows shortening it", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "lip-access-rotate-expiry-"));
+    const databasePath = join(directory, "reference.db");
+    const service = await AccessControlService.create({
+      store: makeStore(databasePath, "tenant-acme"),
+      tenantId: "tenant-acme",
+      tenantName: "Acme",
+      reset: true
+    });
+    try {
+      const root = service.rootPrincipal();
+      const expiry = new Date(Date.now() + 3_600_000).toISOString();
+      const created = await service.createApiKey({
+        name: "Bounded",
+        role: "integration",
+        expires_at: expiry
+      }, root);
+
+      // Omitting expires_at inherits the existing expiry: rotating a
+      // time-boxed key must never mint an immortal replacement.
+      const inherited = await service.rotateApiKey({
+        key_id: created.api_key.key_id
+      }, root);
+      expect(inherited.api_key.expires_at).toBe(expiry);
+
+      // Rotation may shorten the expiry...
+      const sooner = new Date(Date.now() + 1_800_000).toISOString();
+      const shortened = await service.rotateApiKey({
+        key_id: inherited.api_key.key_id,
+        expires_at: sooner
+      }, root);
+      expect(shortened.api_key.expires_at).toBe(sooner);
+
+      // ...but never extend it.
+      const later = new Date(Date.now() + 7_200_000).toISOString();
+      await expect(service.rotateApiKey({
+        key_id: shortened.api_key.key_id,
+        expires_at: later
+      }, root)).rejects.toThrowError(/extend/i);
+
+      // An unbounded key stays unbounded by default and may become bounded.
+      const unbounded = await service.createApiKey({ name: "Unbounded", role: "integration" }, root);
+      const stillUnbounded = await service.rotateApiKey({
+        key_id: unbounded.api_key.key_id
+      }, root);
+      expect(stillUnbounded.api_key.expires_at).toBeUndefined();
+      const bounded = await service.rotateApiKey({
+        key_id: stillUnbounded.api_key.key_id,
+        expires_at: later
+      }, root);
+      expect(bounded.api_key.expires_at).toBe(later);
+    } finally {
+      await service.close();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it("rejects invalid rotations", async () => {
     const directory = mkdtempSync(join(tmpdir(), "lip-access-rotate-invalid-"));
     const databasePath = join(directory, "reference.db");

@@ -67,6 +67,19 @@ export function assertStrongApiKey(apiKey: string): void {
   }
 }
 
+/**
+ * True when a listen host can only be reached from the local machine. Any
+ * other binding is network-exposed and must enforce `assertStrongApiKey`
+ * regardless of the storage backend behind the runtime.
+ */
+function isLoopbackHost(host: string): boolean {
+  const normalized = host.trim().toLowerCase().replace(/^\[|\]$/g, "");
+  return normalized === "localhost" ||
+    normalized === "::1" ||
+    normalized === "::ffff:127.0.0.1" ||
+    normalized.startsWith("127.");
+}
+
 interface Route {
   schema: TSchema;
   status: number;
@@ -565,6 +578,25 @@ function readAllowedLocationIds(
       ? "allowed_location_ids must be an array of strings, or null to clear the scope"
       : "allowed_location_ids must be an array of strings"
   );
+}
+
+/**
+ * Reads an optional `expires_at` body field. A present-but-non-string value
+ * is rejected instead of silently dropped — dropping it would mint a key
+ * with a different lifetime than the caller asked for.
+ */
+function readOptionalExpiresAt(values: Record<string, unknown>): string | undefined {
+  const value = values["expires_at"];
+  if (value === undefined) return undefined;
+  if (typeof value !== "string") {
+    throw new TransportError(
+      422,
+      "validation_failed",
+      "Request validation failed",
+      "expires_at must be an ISO 8601 timestamp string"
+    );
+  }
+  return value;
 }
 
 function problem(status: number, title: string, code: string, detail?: string): ProblemDetails {
@@ -1256,12 +1288,11 @@ export function createReferenceServer(engine: LoyaltyEngine, options: ServerOpti
             values["allowed_location_ids"],
             { allowNull: false }
           );
+          const createExpiresAt = readOptionalExpiresAt(values);
           sendJson(response, 201, await access.createApiKey({
             name: values["name"],
             role: values["role"] as TenantRole,
-            ...(typeof values["expires_at"] === "string"
-              ? { expires_at: values["expires_at"] }
-              : {}),
+            ...(createExpiresAt !== undefined ? { expires_at: createExpiresAt } : {}),
             ...(allowedLocationIds ? { allowed_location_ids: allowedLocationIds } : {})
           }, principal));
           return;
@@ -1286,14 +1317,13 @@ export function createReferenceServer(engine: LoyaltyEngine, options: ServerOpti
               "overlap_seconds must be a number"
             );
           }
+          const rotateExpiresAt = readOptionalExpiresAt(values);
           sendJson(response, 200, await access.rotateApiKey({
             key_id: values["key_id"],
             ...(typeof values["overlap_seconds"] === "number"
               ? { overlap_seconds: values["overlap_seconds"] }
               : {}),
-            ...(typeof values["expires_at"] === "string"
-              ? { expires_at: values["expires_at"] }
-              : {})
+            ...(rotateExpiresAt !== undefined ? { expires_at: rotateExpiresAt } : {})
           }, principal));
           return;
         }
@@ -1938,8 +1968,11 @@ export async function startReferenceServer(
   engine: LoyaltyEngine,
   options: ServerOptions & { host?: string; port?: number }
 ): Promise<RunningServer> {
-  const server = createReferenceServer(engine, options);
   const host = options.host ?? "127.0.0.1";
+  // A non-loopback binding accepts traffic from the network: the local
+  // development default key must be rejected even for demo/SQLite runtimes.
+  if (!isLoopbackHost(host)) assertStrongApiKey(options.apiKey);
+  const server = createReferenceServer(engine, options);
   const port = options.port ?? 0;
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);

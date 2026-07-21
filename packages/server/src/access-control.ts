@@ -122,6 +122,12 @@ function hashSecret(secret: string): string {
   return createHash("sha256").update(secret).digest("hex");
 }
 
+/** Mints a fresh API-key secret with its stored prefix and hash. */
+function mintApiKeySecret(): { secret: string; prefix: string; secret_hash: string } {
+  const secret = `lip_sk_${randomBytes(32).toString("base64url")}`;
+  return { secret, prefix: secret.slice(0, 15), secret_hash: hashSecret(secret) };
+}
+
 function secretsEqual(left: string, right: string): boolean {
   const leftBytes = Buffer.from(left, "hex");
   const rightBytes = Buffer.from(right, "hex");
@@ -360,13 +366,13 @@ export class AccessControlService {
     }
     const allowedLocationIds = normalizeAllowedLocationIds(input.allowed_location_ids);
     this.assertWithinPrincipalScope(principal, allowedLocationIds);
-    const secret = `lip_sk_${randomBytes(32).toString("base64url")}`;
+    const { secret, prefix, secret_hash } = mintApiKeySecret();
     const timestamp = now();
     const key: TenantApiKey = {
       key_id: `key_${randomUUID()}`,
       tenant_id: this.state.tenant.tenant_id,
       name: input.name.trim(),
-      prefix: secret.slice(0, 15),
+      prefix,
       role: input.role,
       active: true,
       created_at: timestamp,
@@ -374,7 +380,7 @@ export class AccessControlService {
         ? { expires_at: new Date(input.expires_at).toISOString() }
         : {}),
       ...(allowedLocationIds ? { allowed_location_ids: allowedLocationIds } : {}),
-      secret_hash: hashSecret(secret)
+      secret_hash
     };
     this.state = {
       ...this.state,
@@ -396,13 +402,15 @@ export class AccessControlService {
    * scope; fresh secret) and bounds the old key's remaining validity to an
    * overlap window so consumers can swap credentials without a flag-day
    * cutover. `overlap_seconds: 0` expires the old key immediately; an
-   * existing sooner expiry is never widened. Both keys are audited.
+   * existing sooner expiry is never widened. The replacement inherits the
+   * rotated key's expiry unless an explicit earlier `expires_at` shortens
+   * it — rotation can never extend a key's lifetime. Both keys are audited.
    */
   public async rotateApiKey(input: {
     key_id: string;
     /** Old-key validity after rotation, 0..604800 s. Defaults to 24 h. */
     overlap_seconds?: number;
-    /** Optional expiry for the replacement key. */
+    /** Optional replacement expiry; must not be later than the existing one. */
     expires_at?: string;
   }, principal: TenantPrincipal): Promise<{
     api_key: Omit<TenantApiKey, "secret_hash">;
@@ -438,23 +446,37 @@ export class AccessControlService {
       throw new EngineError("conflict", "API key is not active", 409);
     }
     this.assertWithinPrincipalScope(principal, existing.allowed_location_ids);
-    const secret = `lip_sk_${randomBytes(32).toString("base64url")}`;
+    if (
+      input.expires_at &&
+      existing.expires_at &&
+      Date.parse(input.expires_at) > Date.parse(existing.expires_at)
+    ) {
+      throw new EngineError(
+        "validation_failed",
+        "Rotation may shorten an API key's expiration but never extend it",
+        422
+      );
+    }
+    // Inherit the rotated key's expiry: rotating a time-boxed key must never
+    // mint an immortal replacement.
+    const replacementExpiresAt = input.expires_at
+      ? new Date(input.expires_at).toISOString()
+      : existing.expires_at;
+    const { secret, prefix, secret_hash } = mintApiKeySecret();
     const timestamp = now();
     const replacement: TenantApiKey = {
       key_id: `key_${randomUUID()}`,
       tenant_id: this.state.tenant.tenant_id,
       name: existing.name,
-      prefix: secret.slice(0, 15),
+      prefix,
       role: existing.role,
       active: true,
       created_at: timestamp,
-      ...(input.expires_at
-        ? { expires_at: new Date(input.expires_at).toISOString() }
-        : {}),
+      ...(replacementExpiresAt ? { expires_at: replacementExpiresAt } : {}),
       ...(existing.allowed_location_ids
         ? { allowed_location_ids: [...existing.allowed_location_ids] }
         : {}),
-      secret_hash: hashSecret(secret)
+      secret_hash
     };
     const overlapExpiry = new Date(Date.now() + overlapSeconds * 1_000).toISOString();
     const replacedExpiresAt =
@@ -471,18 +493,23 @@ export class AccessControlService {
         )
       ]
     };
-    await this.recordAudit(principal, "access.api_key.created", "api_key", replacement.key_id, {
-      role: replacement.role,
-      prefix: replacement.prefix,
-      rotated_from: existing.key_id,
-      ...(replacement.allowed_location_ids
-        ? { allowed_location_ids: replacement.allowed_location_ids }
-        : {})
-    });
-    await this.recordAudit(principal, "access.api_key.rotated", "api_key", existing.key_id, {
-      replacement_key_id: replacement.key_id,
-      overlap_expires_at: replacedExpiresAt
-    });
+    // Both rotation audit entries land in one state save: the pair is atomic
+    // and a crash can never persist half the story.
+    this.appendAudit([
+      this.makeAuditEntry(principal, "access.api_key.created", "api_key", replacement.key_id, {
+        role: replacement.role,
+        prefix: replacement.prefix,
+        rotated_from: existing.key_id,
+        ...(replacement.allowed_location_ids
+          ? { allowed_location_ids: replacement.allowed_location_ids }
+          : {})
+      }),
+      this.makeAuditEntry(principal, "access.api_key.rotated", "api_key", existing.key_id, {
+        replacement_key_id: replacement.key_id,
+        overlap_expires_at: replacedExpiresAt
+      })
+    ]);
+    await this.save();
     const { secret_hash: _replacementHash, ...publicReplacement } = replacement;
     const { secret_hash: _replacedHash, ...publicReplaced } = replaced;
     return {
@@ -515,7 +542,21 @@ export class AccessControlService {
     metadata?: Record<string, unknown>,
     requestId?: string
   ): Promise<void> {
-    const entry: TenantAuditEntry = {
+    this.appendAudit([
+      this.makeAuditEntry(principal, action, resourceType, resourceId, metadata, requestId)
+    ]);
+    await this.save();
+  }
+
+  private makeAuditEntry(
+    principal: TenantPrincipal,
+    action: string,
+    resourceType: string,
+    resourceId?: string,
+    metadata?: Record<string, unknown>,
+    requestId?: string
+  ): TenantAuditEntry {
+    return {
       audit_id: `tenant-audit_${randomUUID()}`,
       tenant_id: this.state.tenant.tenant_id,
       actor_id: principal.actor_id,
@@ -527,11 +568,14 @@ export class AccessControlService {
       ...(metadata ? { metadata: structuredClone(metadata) } : {}),
       ...(requestId ? { request_id: requestId } : {})
     };
+  }
+
+  /** Prepends audit entries to the in-memory state without persisting. */
+  private appendAudit(entries: TenantAuditEntry[]): void {
     this.state = {
       ...this.state,
-      audit: [entry, ...this.state.audit].slice(0, 1_000)
+      audit: [...entries, ...this.state.audit].slice(0, 1_000)
     };
-    await this.save();
   }
 
   public async close(): Promise<void> {
