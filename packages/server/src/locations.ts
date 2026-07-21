@@ -89,6 +89,11 @@ export class LocationDirectoryService {
     });
   }
 
+  /** Cloned registry entries only, without copying the audit trail. */
+  public listLocations(): LocationEntry[] {
+    return structuredClone(this.state.locations);
+  }
+
   public locationById(locationId: string): LocationEntry | undefined {
     const location = this.state.locations.find((candidate) =>
       candidate.location_id === locationId

@@ -1339,3 +1339,33 @@ describe("reward availability windows", () => {
     })).toThrowError(/no longer available/);
   });
 });
+
+describe("ledger inspection", () => {
+  it("exposes cloned ledger and reservation state without per-member metrics work", () => {
+    const engine = new LoyaltyEngine(makeProgram(), { ids: sequentialIds() });
+    engine.enroll(makeEnroll());
+    engine.postAccrual({
+      context: makeContext("inspect-ledger-accrual"),
+      member_id: "member-001",
+      order: makeOrder()
+    });
+    engine.reserve({
+      context: makeContext("inspect-ledger-reserve"),
+      redemption_id: "redemption-inspect-001",
+      member_id: "member-001",
+      reward_id: "one-dollar-off",
+      order: makeOrder()
+    });
+
+    const inspection = engine.inspectLedger();
+    const admin = engine.inspectAdmin();
+    expect(inspection.ledger).toEqual(admin.ledger);
+    expect(inspection.reservations).toEqual(admin.reservations);
+
+    // Returned values are clones: mutating them must not touch engine state.
+    inspection.ledger[0]!.amount = 999_999;
+    inspection.reservations[0]!.status = "reversed";
+    expect(engine.inspectAdmin().ledger[0]!.amount).not.toBe(999_999);
+    expect(engine.inspectAdmin().reservations[0]!.status).toBe("reserved");
+  });
+});

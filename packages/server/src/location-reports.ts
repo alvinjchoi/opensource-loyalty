@@ -1,6 +1,10 @@
 import type { LedgerEntry, LoyaltyUnit } from "@loyalty-interchange/protocol";
 import type { LoyaltyEngine } from "@loyalty-interchange/reference";
 import type { LocationEntry } from "./locations.js";
+import {
+  countReservationStatuses,
+  type ReservationStatusCounts
+} from "./reservation-counts.js";
 
 export interface LocationActivity {
   unit: LoyaltyUnit;
@@ -12,11 +16,7 @@ export interface LocationActivity {
   expired: number;
 }
 
-export interface LocationReservationCounts {
-  reserved: number;
-  captured: number;
-  reversed: number;
-}
+export type LocationReservationCounts = ReservationStatusCounts;
 
 export interface LocationReportRow {
   location_id: string;
@@ -46,6 +46,12 @@ export interface LocationReport {
    * Omitted for callers with a location scope.
    */
   unattributed?: UnattributedLocationActivity;
+  /**
+   * For location-scoped callers only: true when activity exists outside the
+   * caller's view (the unattributed bucket is non-empty), without exposing
+   * any amounts.
+   */
+  unattributed_present?: boolean;
 }
 
 export interface LocationReportOptions {
@@ -55,46 +61,67 @@ export interface LocationReportOptions {
   scope?: string[];
 }
 
-interface MutableBucket {
-  orders: Set<string>;
-  ledgerEntries: number;
-  activity: Map<LoyaltyUnit, LocationActivity>;
-  reservations: LocationReservationCounts;
+interface AttributedItems<T> {
+  attributed: ReadonlyMap<string, readonly T[]>;
+  unattributed: readonly T[];
 }
 
-function emptyBucket(): MutableBucket {
-  return {
-    orders: new Set(),
-    ledgerEntries: 0,
-    activity: new Map(),
-    reservations: { reserved: 0, captured: 0, reversed: 0 }
-  };
-}
-
-function applyEntry(bucket: MutableBucket, entry: LedgerEntry): void {
-  bucket.ledgerEntries += 1;
-  const activity = bucket.activity.get(entry.unit) ?? {
-    unit: entry.unit,
-    accrued: 0,
-    redeemed: 0,
-    reversed: 0,
-    adjusted: 0,
-    manual: 0,
-    expired: 0
-  };
-  if (entry.operation === "accrual") activity.accrued += entry.amount;
-  if (entry.operation === "redemption") activity.redeemed += Math.abs(entry.amount);
-  if (entry.operation === "reversal") activity.reversed += entry.amount;
-  if (entry.operation === "adjustment") activity.adjusted += entry.amount;
-  if (entry.operation === "manual") activity.manual += entry.amount;
-  if (entry.operation === "expiration") activity.expired += Math.abs(entry.amount);
-  bucket.activity.set(entry.unit, activity);
-}
-
-function sortedActivity(bucket: MutableBucket): LocationActivity[] {
-  return [...bucket.activity.values()].sort((left, right) =>
-    left.unit.localeCompare(right.unit)
+function groupByLocation<T>(
+  items: readonly T[],
+  locate: (item: T) => string | undefined
+): AttributedItems<T> {
+  return items.reduce<AttributedItems<T>>(
+    (grouped, item) => {
+      const locationId = locate(item);
+      if (!locationId) {
+        return {
+          attributed: grouped.attributed,
+          unattributed: [...grouped.unattributed, item]
+        };
+      }
+      const attributed = new Map(grouped.attributed);
+      attributed.set(locationId, [...(attributed.get(locationId) ?? []), item]);
+      return { attributed, unattributed: grouped.unattributed };
+    },
+    { attributed: new Map(), unattributed: [] }
   );
+}
+
+function emptyActivity(unit: LoyaltyUnit): LocationActivity {
+  return { unit, accrued: 0, redeemed: 0, reversed: 0, adjusted: 0, manual: 0, expired: 0 };
+}
+
+function withEntry(activity: LocationActivity, entry: LedgerEntry): LocationActivity {
+  return {
+    ...activity,
+    accrued: activity.accrued + (entry.operation === "accrual" ? entry.amount : 0),
+    redeemed: activity.redeemed +
+      (entry.operation === "redemption" ? Math.abs(entry.amount) : 0),
+    reversed: activity.reversed + (entry.operation === "reversal" ? entry.amount : 0),
+    adjusted: activity.adjusted + (entry.operation === "adjustment" ? entry.amount : 0),
+    manual: activity.manual + (entry.operation === "manual" ? entry.amount : 0),
+    expired: activity.expired +
+      (entry.operation === "expiration" ? Math.abs(entry.amount) : 0)
+  };
+}
+
+function activityFor(entries: readonly LedgerEntry[]): LocationActivity[] {
+  const byUnit = entries.reduce(
+    (units, entry) => new Map(units).set(
+      entry.unit,
+      withEntry(units.get(entry.unit) ?? emptyActivity(entry.unit), entry)
+    ),
+    new Map<LoyaltyUnit, LocationActivity>()
+  );
+  return [...byUnit.values()].sort((left, right) => left.unit.localeCompare(right.unit));
+}
+
+function accruedOrderCount(entries: readonly LedgerEntry[]): number {
+  return new Set(
+    entries
+      .filter((entry) => entry.operation === "accrual" && entry.order_id)
+      .map((entry) => entry.order_id)
+  ).size;
 }
 
 /**
@@ -104,66 +131,53 @@ function sortedActivity(bucket: MutableBucket): LocationActivity[] {
  * entries recorded before stamping existed fall back to the reservation's
  * stamped location and then to an order-to-location map built from accruals.
  * Everything else lands in the unattributed bucket, which is withheld from
- * location-scoped callers.
+ * location-scoped callers (they only learn whether it is non-empty).
  */
 export function locationReport(
   engine: LoyaltyEngine,
   options: LocationReportOptions = {}
 ): LocationReport {
-  const snapshot = engine.inspectAdmin();
-  const orderLocations = new Map<string, string>();
-  for (const entry of snapshot.ledger) {
-    if (entry.operation === "accrual" && entry.order_id && entry.location_id) {
-      orderLocations.set(entry.order_id, entry.location_id);
-    }
-  }
-  const reservationLocations = new Map<string, string>();
-  for (const reservation of snapshot.reservations) {
-    if (reservation.location_id) {
-      reservationLocations.set(reservation.reservation_id, reservation.location_id);
-    }
-  }
+  const { ledger, reservations } = engine.inspectLedger();
+  const orderLocations = new Map<string, string>(
+    ledger
+      .filter((entry) => entry.operation === "accrual" && entry.order_id && entry.location_id)
+      .map((entry) => [entry.order_id!, entry.location_id!])
+  );
+  const reservationLocations = new Map<string, string>(
+    reservations
+      .filter((reservation) => reservation.location_id)
+      .map((reservation) => [reservation.reservation_id, reservation.location_id!])
+  );
 
-  const buckets = new Map<string, MutableBucket>();
-  const unattributed = emptyBucket();
-  const bucketFor = (locationId: string): MutableBucket => {
-    const bucket = buckets.get(locationId) ?? emptyBucket();
-    buckets.set(locationId, bucket);
-    return bucket;
-  };
-  const resolveLocation = (entry: LedgerEntry): string | undefined =>
+  const entriesByLocation = groupByLocation(ledger, (entry) =>
     entry.location_id ??
     (entry.reservation_id ? reservationLocations.get(entry.reservation_id) : undefined) ??
-    (entry.order_id ? orderLocations.get(entry.order_id) : undefined);
-
-  for (const entry of snapshot.ledger) {
-    const locationId = resolveLocation(entry);
-    const bucket = locationId ? bucketFor(locationId) : unattributed;
-    applyEntry(bucket, entry);
-    if (entry.operation === "accrual" && entry.order_id && locationId) {
-      bucket.orders.add(entry.order_id);
-    }
-  }
-  for (const reservation of snapshot.reservations) {
-    const locationId = reservation.location_id ?? orderLocations.get(reservation.order_id);
-    const bucket = locationId ? bucketFor(locationId) : unattributed;
-    if (reservation.status === "reserved") bucket.reservations.reserved += 1;
-    if (reservation.status === "captured") bucket.reservations.captured += 1;
-    if (reservation.status === "reversed") bucket.reservations.reversed += 1;
-  }
+    (entry.order_id ? orderLocations.get(entry.order_id) : undefined)
+  );
+  const reservationsByLocation = groupByLocation(reservations, (reservation) =>
+    reservation.location_id ?? orderLocations.get(reservation.order_id)
+  );
 
   const registry = new Map<string, LocationEntry>(
     (options.locations ?? []).map((location) => [location.location_id, location])
   );
   const scope = options.scope ? new Set(options.scope) : undefined;
-  const locationIds = [...new Set([...buckets.keys(), ...registry.keys()])]
+  const locationIds = [...new Set([
+    ...entriesByLocation.attributed.keys(),
+    ...reservationsByLocation.attributed.keys(),
+    ...registry.keys()
+  ])]
     .filter((locationId) => !scope || scope.has(locationId))
     .sort((left, right) => left.localeCompare(right));
+
+  const unattributedPresent =
+    entriesByLocation.unattributed.length > 0 ||
+    reservationsByLocation.unattributed.length > 0;
 
   return {
     generated_at: new Date().toISOString(),
     locations: locationIds.map((locationId) => {
-      const bucket = buckets.get(locationId) ?? emptyBucket();
+      const entries = entriesByLocation.attributed.get(locationId) ?? [];
       const registered = registry.get(locationId);
       return {
         location_id: locationId,
@@ -173,18 +187,22 @@ export function locationReport(
           active: registered.active,
           ...(registered.franchisee_id ? { franchisee_id: registered.franchisee_id } : {})
         } : {}),
-        orders_accrued: bucket.orders.size,
-        ledger_entries: bucket.ledgerEntries,
-        activity: sortedActivity(bucket),
-        reservations: { ...bucket.reservations }
+        orders_accrued: accruedOrderCount(entries),
+        ledger_entries: entries.length,
+        activity: activityFor(entries),
+        reservations: countReservationStatuses(
+          reservationsByLocation.attributed.get(locationId) ?? []
+        )
       };
     }),
-    ...(scope ? {} : {
-      unattributed: {
-        ledger_entries: unattributed.ledgerEntries,
-        activity: sortedActivity(unattributed),
-        reservations: { ...unattributed.reservations }
-      }
-    })
+    ...(scope
+      ? { unattributed_present: unattributedPresent }
+      : {
+          unattributed: {
+            ledger_entries: entriesByLocation.unattributed.length,
+            activity: activityFor(entriesByLocation.unattributed),
+            reservations: countReservationStatuses(reservationsByLocation.unattributed)
+          }
+        })
   };
 }

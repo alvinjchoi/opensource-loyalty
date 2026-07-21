@@ -1,9 +1,10 @@
 import { createHash, createHmac, randomUUID } from "node:crypto";
-import type { Member } from "@loyalty-interchange/protocol";
+import type { Member, RedemptionReservation } from "@loyalty-interchange/protocol";
 import type { LoyaltyEngine } from "@loyalty-interchange/reference";
 import { EngineError } from "@loyalty-interchange/reference";
 import type { AsyncStateStore } from "@loyalty-interchange/storage";
 import type { CampaignService } from "./campaigns.js";
+import { countReservationStatuses } from "./reservation-counts.js";
 
 export interface MessagingConnector {
   connector_id: string;
@@ -109,6 +110,7 @@ export interface EngagementAnalytics {
     reserved: number;
     captured: number;
     reversed: number;
+    expired: number;
   }>;
   campaigns: {
     configured: number;
@@ -566,19 +568,19 @@ export function engagementAnalytics(
     if (entry.operation === "expiration") aggregate.expired += Math.abs(entry.amount);
     days.set(key, aggregate);
   }
-  const rewards = new Map<string, EngagementAnalytics["rewards"][number]>();
-  for (const reservation of snapshot.reservations) {
-    const aggregate = rewards.get(reservation.reward_id) ?? {
-      reward_id: reservation.reward_id,
-      reserved: 0,
-      captured: 0,
-      reversed: 0
-    };
-    if (reservation.status === "reserved") aggregate.reserved += 1;
-    if (reservation.status === "captured") aggregate.captured += 1;
-    if (reservation.status === "reversed") aggregate.reversed += 1;
-    rewards.set(reservation.reward_id, aggregate);
-  }
+  const reservationsByReward = snapshot.reservations.reduce(
+    (groups, reservation) => new Map(groups).set(reservation.reward_id, [
+      ...(groups.get(reservation.reward_id) ?? []),
+      reservation
+    ]),
+    new Map<string, RedemptionReservation[]>()
+  );
+  const rewards = new Map<string, EngagementAnalytics["rewards"][number]>(
+    [...reservationsByReward.entries()].map(([rewardId, group]) => [
+      rewardId,
+      { reward_id: rewardId, ...countReservationStatuses(group) }
+    ])
+  );
   return {
     generated_at: timestamp(),
     members: {

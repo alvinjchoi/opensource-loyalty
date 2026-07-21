@@ -1345,14 +1345,14 @@ export function createReferenceServer(engine: LoyaltyEngine, options: ServerOpti
           ? options.admin.access.locationScopeFor(principal)
           : undefined;
         if (method === "GET" && path === "/admin/api/v1/locations") {
-          const locations = locationDirectory.snapshot().locations.filter((location) =>
+          const locations = locationDirectory.listLocations().filter((location) =>
             !scope || scope.includes(location.location_id)
           );
           sendJson(response, 200, { locations });
           return;
         }
         if (method === "GET" && path === "/admin/api/v1/reports/locations") {
-          const registry = locationDirectory.snapshot().locations;
+          const registry = locationDirectory.listLocations();
           const reportOptions = { locations: registry, ...(scope ? { scope } : {}) };
           const report = options.executeEngineOperation
             ? await options.executeEngineOperation(() => locationReport(engine, reportOptions))

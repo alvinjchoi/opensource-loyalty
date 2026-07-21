@@ -107,6 +107,27 @@ describe("location directory", () => {
     }
   });
 
+  it("lists locations without cloning the audit trail", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "lip-locations-list-"));
+    const databasePath = join(directory, "reference.db");
+    const service = await LocationDirectoryService.create({
+      store: makeStore(databasePath),
+      reset: true
+    });
+    try {
+      await service.upsertLocation({ location_id: "location-1", name: "One" }, "tester");
+      await service.upsertLocation({ location_id: "location-2", name: "Two" }, "tester");
+      const listed = service.listLocations();
+      expect(listed.map(({ location_id }) => location_id)).toEqual(["location-1", "location-2"]);
+      // Cloned: mutations must not leak back into the directory.
+      listed[0]!.name = "Mutated";
+      expect(service.locationById("location-1")).toMatchObject({ name: "One" });
+    } finally {
+      await service.close();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it("returns immutable snapshots", async () => {
     const directory = mkdtempSync(join(tmpdir(), "lip-locations-immutable-"));
     const databasePath = join(directory, "reference.db");

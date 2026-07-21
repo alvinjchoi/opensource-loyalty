@@ -1,7 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { LoyaltyEngine } from "@loyalty-interchange/reference";
 import { locationReport } from "@loyalty-interchange/server";
-import { makeContext, makeEnroll, makeOrder, makeProgram, sequentialIds } from "../fixtures.js";
+import {
+  makeContext,
+  makeEnroll,
+  makeOrder,
+  makeProgram,
+  MutableClock,
+  sequentialIds
+} from "../fixtures.js";
 
 function engineWithLocationActivity(): LoyaltyEngine {
   const engine = new LoyaltyEngine(makeProgram(), { ids: sequentialIds() });
@@ -114,6 +121,52 @@ describe("per-location reporting", () => {
     const report = locationReport(engine, { scope: ["location-77"] });
     expect(report.locations.map(({ location_id }) => location_id)).toEqual(["location-77"]);
     expect(report.unattributed).toBeUndefined();
+    // Scoped callers still learn that data exists outside their view (the
+    // manual adjustment), without seeing any amounts.
+    expect(report.unattributed_present).toBe(true);
+  });
+
+  it("reports unattributed_present false for scoped callers when everything is attributed", () => {
+    const engine = new LoyaltyEngine(makeProgram(), { ids: sequentialIds() });
+    engine.enroll(makeEnroll());
+    engine.postAccrual({
+      context: makeContext("clean-accrual"),
+      member_id: "member-001",
+      order: makeOrder()
+    });
+    const report = locationReport(engine, { scope: ["location-42"] });
+    expect(report.unattributed_present).toBe(false);
+    // Unscoped callers keep the full bucket and no presence flag.
+    const full = locationReport(engine);
+    expect(full.unattributed_present).toBeUndefined();
+    expect(full.unattributed).toBeDefined();
+  });
+
+  it("counts expired reservations by status", () => {
+    const clock = new MutableClock();
+    const engine = new LoyaltyEngine(makeProgram(), { ids: sequentialIds(), clock });
+    engine.enroll(makeEnroll());
+    engine.postAccrual({
+      context: makeContext("expired-accrual"),
+      member_id: "member-001",
+      order: makeOrder()
+    });
+    engine.reserve({
+      context: makeContext("expired-reserve"),
+      redemption_id: "redemption-expired-001",
+      member_id: "member-001",
+      reward_id: "one-dollar-off",
+      order: makeOrder()
+    });
+    clock.advance(300);
+    const report = locationReport(engine);
+    const row = report.locations.find(({ location_id }) => location_id === "location-42");
+    expect(row?.reservations).toEqual({
+      reserved: 0,
+      captured: 0,
+      reversed: 0,
+      expired: 1
+    });
   });
 
   it("attributes redemptions and reversals to the reserving order's own location", () => {

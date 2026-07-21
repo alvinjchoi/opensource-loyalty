@@ -1055,15 +1055,24 @@ export class LoyaltyEngine {
     this.hydrate(state);
   }
 
+  /**
+   * Ledger-only admin inspection: the cloned ledger (newest first) and
+   * reservations without the per-member balance/metric aggregation that
+   * `inspectAdmin()` performs. Reporting over raw entries should prefer this.
+   */
+  public inspectLedger(): { ledger: LedgerEntry[]; reservations: RedemptionReservation[] } {
+    this.expireAllReservations();
+    this.expirePointLots();
+    return {
+      ledger: this.sortedLedgerClone(),
+      reservations: [...this.reservations.values()].map(clone)
+    };
+  }
+
   public inspectAdmin(): ReferenceAdminSnapshot {
     this.expireAllReservations();
     this.expirePointLots();
-    const ledger = [...this.ledger.values()]
-      .sort((left, right) => {
-        const occurred = Date.parse(right.occurred_at) - Date.parse(left.occurred_at);
-        return occurred !== 0 ? occurred : right.entry_id.localeCompare(left.entry_id);
-      })
-      .map(clone);
+    const ledger = this.sortedLedgerClone();
     const members = [...this.members.values()]
       .map((member): ReferenceAdminMember => {
         const metrics = this.accountMetrics(member.member_id);
@@ -1123,6 +1132,16 @@ export class LoyaltyEngine {
       reservations: [...this.reservations.values()].map(clone),
       issued_rewards: [...this.issuedRewards.values()].map(clone)
     };
+  }
+
+  /** Cloned ledger entries, newest first with a stable entry-id tiebreak. */
+  private sortedLedgerClone(): LedgerEntry[] {
+    return [...this.ledger.values()]
+      .sort((left, right) => {
+        const occurred = Date.parse(right.occurred_at) - Date.parse(left.occurred_at);
+        return occurred !== 0 ? occurred : right.entry_id.localeCompare(left.entry_id);
+      })
+      .map(clone);
   }
 
   private hydrate(state: LoyaltyEngineState): void {
