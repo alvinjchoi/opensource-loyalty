@@ -77,7 +77,9 @@ portable LIP contract focused on interoperability.
 - [x] Add per-subscription timeout, backoff, and retry policies.
 - [x] Scoped Admin users, fixed roles and permissions, tenant-scoped API keys,
   key expiration/revocation, and audit entries for Admin and protocol writes.
-- [ ] Location-level scoping and custom role definitions.
+- [x] Location-level scoping: per-tenant location registry, location-scoped
+  Admin users and API keys, and per-location reporting.
+- [ ] Custom role definitions.
 - [x] Consent-filtered member CRM exports in JSON and CSV.
 - [x] Ledger/member/campaign analytics plus signed, idempotent messaging
   connectors with persisted jobs, retries, and Admin controls.

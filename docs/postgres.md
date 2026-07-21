@@ -63,11 +63,16 @@ optimistic revisions for tenant-scoped extension state.
 
 The bundled Admin in Postgres mode now runs the complete service suite —
 program publishing, campaign scheduling, memberships, engagement, access
-directory, and durable webhook journals — against tenant-scoped
-`PostgresJsonStateStore` rows sharing one pool. Engine-mutating admin
-operations (membership grants, campaign runs, program publishes) run inside
-`executeEngineOperation`, so they commit through the same transactional
-revision flow as protocol traffic.
+directory, the location registry, and durable webhook journals — against
+tenant-scoped `PostgresJsonStateStore` rows sharing one pool. Engine-mutating
+admin operations (membership grants, campaign runs, program publishes) run
+inside `executeEngineOperation`, so they commit through the same transactional
+revision flow as protocol traffic. Admin queries and reporting are
+location-aware: users and API keys created with `allowed_location_ids` only
+see their own locations in the registry and in
+`/admin/api/v1/reports/locations`, which aggregates accrued balances, order
+counts, and reservation outcomes per `location_id` from the accrual-stamped
+ledger.
 
 > [!IMPORTANT]
 > **Run at most one platform instance per tenant.** The engine repository is
