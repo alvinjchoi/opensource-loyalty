@@ -63,6 +63,49 @@ reversed), enriched with registry name/franchisee_id; registry locations with
 no activity still appear. Callers with a location scope see only their
 locations and never the `unattributed` bucket.
 
+## Amendments after review
+
+Code review of the initial implementation produced the following changes, all
+shipped on this branch:
+
+1. **Fail-closed admin reads.** `locationScopeFor()` was only consulted by the
+   new locations endpoints, so a scoped principal could read the whole tenant
+   via `/admin/api/v1/snapshot`, `/analytics`, and `/exports/members`. Any
+   admin GET outside a small allowlist of scope-aware paths now returns 403
+   `location_scoped_forbidden` for scoped principals; new endpoints are safe
+   by default. Location-filtered variants of snapshot/analytics remain
+   follow-up work.
+2. **Partial updates preserve scope/attribution fields.** Omitting
+   `allowed_location_ids` (users) or `franchisee_id` (locations) preserves the
+   stored value, mirroring the `active` fallback; explicit `null` clears and
+   the clear is audited. Empty arrays still 422. Location audit entries carry
+   `active`/`franchisee_id` metadata.
+3. **Scope-escape prevention.** A location-scoped principal can only
+   create/update users and API keys whose effective scope is a non-empty
+   subset of its own, and can only upsert/delete registry locations inside its
+   scope (403 otherwise). `allowed_location_ids` arrays containing non-strings
+   are rejected with 422 (no silent filtering), and location ids at both
+   boundaries are validated against the protocol `Id` schema.
+4. **Write-time redemption attribution.** `RedemptionReservation` gains an
+   optional `location_id` stamped at reserve from the reserving order's scope;
+   capture and reversal ledger entries carry the reservation's location. The
+   accrual order→location map survives only as a fallback for pre-upgrade
+   entries. *Wire compatibility:* the new optional `location_id` on
+   `RedemptionReservation` (and the existing one on `LedgerEntry`) is
+   additive, but consumers that validate responses with
+   `additionalProperties: false` schemas must regenerate from the updated
+   spec.
+5. **Report internals.** `locationReport` reads
+   `LoyaltyEngine.inspectLedger()` (no per-member metric aggregation),
+   reservation outcomes are counted across all four protocol statuses (the
+   report and engagement analytics gain `expired`), scoped reports include an
+   `unattributed_present` boolean, and the aggregation is written with
+   immutable updates.
+6. **Wiring.** The CLI mock server and the cloud data-plane provisioner now
+   pass the full admin service block (the provisioner previously advertised
+   `admin_url` with no admin services at all), and demo seeding registers
+   `location-014` in the location directory.
+
 ## Out of scope (future work)
 
 - **Franchise funding-share math** (spec `foodservice.md` § Franchise funding):

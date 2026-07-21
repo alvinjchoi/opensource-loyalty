@@ -105,6 +105,13 @@ page at 100 entries.
 make the entry temporary. `related_entry_id` links a derived entry such as an
 expiration to its source without changing either entry.
 
+`location_id` attributes an entry to the operating location that generated it.
+Providers MUST set `location_id` on accrual entries from the accrued order's
+scope and SHOULD set it on redemption and reversal entries from the reserving
+order's scope — the location where the guest redeemed, which may differ from
+the location that earned the balance. Manual adjustments and expirations have
+no originating order and carry no `location_id`.
+
 `next_cursor` is opaque and bound to the original filters. Clients MUST send it
 unchanged and MUST NOT parse, modify, or persist it as an entry identifier. A
 provider MUST reject malformed cursors and cursors reused with different

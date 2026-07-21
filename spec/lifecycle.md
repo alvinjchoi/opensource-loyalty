@@ -43,6 +43,11 @@ Capture and reverse are individually idempotent. Capturing a reversed or expired
 reservation is invalid. Reversing an already reversed reservation succeeds
 without another ledger entry.
 
+A reservation SHOULD record the reserving order's `location_id` so that the
+ledger entries later posted by capture and reversal are attributed to the
+location where the redemption happened, not to the location that originally
+earned the balance.
+
 ## Accrual and adjustment
 
 Accrual is posted only for a paid order in the foodservice profile. A provider
