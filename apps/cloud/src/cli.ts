@@ -57,6 +57,9 @@ if (programDirectory) {
     ...(process.env["LIP_CLOUD_DATA_PLANE_HOST"]
       ? { host: process.env["LIP_CLOUD_DATA_PLANE_HOST"] }
       : {}),
+    ...(process.env["LIP_CLOUD_DATA_PLANE_PUBLIC_HOST"]
+      ? { publicHost: process.env["LIP_CLOUD_DATA_PLANE_PUBLIC_HOST"] }
+      : {}),
     ...(process.env["LIP_CLOUD_DATA_PLANE_BASE_PORT"]
       ? { basePort: Number.parseInt(process.env["LIP_CLOUD_DATA_PLANE_BASE_PORT"], 10) }
       : {}),

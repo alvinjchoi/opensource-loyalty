@@ -8,6 +8,7 @@ export default defineConfig({
       "@loyalty-interchange/reference": fileURLToPath(new URL("./packages/reference/src/index.ts", import.meta.url)),
       "@loyalty-interchange/storage": fileURLToPath(new URL("./packages/storage/src/index.ts", import.meta.url)),
       "@loyalty-interchange/storage-sqlite": fileURLToPath(new URL("./packages/storage-sqlite/src/index.ts", import.meta.url)),
+      "@loyalty-interchange/storage-postgres": fileURLToPath(new URL("./packages/storage-postgres/src/index.ts", import.meta.url)),
       "@loyalty-interchange/server": fileURLToPath(new URL("./packages/server/src/index.ts", import.meta.url)),
       "@loyalty-interchange/cli": fileURLToPath(new URL("./packages/cli/src/index.ts", import.meta.url)),
       "@loyalty-interchange/identity": fileURLToPath(new URL("./packages/identity/src/index.ts", import.meta.url)),

@@ -10,6 +10,7 @@
   "references": [
     { "path": "../../packages/identity" },
     { "path": "../../packages/reference" },
-    { "path": "../../packages/server" }
+    { "path": "../../packages/server" },
+    { "path": "../../packages/storage-postgres" }
   ]
 }

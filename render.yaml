@@ -1,0 +1,96 @@
+# Render Blueprint: shared LIP data plane (PLA-417)
+#
+# Deployable unit: the apps/cloud host (`node apps/cloud/dist/cli.js`).
+# Why this entry point and not packages/server/src/cli.ts: the reference
+# server binds exactly ONE tenant per process (LIP_TENANT_ID), so it cannot
+# serve all brands from one service. The cloud host is the existing
+# multi-tenant runner: its control plane provisions tenants (org -> project ->
+# environment => generated tenant_id + program + merchant API key) and its
+# LocalDataPlaneProvisioner boots one row-scoped Postgres runtime per tenant
+# inside the same process, all sharing the one managed Postgres below.
+#
+# Single instance is a hard constraint, not a cost choice: docs/postgres.md
+# requires at most ONE platform instance per tenant until PLA-428/429 land
+# (Admin extension stores cache per-process revisions; webhook journals assume
+# a single dispatcher). numInstances: 1 plus the attached disk (disk-backed
+# services cannot scale out) both enforce it.
+#
+# Networking note: Render routes public HTTP only to the control-plane port.
+# Per-tenant runtimes (ports 13210+) are reachable from other services in this
+# Render account over the private network (host `lip-shared-data-plane`).
+# The consuming BFF (Express API) already runs on Render, so it reaches
+# tenants privately; public per-tenant hostnames are follow-up work.
+#
+# Secrets are sync: false — set them in the Render dashboard on first deploy.
+
+previews:
+  generation: off
+
+databases:
+  - name: lip-shared-postgres
+    plan: basic-1gb # smallest paid tier with PITR; resize without data loss later
+    region: oregon
+    postgresMajorVersion: "17" # matches compose.yaml (postgres:17-alpine)
+    databaseName: loyalty
+    user: loyalty
+    ipAllowList: [] # private-network access only; no public reads/writes
+
+services:
+  - type: web
+    name: lip-shared-data-plane
+    runtime: docker
+    region: oregon # ONE regional cluster; a second region is a second blueprint
+    plan: standard # hosts N in-process tenant runtimes; starter is too small
+    numInstances: 1 # REQUIRED: one platform instance per tenant (docs/postgres.md)
+    autoDeploy: false # promote deliberately; loyalty state is financial data
+    dockerfilePath: ./Dockerfile
+    dockerCommand: node apps/cloud/dist/cli.js
+    # Applies the engine schema (@loyalty-interchange/storage-postgres) and the
+    # control-plane schema (apps/cloud/migrations) before each deploy goes
+    # live. Advisory-locked and idempotent (apps/cloud/src/migrate-cli.ts).
+    preDeployCommand: node apps/cloud/dist/migrate-cli.js
+    healthCheckPath: /health # control-plane health (no auth required)
+    disk:
+      name: lip-cloud-data
+      mountPath: /data
+      sizeGB: 10 # program JSONs, per-environment credentials, ports.json
+    envVars:
+      # --- shared Postgres: control plane + every tenant's engine rows ---
+      - key: LIP_CLOUD_DATABASE_URL
+        fromDatabase:
+          name: lip-shared-postgres
+          property: connectionString
+      - key: LIP_CLOUD_DATA_PLANE_DATABASE_URL
+        fromDatabase:
+          name: lip-shared-postgres
+          property: connectionString
+      # --- control-plane HTTP ---
+      - key: LIP_CLOUD_HOST
+        value: 0.0.0.0
+      - key: LIP_CLOUD_PORT
+        value: "10000" # Render's default detected port
+      - key: HEALTH_PORT
+        value: "10000"
+      # Trusted-gateway shared key (>= 16 chars). INTERIM AUTH: tenant-scoped
+      # API keys are pending PLA-416; until then every management call uses
+      # this one key plus an X-LIP-Cloud-Subject header. Never expose it to
+      # browsers or mobile apps.
+      - key: LIP_CLOUD_API_KEY
+        sync: false
+      - key: LIP_CLOUD_ALLOWED_ORIGINS
+        sync: false # e.g. https://dashboard.craveup.com
+      - key: LIP_CLOUD_REGIONS
+        value: render-oregon # must match --region passed to cloud:provision
+      - key: LIP_CLOUD_DEFAULT_PLAN
+        value: free
+      # --- in-process data-plane provisioner (one runtime per tenant) ---
+      - key: LIP_CLOUD_PROGRAM_DIR
+        value: /data/programs # setting this enables the provisioning worker
+      - key: LIP_CLOUD_DATA_DIR
+        value: /data/lip-cloud # credentials files + ports.json (survive deploys)
+      - key: LIP_CLOUD_DATA_PLANE_HOST
+        value: 0.0.0.0 # tenant runtimes reachable over Render private network
+      - key: LIP_CLOUD_DATA_PLANE_PUBLIC_HOST
+        value: lip-shared-data-plane # private-network hostname written into api_url
+      - key: LIP_CLOUD_DATA_PLANE_BASE_PORT
+        value: "13210"
