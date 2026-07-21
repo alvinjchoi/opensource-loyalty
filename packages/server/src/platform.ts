@@ -95,6 +95,9 @@ export function webhookSubscriptionsFromEnv(
   if (!secret) {
     throw new Error("LIP_WEBHOOK_SECRET is required when LIP_WEBHOOK_URL is set");
   }
+  if (secret.length < 16) {
+    throw new Error("LIP_WEBHOOK_SECRET must contain at least 16 characters");
+  }
   const events = env["LIP_WEBHOOK_EVENTS"]
     ?.split(",")
     .map((value) => value.trim())

@@ -51,6 +51,22 @@ import type { LocationDirectoryService } from "./locations.js";
 const MAX_BODY_BYTES = 1_048_576;
 const DEFAULT_LOCAL_API_KEY = "lip-dev-key";
 
+/**
+ * Static-key hygiene for shared/Postgres deployments: the local development
+ * default and short keys are fine for a laptop SQLite runtime but must never
+ * reach a multi-tenant or network-exposed host. Call at boot before serving.
+ */
+export function assertStrongApiKey(apiKey: string): void {
+  if (apiKey === DEFAULT_LOCAL_API_KEY) {
+    throw new Error(
+      "The default local API key (lip-dev-key) is not allowed for shared deployments; set a strong LIP_API_KEY"
+    );
+  }
+  if (apiKey.length < 16) {
+    throw new Error("Shared-deployment API keys must contain at least 16 characters");
+  }
+}
+
 interface Route {
   schema: TSchema;
   status: number;

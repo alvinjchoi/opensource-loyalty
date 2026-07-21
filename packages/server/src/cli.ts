@@ -2,7 +2,7 @@
 
 import { resolve } from "node:path";
 import { createDemoPlatform, createPostgresProtocolPlatform } from "./platform.js";
-import { startReferenceServer } from "./server.js";
+import { assertStrongApiKey, startReferenceServer } from "./server.js";
 
 function positiveIntegerEnvironment(name: string, fallback: number): number {
   const raw = process.env[name];
@@ -21,6 +21,9 @@ const databasePath = resolve(process.env.LIP_DATABASE_PATH ?? ".lip/reference.db
 const databaseUrl = process.env.LIP_DATABASE_URL;
 const rateLimit = positiveIntegerEnvironment("LIP_RATE_LIMIT_REQUESTS", 120);
 const rateWindowMs = positiveIntegerEnvironment("LIP_RATE_LIMIT_WINDOW_MS", 60_000);
+// Postgres mode means a shared/cloud deployment: refuse to boot with the
+// local development default or a short key (PLA-416 static-key hygiene).
+if (databaseUrl) assertStrongApiKey(apiKey);
 const platform = databaseUrl
   ? await createPostgresProtocolPlatform({
       connectionString: databaseUrl,

@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { LoyaltyEngine } from "@loyalty-interchange/reference";
 import {
+  assertStrongApiKey,
   createReferenceServer,
   createDemoPlatform,
   startReferenceServer,
@@ -15,6 +16,13 @@ describe("reference HTTP server", () => {
   it("requires a nontrivial API key", () => {
     expect(() => createReferenceServer(new LoyaltyEngine(makeProgram()), { apiKey: "short" }))
       .toThrowError(/at least 8/);
+  });
+
+  it("rejects weak or default keys for shared deployments", () => {
+    expect(() => assertStrongApiKey("lip-dev-key")).toThrowError(/default/);
+    expect(() => assertStrongApiKey("only-15-chars-x")).toThrowError(/at least 16/);
+    expect(() => assertStrongApiKey("")).toThrowError(/at least 16/);
+    expect(() => assertStrongApiKey("a-strong-key-of-16ch")).not.toThrow();
   });
 
   it("commits protocol operations through an external transaction hook", async () => {

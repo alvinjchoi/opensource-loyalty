@@ -499,13 +499,13 @@ describe("platform webhook wiring", () => {
     expect(
       webhookSubscriptionsFromEnv({
         LIP_WEBHOOK_URL: "https://receiver.example/hooks",
-        LIP_WEBHOOK_SECRET: "hook-secret",
+        LIP_WEBHOOK_SECRET: "hook-secret-16-chars",
         LIP_WEBHOOK_EVENTS: "org.loyalty-interchange.order.accrued.v1, org.loyalty-interchange.redemption.captured.v1"
       })
     ).toEqual([
       {
         url: "https://receiver.example/hooks",
-        secret: "hook-secret",
+        secret: "hook-secret-16-chars",
         events: [
           "org.loyalty-interchange.order.accrued.v1",
           "org.loyalty-interchange.redemption.captured.v1"
@@ -515,6 +515,10 @@ describe("platform webhook wiring", () => {
     expect(() => webhookSubscriptionsFromEnv({ LIP_WEBHOOK_URL: "https://x.example" })).toThrowError(
       /LIP_WEBHOOK_SECRET/
     );
+    expect(() => webhookSubscriptionsFromEnv({
+      LIP_WEBHOOK_URL: "https://x.example",
+      LIP_WEBHOOK_SECRET: "short"
+    })).toThrowError(/at least 16 characters/);
   });
 
   it("delivers signed events from a live platform to an HTTP receiver", async () => {
