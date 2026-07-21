@@ -22,15 +22,18 @@ scope inside the shared database — never a per-brand deployment.
   extension stores cache per-process revisions; webhook journals assume a
   single dispatcher). `render.yaml` pins `numInstances: 1` and the attached
   disk prevents scale-out. Do not raise the instance count.
-- **Interim auth (PLA-416 boundary).** Tenant-scoped API keys do not exist
-  yet. Two keys are in play today:
+- **Auth model (PLA-416).** Two keys are in play:
   - `LIP_CLOUD_API_KEY` — one shared trusted-gateway key for all
     control-plane management calls, paired with an `X-LIP-Cloud-Subject`
     header. Server-side only, never in a browser or app.
-  - Per-environment **merchant keys** (`lip_sk_...`) — generated during
-    provisioning but written only to a `0600` credentials file on the
-    service disk; no API returns them. Retrieval is a manual step (below)
-    until PLA-416 adds tenant-scoped issuance/rotation.
+  - Per-environment **merchant keys** (`lip_sk_...`) — owner-role,
+    tenant-scoped access-control keys bootstrapped at provision time
+    (hashed at rest, audited, only valid on their own tenant's runtime).
+    Retrieved and rotated through the control plane (step 4c); the replaced
+    key stays valid for a bounded overlap window (default 24 h) so BFFs swap
+    without downtime. Each runtime also holds a root key in its credentials
+    file — deprecated, never handed out, kept only for backward
+    compatibility with pre-v2 consumers.
 
 ## 1. Create the shared Postgres
 
@@ -146,21 +149,34 @@ The environment response carries the generated `tenant_id` and, once ready,
 `api_url`/`admin_url` on the private-network host
 (`lip-shared-data-plane:<port>`).
 
-### 4c. Retrieve the merchant API key — INTERIM, blocked on PLA-416
+### 4c. Retrieve or rotate the merchant API key (via the control plane)
 
-No API exposes the merchant key today. Read it off the service disk:
+Rotation doubles as retrieval — mint the credential the moment you need it
+instead of reading files off the disk:
 
 ```bash
-render ssh lip-shared-data-plane
-cat /data/lip-cloud/<environment_id>.credentials.json
-# { "tenant_id": "...", "api_url": "...", "api_key": "lip_sk_...", ... }
+LIP_CLOUD_API_KEY=<shared key> npm run cloud:provision -- rotate-credentials \
+  --cloud-url https://<service>.onrender.com \
+  --subject org_<business_manager_org_id> \
+  --environment <environment_id>
+# {"event":"tenant_credentials_rotated","merchant_api_key":"lip_sk_...", ...}
 ```
 
-Copy `api_key` into the consuming BFF's secrets (`LIP_URL` + `LIP_API_KEY`
-on the Express API's Render service) and into the password manager — the
-credentials file is currently the only durable copy. When PLA-416 lands,
-tenant-scoped keys will be issued/rotated through the control plane and this
-manual step (and the shared management key) goes away.
+(Equivalent raw call: `POST $BASE/cloud/v1/environments/<environment_id>/credentials/rotate`
+with the same auth headers as 4b. Requires org owner/admin; audited as
+`cloud.environment.credentials_rotated`.)
+
+Copy `merchant_api_key` into the consuming BFF's secrets (`LIP_URL` +
+`LIP_API_KEY` on the Express API's Render service) and into the password
+manager. The previously issued merchant key stays valid for the overlap
+window (default 24 h), so re-running this command is always safe; swap the
+BFF before the window closes. Never hand out the root `api_key` from the
+credentials file — it is deprecated and no API returns it.
+
+Tenants can also self-serve rotation of any key they created on their own
+runtime: `POST /admin/api/v1/access/api-keys/rotate` with
+`{"key_id": "key_...", "overlap_seconds": 86400}` (0 = immediate cutover),
+and revoke early via `POST /admin/api/v1/access/api-keys/revoke`.
 
 ### 4d. Verify before routing traffic
 
@@ -194,10 +210,11 @@ npm run lip -- state import --program ./demo-rewards.json --input ./archive.json
   `neon branches create --parent-timestamp ...`) inside the history-retention
   window, then repoint the service env vars at the new branch's endpoint.
 - **The service disk is state too.** `/data` holds program JSONs and the
-  per-environment credentials files (the only copy of merchant keys until
-  PLA-416). Render disks take daily snapshots; restore from the disk's
-  **Snapshots** tab. Additionally keep programs in git and keys in the
-  password manager so a disk loss is an inconvenience, not an incident.
+  per-environment credentials files. Render disks take daily snapshots;
+  restore from the disk's **Snapshots** tab. Additionally keep programs in
+  git and merchant keys in the password manager; a lost credentials file is
+  recoverable anyway — `rotate-credentials` (4c) mints a fresh merchant key
+  through the control plane.
 - **Restore drill:** after any restore, run step 4d verification plus a
   known-member balance spot check (`cloud-verify --expect-member ...`)
   before unfreezing.
@@ -246,9 +263,9 @@ failure + health-check alerts to the engineering Slack. Stream logs (Render
 | Constraint | Tracking |
 | --- | --- |
 | One platform instance per tenant → `numInstances: 1`, no horizontal scaling of the shared host | PLA-428 / PLA-429 |
-| Shared management key + file-based merchant keys | PLA-416 (tenant-scoped API keys) |
+| Shared control-plane management key (`LIP_CLOUD_API_KEY`); merchant keys are tenant-scoped + rotatable since PLA-416, but the management key is still one shared secret | follow-up: per-operator control-plane credentials |
 | Tenant runtimes are private-network only (one public port per Render service) | follow-up: per-tenant public hostnames or gateway routing |
-| Credentials in plaintext files on disk, no rotation | listed in `docs/cloud.md` "Next production steps" |
+| Credentials files still plaintext on disk (rotation shipped; encryption at rest pending) | listed in `docs/cloud.md` "Next production steps" |
 
 ## Owner actions checklist (dashboard-only steps)
 
@@ -259,5 +276,6 @@ failure + health-check alerts to the engineering Slack. Stream logs (Render
    history retention, paste both database URLs into the service env.
 4. Render: enable failure/health notifications; optionally add a log stream.
 5. Seed `/data/programs/<program_id>.json` via `render ssh` per brand.
-6. Per onboarded brand: read the credentials file, set `LIP_URL` +
-   `LIP_API_KEY` on the BFF service, store the key in the password manager.
+6. Per onboarded brand: run `rotate-credentials` (step 4c) to mint the
+   merchant key, set `LIP_URL` + `LIP_API_KEY` on the BFF service, store the
+   key in the password manager.

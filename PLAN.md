@@ -251,7 +251,9 @@ Cloud-specific lifecycle or billing concepts part of `/lip/v1`.
 - [ ] Regional data-plane provisioning adapter
 - [x] Direct OIDC validation, invitations, and membership management
 - [ ] Stripe billing adapter and signed subscription webhooks
-- [ ] Encrypted environment credentials, API-key rotation, and suspension
+- [x] Tenant-scoped merchant API keys with control-plane retrieval/rotation
+  and bounded overlap windows (PLA-416)
+- [ ] Encrypted environment credentials and suspension
 - [ ] Automated runtime metering, backup, restore, and region migration
 
 Exit criteria: a customer can create an organization, project, and environment;

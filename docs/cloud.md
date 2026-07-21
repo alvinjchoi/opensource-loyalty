@@ -53,9 +53,20 @@ environment inside the control-plane process. Each `create` job:
    `LIP_CLOUD_DATA_PLANE_DATABASE_URL` is set;
 3. allocates a **stable port** from `LIP_CLOUD_DATA_PLANE_BASE_PORT` (default
    `13210`) recorded in `<data-dir>/ports.json`;
-4. generates (or reuses) a merchant API key and writes a `0600` credentials
-   file (`<data-dir>/<environment_id>.credentials.json`); and
+4. bootstraps an owner-role **merchant API key** through the tenant's own
+   access-control service (hashed, audited, rotatable) and writes a `0600`
+   credentials file (`<data-dir>/<environment_id>.credentials.json`, format
+   v2: `merchant_api_key` + a deprecated root `api_key` kept for backward
+   compatibility; legacy v1 files are upgraded in place on restore); and
 5. marks the environment `ready` with its reachable `api_url` and `admin_url`.
+
+Merchant credentials are retrieved and rotated through the control plane —
+`POST /cloud/v1/environments/{id}/credentials/rotate` (org owner/admin;
+audited) or `npm run cloud:provision -- rotate-credentials --environment
+env_...` — which returns a fresh merchant key while the replaced key stays
+valid for the standard overlap window (default 24 h). The root runtime key is
+never returned by any API. Tenants can additionally self-rotate any of their
+keys via `POST /admin/api/v1/access/api-keys/rotate` on their runtime.
 
 On control-plane startup the provisioner calls `restore()` and relaunches every
 credentialed environment on the same port and API key so BFF `LIP_URL` values
@@ -238,6 +249,7 @@ points issued are not a billing metric.
    through the existing claim-safe worker.
 2. Implement the Stripe adapter behind `CloudBillingProvider`, including signed
    webhook handling.
-3. Add encrypted environment credentials and API-key rotation.
+3. Add encrypted environment credentials (API-key rotation shipped with
+   PLA-416; the credentials file itself is still plaintext-on-disk `0600`).
 4. Aggregate runtime usage into the control plane automatically.
 5. Add backups, restore, region migration, and suspension workflows.
