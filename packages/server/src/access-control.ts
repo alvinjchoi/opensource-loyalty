@@ -113,6 +113,11 @@ export interface AccessControlServiceOptions {
   reset?: boolean;
 }
 
+/** Default validity overlap for a replaced key after rotation. */
+export const DEFAULT_ROTATION_OVERLAP_SECONDS = 86_400;
+/** Upper bound on the rotation overlap window (7 days). */
+export const MAX_ROTATION_OVERLAP_SECONDS = 604_800;
+
 function hashSecret(secret: string): string {
   return createHash("sha256").update(secret).digest("hex");
 }
@@ -384,6 +389,107 @@ export class AccessControlService {
     });
     const { secret_hash: _secretHash, ...publicKey } = key;
     return { api_key: structuredClone(publicKey), secret };
+  }
+
+  /**
+   * Mints a replacement for an active API key (same name, role, and location
+   * scope; fresh secret) and bounds the old key's remaining validity to an
+   * overlap window so consumers can swap credentials without a flag-day
+   * cutover. `overlap_seconds: 0` expires the old key immediately; an
+   * existing sooner expiry is never widened. Both keys are audited.
+   */
+  public async rotateApiKey(input: {
+    key_id: string;
+    /** Old-key validity after rotation, 0..604800 s. Defaults to 24 h. */
+    overlap_seconds?: number;
+    /** Optional expiry for the replacement key. */
+    expires_at?: string;
+  }, principal: TenantPrincipal): Promise<{
+    api_key: Omit<TenantApiKey, "secret_hash">;
+    secret: string;
+    replaced_api_key: Omit<TenantApiKey, "secret_hash">;
+  }> {
+    this.requirePermission(principal, "access:manage");
+    const overlapSeconds = input.overlap_seconds ?? DEFAULT_ROTATION_OVERLAP_SECONDS;
+    if (
+      !Number.isInteger(overlapSeconds) ||
+      overlapSeconds < 0 ||
+      overlapSeconds > MAX_ROTATION_OVERLAP_SECONDS
+    ) {
+      throw new EngineError(
+        "validation_failed",
+        `overlap_seconds must be an integer between 0 and ${MAX_ROTATION_OVERLAP_SECONDS}`,
+        422
+      );
+    }
+    if (
+      input.expires_at &&
+      (!Number.isFinite(Date.parse(input.expires_at)) ||
+        Date.parse(input.expires_at) <= Date.now())
+    ) {
+      throw new EngineError("validation_failed", "API key expiration must be in the future", 422);
+    }
+    const existing = this.state.api_keys.find((candidate) => candidate.key_id === input.key_id);
+    if (!existing) throw new EngineError("not_found", "API key was not found", 404);
+    if (
+      !existing.active ||
+      (existing.expires_at && Date.parse(existing.expires_at) <= Date.now())
+    ) {
+      throw new EngineError("conflict", "API key is not active", 409);
+    }
+    this.assertWithinPrincipalScope(principal, existing.allowed_location_ids);
+    const secret = `lip_sk_${randomBytes(32).toString("base64url")}`;
+    const timestamp = now();
+    const replacement: TenantApiKey = {
+      key_id: `key_${randomUUID()}`,
+      tenant_id: this.state.tenant.tenant_id,
+      name: existing.name,
+      prefix: secret.slice(0, 15),
+      role: existing.role,
+      active: true,
+      created_at: timestamp,
+      ...(input.expires_at
+        ? { expires_at: new Date(input.expires_at).toISOString() }
+        : {}),
+      ...(existing.allowed_location_ids
+        ? { allowed_location_ids: [...existing.allowed_location_ids] }
+        : {}),
+      secret_hash: hashSecret(secret)
+    };
+    const overlapExpiry = new Date(Date.now() + overlapSeconds * 1_000).toISOString();
+    const replacedExpiresAt =
+      existing.expires_at && Date.parse(existing.expires_at) < Date.parse(overlapExpiry)
+        ? existing.expires_at
+        : overlapExpiry;
+    const replaced: TenantApiKey = { ...existing, expires_at: replacedExpiresAt };
+    this.state = {
+      ...this.state,
+      api_keys: [
+        replacement,
+        ...this.state.api_keys.map((candidate) =>
+          candidate.key_id === existing.key_id ? replaced : candidate
+        )
+      ]
+    };
+    await this.recordAudit(principal, "access.api_key.created", "api_key", replacement.key_id, {
+      role: replacement.role,
+      prefix: replacement.prefix,
+      rotated_from: existing.key_id,
+      ...(replacement.allowed_location_ids
+        ? { allowed_location_ids: replacement.allowed_location_ids }
+        : {})
+    });
+    await this.recordAudit(principal, "access.api_key.rotated", "api_key", existing.key_id, {
+      replacement_key_id: replacement.key_id,
+      overlap_expires_at: replacedExpiresAt
+    });
+    const { secret_hash: _replacementHash, ...publicReplacement } = replacement;
+    const { secret_hash: _replacedHash, ...publicReplaced } = replaced;
+    return {
+      api_key: structuredClone(publicReplacement),
+      secret,
+      replaced_api_key: structuredClone(publicReplaced)
+    };
   }
 
   public async revokeApiKey(keyId: string, principal: TenantPrincipal): Promise<void> {

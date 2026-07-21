@@ -317,6 +317,159 @@ describe("tenant access control", () => {
     }
   });
 
+  it("rotates an API key with a bounded overlap window", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "lip-access-rotate-"));
+    const databasePath = join(directory, "reference.db");
+    const service = await AccessControlService.create({
+      store: makeStore(databasePath, "tenant-acme"),
+      tenantId: "tenant-acme",
+      tenantName: "Acme",
+      reset: true
+    });
+    try {
+      const root = service.rootPrincipal();
+      const created = await service.createApiKey({
+        name: "Acme mobile BFF",
+        role: "integration",
+        allowed_location_ids: ["location-42"]
+      }, root);
+
+      const rotated = await service.rotateApiKey({
+        key_id: created.api_key.key_id,
+        overlap_seconds: 3_600
+      }, root);
+
+      // Replacement inherits name, role, and location scope with a new secret.
+      expect(rotated.secret).toMatch(/^lip_sk_/);
+      expect(rotated.secret).not.toBe(created.secret);
+      expect(rotated.api_key).toMatchObject({
+        name: "Acme mobile BFF",
+        role: "integration",
+        allowed_location_ids: ["location-42"],
+        active: true
+      });
+      expect(rotated.api_key.key_id).not.toBe(created.api_key.key_id);
+
+      // Old key stays valid during the overlap window and its expiry is set.
+      const overlapExpiry = Date.parse(rotated.replaced_api_key.expires_at!);
+      expect(overlapExpiry).toBeGreaterThan(Date.now());
+      expect(overlapExpiry).toBeLessThanOrEqual(Date.now() + 3_600_000 + 5_000);
+      expect(await service.authenticate(created.secret)).toMatchObject({
+        actor_id: created.api_key.key_id
+      });
+      expect(await service.authenticate(rotated.secret)).toMatchObject({
+        actor_id: rotated.api_key.key_id
+      });
+
+      // Every step is audited.
+      const audit = service.snapshot().audit;
+      expect(audit.find((entry) => entry.action === "access.api_key.rotated")).toMatchObject({
+        resource_id: created.api_key.key_id,
+        metadata: expect.objectContaining({
+          replacement_key_id: rotated.api_key.key_id
+        })
+      });
+      expect(audit.find((entry) =>
+        entry.action === "access.api_key.created" &&
+        entry.resource_id === rotated.api_key.key_id
+      )?.metadata).toMatchObject({ rotated_from: created.api_key.key_id });
+    } finally {
+      await service.close();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("supports immediate cutover and never widens an existing expiry", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "lip-access-rotate-edge-"));
+    const databasePath = join(directory, "reference.db");
+    const service = await AccessControlService.create({
+      store: makeStore(databasePath, "tenant-acme"),
+      tenantId: "tenant-acme",
+      tenantName: "Acme",
+      reset: true
+    });
+    try {
+      const root = service.rootPrincipal();
+
+      // overlap_seconds: 0 expires the old key immediately.
+      const immediate = await service.createApiKey({ name: "Immediate", role: "integration" }, root);
+      const cutover = await service.rotateApiKey({
+        key_id: immediate.api_key.key_id,
+        overlap_seconds: 0
+      }, root);
+      expect(await service.authenticate(immediate.secret)).toBeUndefined();
+      expect(await service.authenticate(cutover.secret)).toBeDefined();
+
+      // A sooner existing expiry wins over the requested overlap.
+      const soon = new Date(Date.now() + 60_000).toISOString();
+      const expiring = await service.createApiKey({
+        name: "Expiring",
+        role: "integration",
+        expires_at: soon
+      }, root);
+      const kept = await service.rotateApiKey({
+        key_id: expiring.api_key.key_id,
+        overlap_seconds: 86_400
+      }, root);
+      expect(kept.replaced_api_key.expires_at).toBe(soon);
+    } finally {
+      await service.close();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects invalid rotations", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "lip-access-rotate-invalid-"));
+    const databasePath = join(directory, "reference.db");
+    const service = await AccessControlService.create({
+      store: makeStore(databasePath, "tenant-acme"),
+      tenantId: "tenant-acme",
+      tenantName: "Acme",
+      reset: true
+    });
+    try {
+      const root = service.rootPrincipal();
+      const created = await service.createApiKey({ name: "Target", role: "integration" }, root);
+
+      await expect(service.rotateApiKey({ key_id: "key_missing" }, root))
+        .rejects.toThrowError(/not found/i);
+      await expect(service.rotateApiKey({
+        key_id: created.api_key.key_id,
+        overlap_seconds: -1
+      }, root)).rejects.toThrowError(/overlap_seconds/);
+      await expect(service.rotateApiKey({
+        key_id: created.api_key.key_id,
+        overlap_seconds: 700_000
+      }, root)).rejects.toThrowError(/overlap_seconds/);
+
+      // Rotation requires access:manage.
+      const integration = await service.authenticate(created.secret);
+      await expect(service.rotateApiKey({
+        key_id: created.api_key.key_id
+      }, integration!)).rejects.toThrowError(/access:manage/);
+
+      // A revoked key cannot be rotated back to life.
+      await service.revokeApiKey(created.api_key.key_id, root);
+      await expect(service.rotateApiKey({ key_id: created.api_key.key_id }, root))
+        .rejects.toThrowError(/not active/i);
+
+      // A location-scoped principal cannot rotate a wider-scoped key.
+      const scopedGrant = await service.createApiKey({
+        name: "Scoped admin",
+        role: "admin",
+        allowed_location_ids: ["location-1"]
+      }, root);
+      const wide = await service.createApiKey({ name: "Wide", role: "integration" }, root);
+      const scopedPrincipal = await service.authenticate(scopedGrant.secret);
+      await expect(service.rotateApiKey({
+        key_id: wide.api_key.key_id
+      }, scopedPrincipal!)).rejects.toThrowError(/scope/);
+    } finally {
+      await service.close();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it("does not authenticate an API key against another tenant", async () => {
     const directory = mkdtempSync(join(tmpdir(), "lip-access-isolation-"));
     const databasePath = join(directory, "reference.db");
