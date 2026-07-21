@@ -94,6 +94,12 @@ if (programDirectory) {
 
 const running = await startCloudServer(controlPlane, {
   ...(authenticator ? { authenticator } : { apiKey: apiKey! }),
+  ...(provisioner
+    ? {
+        rotateEnvironmentCredentials: (environmentId: string) =>
+          provisioner!.rotateCredentials(environmentId)
+      }
+    : {}),
   host: process.env["LIP_CLOUD_HOST"] ?? "0.0.0.0",
   port: Number.parseInt(process.env["LIP_CLOUD_PORT"] ?? "3220", 10),
   ...(process.env["LIP_CLOUD_ALLOWED_ORIGINS"]

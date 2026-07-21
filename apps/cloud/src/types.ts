@@ -155,6 +155,21 @@ export interface CloudProvisioningResult {
   admin_url?: string;
 }
 
+/**
+ * Merchant credential handed back by the control-plane rotation surface
+ * (PLA-416). Deliberately excludes the deprecated root runtime key.
+ */
+export interface RotatedEnvironmentCredentials {
+  environment_id: string;
+  tenant_id: string;
+  program_id: string;
+  api_url: string;
+  admin_url: string;
+  merchant_api_key: string;
+  merchant_api_key_id: string;
+  rotated_at: string;
+}
+
 export interface CloudDashboard {
   organization: CloudOrganization;
   membership: CloudOrganizationMembership;

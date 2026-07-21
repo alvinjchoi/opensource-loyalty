@@ -3,8 +3,12 @@ import type {
   CloudOrganization,
   CloudProject,
   EnvironmentKind,
-  ProvisioningStatus
+  ProvisioningStatus,
+  RotatedEnvironmentCredentials
 } from "./types.js";
+
+/** Merchant credential returned by the control-plane rotation endpoint. */
+export type RotatedTenantCredentials = RotatedEnvironmentCredentials;
 
 /**
  * HTTP client for onboarding one brand (= one tenant) onto the shared LIP
@@ -13,13 +17,13 @@ import type {
  * `POST .../environments`, and the environment list endpoint used to poll
  * provisioning status. It creates nothing the API cannot already create.
  *
- * Authentication boundary (PLA-416): the control plane is called with the
- * shared trusted-gateway key (`LIP_CLOUD_API_KEY`) plus an operator subject.
- * Tenant-scoped API keys are not implemented yet; the merchant data-plane key
- * generated during provisioning is written server-side to
- * `<LIP_CLOUD_DATA_DIR>/<environment_id>.credentials.json` and is NOT
- * returned by any API. Until PLA-416 lands, operators must read that file on
- * the data-plane host to hand the key to the consuming BFF.
+ * Authentication boundary: the control plane is called with the shared
+ * trusted-gateway key (`LIP_CLOUD_API_KEY`) plus an operator subject. The
+ * merchant credential is a tenant-scoped owner API key (PLA-416); retrieve or
+ * rotate it with `rotateTenantCredentials`, which calls
+ * `POST /cloud/v1/environments/{id}/credentials/rotate` — no more reading
+ * credentials files off the data-plane host, and the deprecated root runtime
+ * key is never handed out.
  */
 export interface TenantOnboardingTarget {
   /** Base URL of the control plane, e.g. https://lip-cloud.internal:3220 */
@@ -285,4 +289,25 @@ export async function provisionTenant(
       environment: environmentCreated
     }
   };
+}
+
+/**
+ * Rotates (and thereby retrieves) the merchant credential for a provisioned
+ * environment through the control plane. The response carries the fresh
+ * owner-role merchant API key; the replaced key stays valid for the standard
+ * overlap window so consuming BFFs can swap without downtime.
+ */
+export async function rotateTenantCredentials(
+  target: TenantOnboardingTarget,
+  environmentId: string
+): Promise<RotatedTenantCredentials> {
+  if (!target.cloudUrl.trim()) throw new Error("A control-plane URL is required");
+  if (!target.apiKey.trim()) throw new Error("A control-plane API key is required");
+  if (!target.subject.trim()) throw new Error("An operator subject is required");
+  if (!environmentId.trim()) throw new Error("An environment id is required");
+  return call<RotatedTenantCredentials>(
+    target,
+    "POST",
+    `/cloud/v1/environments/${encodeURIComponent(environmentId)}/credentials/rotate`
+  );
 }

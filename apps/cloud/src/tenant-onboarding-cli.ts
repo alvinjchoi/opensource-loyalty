@@ -12,17 +12,26 @@
  *     --env-slug production --env-name Production \
  *     --kind production --region us-east-1 --program-id demo-rewards
  *
+ * Rotate (or first-retrieve) the merchant credential of a provisioned
+ * environment — PLA-416 replaces reading credentials files off the disk:
+ *
+ *   LIP_CLOUD_API_KEY=... npm run cloud:provision -- rotate-credentials \
+ *     --cloud-url https://lip-cloud.example.com \
+ *     --subject org_business_manager_123 \
+ *     --environment env_...
+ *
  * The control-plane key comes ONLY from `LIP_CLOUD_API_KEY` (never a flag, to
- * keep it out of shell history). PLA-416 boundary: the merchant data-plane
- * key is written server-side to the environment's credentials file and is not
- * printed here; see docs/runbooks/shared-cluster-provisioning.md.
+ * keep it out of shell history); see
+ * docs/runbooks/shared-cluster-provisioning.md.
  */
 
 import { parseArgs } from "node:util";
-import { provisionTenant } from "./tenant-onboarding.js";
+import { provisionTenant, rotateTenantCredentials } from "./tenant-onboarding.js";
 
-const { values } = parseArgs({
+const { values, positionals } = parseArgs({
+  allowPositionals: true,
   options: {
+    environment: { type: "string" },
     "cloud-url": { type: "string" },
     subject: { type: "string" },
     email: { type: "string" },
@@ -53,6 +62,39 @@ if (!apiKey || apiKey.length < 16) {
   console.error("LIP_CLOUD_API_KEY (>= 16 characters) is required in the environment");
   process.exit(1);
 }
+
+const command = positionals[0] ?? "provision";
+if (!["provision", "rotate-credentials"].includes(command)) {
+  console.error(`Unknown command ${command}; use provision or rotate-credentials`);
+  process.exit(1);
+}
+
+if (command === "rotate-credentials") {
+  try {
+    const rotated = await rotateTenantCredentials(
+      {
+        cloudUrl: required("cloud-url"),
+        apiKey,
+        subject: required("subject"),
+        ...(values.email ? { email: values.email } : {})
+      },
+      required("environment")
+    );
+    console.log(JSON.stringify({ event: "tenant_credentials_rotated", ...rotated }, undefined, 2));
+    console.error(
+      "[note] Store merchant_api_key in the password manager and update the " +
+      "consuming BFF now; the replaced key expires after the overlap window."
+    );
+  } catch (error) {
+    console.error(JSON.stringify({
+      event: "tenant_credential_rotation_failed",
+      message: error instanceof Error ? error.message : String(error)
+    }));
+    process.exit(1);
+  }
+  process.exit(0);
+}
+
 const kind = required("kind");
 if (!["development", "staging", "production"].includes(kind)) {
   console.error("--kind must be development, staging, or production");
@@ -88,9 +130,8 @@ try {
   console.log(JSON.stringify({ event: "tenant_provisioned", ...result }, undefined, 2));
   if (result.status === "ready") {
     console.error(
-      "[note] The merchant API key is in " +
-      `<LIP_CLOUD_DATA_DIR>/${result.environment_id}.credentials.json on the ` +
-      "data-plane host (tenant-scoped keys pending PLA-416)."
+      "[note] Retrieve the merchant API key with: npm run cloud:provision -- " +
+      `rotate-credentials --cloud-url <url> --subject <subject> --environment ${result.environment_id}`
     );
   }
   if (result.status !== "ready" || result.timed_out) process.exit(1);

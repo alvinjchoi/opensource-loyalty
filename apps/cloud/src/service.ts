@@ -17,6 +17,7 @@ import type {
   CloudUsageCounter,
   CloudUsageEvent,
   EnvironmentKind,
+  RotatedEnvironmentCredentials,
   UsageMetric
 } from "./types.js";
 
@@ -556,6 +557,67 @@ export class CloudControlPlane {
       throw new CloudError(429, "usage_limit_exceeded", `${input.metric} hard limit exceeded`);
     }
     return { event, duplicate: result === "duplicate" };
+  }
+
+  /**
+   * PLA-416 rotation surface: authorizes the caller as an owner/admin of the
+   * environment's organization, delegates minting to the wired data-plane
+   * provisioner, audits the rotation, and returns the fresh merchant
+   * credential. The deprecated root runtime key is never returned.
+   */
+  public async rotateEnvironmentCredentials(
+    principal: CloudPrincipal,
+    environmentId: string,
+    rotate?: (environmentId: string) => Promise<{
+      environment_id: string;
+      tenant_id: string;
+      program_id: string;
+      api_url: string;
+      admin_url: string;
+      merchant_api_key: string;
+      merchant_api_key_id: string;
+    }>
+  ): Promise<RotatedEnvironmentCredentials> {
+    const environment = await this.requiredEnvironment(environmentId);
+    const project = await this.requiredProject(environment.project_id);
+    await this.requireRole(principal, project.organization_id, managementRoles);
+    if (!rotate) {
+      throw new CloudError(
+        409,
+        "credential_rotation_unavailable",
+        "This control plane has no data-plane provisioner wired for credential rotation"
+      );
+    }
+    let rotated;
+    try {
+      rotated = await rotate(environmentId);
+    } catch (error) {
+      throw new CloudError(
+        409,
+        "runtime_unavailable",
+        error instanceof Error ? error.message : "Data-plane runtime is unavailable"
+      );
+    }
+    const rotatedAt = this.clock().toISOString();
+    await this.repository.recordAudit(this.audit(
+      project.organization_id,
+      principal,
+      "cloud.environment.credentials_rotated",
+      "environment",
+      environmentId,
+      rotatedAt,
+      { merchant_api_key_id: rotated.merchant_api_key_id }
+    ));
+    return {
+      environment_id: rotated.environment_id,
+      tenant_id: rotated.tenant_id,
+      program_id: rotated.program_id,
+      api_url: rotated.api_url,
+      admin_url: rotated.admin_url,
+      merchant_api_key: rotated.merchant_api_key,
+      merchant_api_key_id: rotated.merchant_api_key_id,
+      rotated_at: rotatedAt
+    };
   }
 
   public async attachEnvironment(

@@ -21,6 +21,20 @@ export interface CloudServerOptions {
   apiKey?: string;
   authenticator?: CloudAuthenticator;
   allowedOrigins?: string[];
+  /**
+   * Data-plane hook for POST /cloud/v1/environments/{id}/credentials/rotate
+   * (PLA-416). When absent the route answers 409
+   * credential_rotation_unavailable.
+   */
+  rotateEnvironmentCredentials?: (environmentId: string) => Promise<{
+    environment_id: string;
+    tenant_id: string;
+    program_id: string;
+    api_url: string;
+    admin_url: string;
+    merchant_api_key: string;
+    merchant_api_key_id: string;
+  }>;
 }
 
 export interface RunningCloudServer {
@@ -362,6 +376,21 @@ export function createCloudServer(
           api_key: requiredString(body, "api_key")
         });
         sendJson(response, 200, { data: environment }, headers);
+        return;
+      }
+
+      const environmentRotateId = pathId(
+        path,
+        /^\/cloud\/v1\/environments\/([^/]+)\/credentials\/rotate$/
+      );
+      if (environmentRotateId && method === "POST") {
+        sendJson(response, 200, {
+          data: await controlPlane.rotateEnvironmentCredentials(
+            actor,
+            environmentRotateId,
+            options.rotateEnvironmentCredentials
+          )
+        }, headers);
         return;
       }
 

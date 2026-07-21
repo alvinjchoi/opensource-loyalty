@@ -3,7 +3,11 @@ import { MemoryCloudRepository } from "./memory-repository.js";
 import { CloudProvisioningWorker } from "./provisioning.js";
 import { CloudControlPlane } from "./service.js";
 import { startCloudServer } from "./server.js";
-import { TenantOnboardingError, provisionTenant } from "./tenant-onboarding.js";
+import {
+  TenantOnboardingError,
+  provisionTenant,
+  rotateTenantCredentials
+} from "./tenant-onboarding.js";
 
 const apiKey = "cloud-onboarding-test-key";
 const target = (url: string, overrides: Partial<{ apiKey: string; subject: string }> = {}) => ({
@@ -127,6 +131,64 @@ describe("provisionTenant", () => {
       ).rejects.toMatchObject({ status: 401 });
     } finally {
       await close();
+    }
+  });
+});
+
+describe("rotateTenantCredentials", () => {
+  it("returns the fresh merchant credential from the rotation endpoint", async () => {
+    const repository = new MemoryCloudRepository();
+    const cloud = new CloudControlPlane({ repository, regions: ["us-east-1"] });
+    const running = await startCloudServer(cloud, {
+      apiKey,
+      port: 0,
+      rotateEnvironmentCredentials: async (environmentId) => ({
+        environment_id: environmentId,
+        tenant_id: "tenant_rotated",
+        program_id: "demo-rewards",
+        api_url: "http://data-plane.internal:13999",
+        admin_url: "http://data-plane.internal:13999/admin/",
+        merchant_api_key: "lip_sk_rotated_merchant_secret",
+        merchant_api_key_id: "key_rotated"
+      })
+    });
+    const worker = new CloudProvisioningWorker({
+      repository,
+      workerId: "rotation-test-worker",
+      provisioner: {
+        provision: async ({ environment }) => ({
+          api_url: `http://data-plane.internal:13210/${environment.tenant_id}`
+        })
+      }
+    });
+    try {
+      const [provisioned] = await Promise.all([
+        provisionTenant(target(running.url), request()),
+        (async () => {
+          for (let attempt = 0; attempt < 100; attempt += 1) {
+            if (await worker.runOnce() === "succeeded") return;
+            await new Promise((resolve) => setTimeout(resolve, 10));
+          }
+        })()
+      ]);
+      const rotated = await rotateTenantCredentials(
+        target(running.url),
+        provisioned.environment_id
+      );
+      expect(rotated).toMatchObject({
+        environment_id: provisioned.environment_id,
+        tenant_id: "tenant_rotated",
+        merchant_api_key: "lip_sk_rotated_merchant_secret",
+        merchant_api_key_id: "key_rotated",
+        rotated_at: expect.any(String)
+      });
+
+      await expect(rotateTenantCredentials(target(running.url), "env_unknown"))
+        .rejects.toMatchObject({ status: 404 });
+    } finally {
+      worker.close();
+      await running.close();
+      await cloud.close();
     }
   });
 });

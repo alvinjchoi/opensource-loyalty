@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { LocalDataPlaneProvisioner, type ProvisionedRuntime } from "./data-plane-provisioner.js";
 import { MemoryCloudRepository } from "./memory-repository.js";
 import { CloudProvisioningWorker } from "./provisioning.js";
+import { startCloudServer } from "./server.js";
 import { CloudControlPlane } from "./service.js";
 
 const owner = {
@@ -307,6 +308,119 @@ describe("LocalDataPlaneProvisioner", () => {
     const second = new LocalDataPlaneProvisioner({ programDirectory, dataDirectory });
     close = () => second.close();
     await expect(second.restore()).rejects.toThrowError(/lip-dev-key|16 characters|default/);
+  });
+
+  it("exposes credential rotation through the control-plane API", async () => {
+    const programDirectory = mkdtempSync(join(tmpdir(), "lip-cloud-programs-"));
+    const dataDirectory = mkdtempSync(join(tmpdir(), "lip-cloud-data-"));
+    writeFileSync(join(programDirectory, "acme-rewards.json"), JSON.stringify(program));
+    const provisioner = new LocalDataPlaneProvisioner({ programDirectory, dataDirectory });
+    const repository = new MemoryCloudRepository();
+    const cloud = new CloudControlPlane({ repository });
+    // apiKey-mode HTTP auth stamps the trusted-gateway issuer, so the
+    // operator's membership must be created under that issuer.
+    const operator = {
+      issuer: "urn:lip:trusted-gateway",
+      subject: "rotate-operator-001",
+      email: "rotate-operator@example.com"
+    };
+    const dashboard = await cloud.createOrganization(operator, {
+      name: "Rotate Restaurants",
+      slug: "rotate-restaurants"
+    });
+    const project = await cloud.createProject(
+      operator,
+      dashboard.organization.organization_id,
+      { name: "Rotate Loyalty", slug: "rotate-loyalty" }
+    );
+    const environment = await cloud.createEnvironment(operator, project.project_id, {
+      name: "Production",
+      slug: "production",
+      kind: "production",
+      region: "us-east-1",
+      program_id: "acme-rewards"
+    });
+    const worker = new CloudProvisioningWorker({
+      repository,
+      provisioner,
+      workerId: "worker-rotate-endpoint",
+      onError: () => {}
+    });
+    expect(await worker.runOnce()).toBe("succeeded");
+    const runtimeBefore = provisioner.runtimes()[0]!;
+    const running = await startCloudServer(cloud, {
+      apiKey: "cloud-rotate-test-key",
+      port: 0,
+      rotateEnvironmentCredentials: (environmentId) =>
+        provisioner.rotateCredentials(environmentId)
+    });
+    const operatorHeaders = {
+      authorization: "Bearer cloud-rotate-test-key",
+      "content-type": "application/json",
+      "x-lip-cloud-subject": operator.subject,
+      "x-lip-cloud-email": operator.email
+    };
+    close = async () => {
+      await running.close();
+      await provisioner.close();
+    };
+
+    const path = `/cloud/v1/environments/${environment.environment_id}/credentials/rotate`;
+    const rotated = await fetch(`${running.url}${path}`, {
+      method: "POST",
+      headers: operatorHeaders
+    });
+    expect(rotated.status).toBe(200);
+    const bodyText = await rotated.text();
+    const body = JSON.parse(bodyText) as {
+      data: {
+        environment_id: string;
+        tenant_id: string;
+        merchant_api_key: string;
+        merchant_api_key_id: string;
+        api_url: string;
+      };
+    };
+    expect(body.data).toMatchObject({
+      environment_id: environment.environment_id,
+      tenant_id: environment.tenant_id,
+      api_url: runtimeBefore.api_url
+    });
+    expect(body.data.merchant_api_key).toMatch(/^lip_sk_/);
+    expect(body.data.merchant_api_key).not.toBe(runtimeBefore.merchant_api_key);
+    // The deprecated root key must never leave the host through this API.
+    expect(bodyText).not.toContain(runtimeBefore.api_key);
+
+    // The returned credential is live on the tenant runtime.
+    expect(await fetch(`${runtimeBefore.api_url}/admin/api/v1/snapshot`, {
+      headers: { authorization: `Bearer ${body.data.merchant_api_key}` }
+    }).then((r) => r.status)).toBe(200);
+
+    // Authorization failures.
+    expect((await fetch(`${running.url}${path}`, { method: "POST" })).status).toBe(401);
+    const outsider = await fetch(`${running.url}${path}`, {
+      method: "POST",
+      headers: { ...operatorHeaders, "x-lip-cloud-subject": "outsider-001" }
+    });
+    expect([403, 404]).toContain(outsider.status);
+    expect((await fetch(
+      `${running.url}/cloud/v1/environments/env_unknown/credentials/rotate`,
+      { method: "POST", headers: operatorHeaders }
+    )).status).toBe(404);
+
+    // Without a wired provisioner the control plane reports the surface unavailable.
+    const detached = await startCloudServer(cloud, {
+      apiKey: "cloud-rotate-test-key",
+      port: 0
+    });
+    try {
+      expect((await fetch(
+        `${detached.url}${path}`,
+        { method: "POST", headers: operatorHeaders }
+      )).status).toBe(409);
+    } finally {
+      await detached.close();
+    }
   });
 
   it("restores the same port and API key after close", async () => {
