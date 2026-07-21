@@ -625,6 +625,34 @@ describe("LoyaltyEngine financial lifecycle", () => {
     })).toThrowError(/different facts/);
   });
 
+  it("stamps accrual ledger entries with the order's location for reporting", () => {
+    const engine = enrolledEngine();
+    const accrued = engine.postAccrual({
+      context: makeContext("location-accrual-key"),
+      member_id: "member-001",
+      order: makeOrder({ order_id: "order-location-42" })
+    });
+    expect(accrued.entry.location_id).toBe("location-42");
+
+    const restored = new LoyaltyEngine(makeProgram(), {
+      ids: sequentialIds(),
+      state: engine.exportState()
+    });
+    expect(restored.getLedger()[0]?.location_id).toBe("location-42");
+    expect(
+      engine.postManualAdjustment({
+        context: makeContext("location-manual-key"),
+        member_id: "member-001",
+        program_id: "demo-foodservice",
+        adjustment_id: "manual-location-001",
+        amount: 25,
+        classification: "bonus",
+        reason: "Location-less manual credit",
+        qualifies_for_tier: false
+      }).entry.location_id
+    ).toBeUndefined();
+  });
+
   it("echoes the retry's request_id on idempotent replay", () => {
     const engine = enrolledEngine();
     const request = {

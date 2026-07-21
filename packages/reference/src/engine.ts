@@ -562,6 +562,7 @@ export class LoyaltyEngine {
           unit,
           amount,
           order_id: request.order.order_id,
+          location_id: request.order.scope.location_id,
           ...(amount > 0 && expiration ? {
             expires_at: this.pointExpirationIso(unit),
             create_point_lot: true
@@ -1969,6 +1970,7 @@ export class LoyaltyEngine {
     expires_at?: string;
     related_entry_id?: string;
     order_id?: string;
+    location_id?: string;
     adjustment_id?: string;
     reservation_id?: string;
     classification?: LedgerEntry["classification"];
@@ -1989,6 +1991,7 @@ export class LoyaltyEngine {
       ...(input.expires_at ? { expires_at: input.expires_at } : {}),
       ...(input.related_entry_id ? { related_entry_id: input.related_entry_id } : {}),
       ...(input.order_id ? { order_id: input.order_id } : {}),
+      ...(input.location_id ? { location_id: input.location_id } : {}),
       ...(input.adjustment_id ? { adjustment_id: input.adjustment_id } : {}),
       ...(input.reservation_id ? { reservation_id: input.reservation_id } : {}),
       ...(input.classification ? { classification: input.classification } : {}),
