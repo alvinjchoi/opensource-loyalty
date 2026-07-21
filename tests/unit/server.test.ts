@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { LoyaltyEngine } from "@loyalty-interchange/reference";
 import {
+  assertStrongApiKey,
   createReferenceServer,
   createDemoPlatform,
   startReferenceServer,
@@ -15,6 +16,31 @@ describe("reference HTTP server", () => {
   it("requires a nontrivial API key", () => {
     expect(() => createReferenceServer(new LoyaltyEngine(makeProgram()), { apiKey: "short" }))
       .toThrowError(/at least 8/);
+  });
+
+  it("rejects weak or default keys for shared deployments", () => {
+    expect(() => assertStrongApiKey("lip-dev-key")).toThrowError(/default/);
+    expect(() => assertStrongApiKey("only-15-chars-x")).toThrowError(/at least 16/);
+    expect(() => assertStrongApiKey("")).toThrowError(/at least 16/);
+    expect(() => assertStrongApiKey("a-strong-key-of-16ch")).not.toThrow();
+  });
+
+  it("refuses weak keys when binding beyond loopback, regardless of storage backend", async () => {
+    const engine = new LoyaltyEngine(makeProgram());
+    // A non-loopback binding is network-exposed: the local default key and
+    // short keys must be rejected even for demo/SQLite runtimes.
+    await expect(startReferenceServer(engine, { apiKey: "lip-dev-key", host: "0.0.0.0" }))
+      .rejects.toThrowError(/lip-dev-key|default/);
+    await expect(startReferenceServer(engine, { apiKey: "weak-key-15ch-x", host: "::" }))
+      .rejects.toThrowError(/at least 16/);
+    // Loopback development bindings keep accepting the local default key.
+    for (const host of [undefined, "127.0.0.1", "localhost"]) {
+      const running = await startReferenceServer(engine, {
+        apiKey: "lip-dev-key",
+        ...(host ? { host } : {})
+      });
+      await running.close();
+    }
   });
 
   it("commits protocol operations through an external transaction hook", async () => {
@@ -822,6 +848,185 @@ describe("reference HTTP server", () => {
     } finally {
       await running.close();
       await platform.close();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("rotates tenant API keys over HTTP with overlap semantics", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "lip-rotate-http-"));
+    const databasePath = join(directory, "reference.db");
+    const platform = await createDemoPlatform({
+      databasePath,
+      reset: true,
+      seed: false,
+      program: makeProgram()
+    });
+    const running = await startReferenceServer(platform.engine, {
+      apiKey: "rotate-admin-key-16ch",
+      persistState: (state) => platform.store.save(state),
+      admin: {
+        programs: platform.programs,
+        campaigns: platform.campaigns,
+        memberships: platform.memberships,
+        access: platform.access,
+        engagement: platform.engagement,
+        webhookManager: platform.webhooks,
+        storage: platform.store.status
+      }
+    });
+    const rootHeaders = {
+      authorization: "Bearer rotate-admin-key-16ch",
+      "content-type": "application/json"
+    };
+    try {
+      const created = await fetch(`${running.url}/admin/api/v1/access/api-keys`, {
+        method: "POST",
+        headers: rootHeaders,
+        body: JSON.stringify({ name: "BFF", role: "integration" })
+      });
+      expect(created.status).toBe(201);
+      const createdKey = await created.json() as { secret: string; api_key: { key_id: string } };
+
+      // Default overlap keeps both secrets valid.
+      const rotated = await fetch(`${running.url}/admin/api/v1/access/api-keys/rotate`, {
+        method: "POST",
+        headers: rootHeaders,
+        body: JSON.stringify({ key_id: createdKey.api_key.key_id })
+      });
+      expect(rotated.status).toBe(200);
+      const rotatedKey = await rotated.json() as {
+        secret: string;
+        api_key: { key_id: string };
+        replaced_api_key: { key_id: string; expires_at?: string };
+      };
+      expect(rotatedKey.secret).toMatch(/^lip_sk_/);
+      expect(rotatedKey.replaced_api_key).toMatchObject({
+        key_id: createdKey.api_key.key_id,
+        expires_at: expect.any(String)
+      });
+      for (const secret of [createdKey.secret, rotatedKey.secret]) {
+        const probe = await fetch(`${running.url}/lip/v1/capabilities`, {
+          headers: { authorization: `Bearer ${secret}` }
+        });
+        expect(probe.status).toBe(200);
+      }
+
+      // overlap_seconds: 0 cuts the replaced key off immediately.
+      const cutover = await fetch(`${running.url}/admin/api/v1/access/api-keys/rotate`, {
+        method: "POST",
+        headers: rootHeaders,
+        body: JSON.stringify({ key_id: rotatedKey.api_key.key_id, overlap_seconds: 0 })
+      });
+      expect(cutover.status).toBe(200);
+      const cutoverKey = await cutover.json() as { secret: string };
+      expect((await fetch(`${running.url}/lip/v1/capabilities`, {
+        headers: { authorization: `Bearer ${rotatedKey.secret}` }
+      })).status).toBe(401);
+      expect((await fetch(`${running.url}/lip/v1/capabilities`, {
+        headers: { authorization: `Bearer ${cutoverKey.secret}` }
+      })).status).toBe(200);
+
+      // Validation and auth failures.
+      expect((await fetch(`${running.url}/admin/api/v1/access/api-keys/rotate`, {
+        method: "POST",
+        headers: rootHeaders,
+        body: JSON.stringify({})
+      })).status).toBe(422);
+      // Non-string expires_at is rejected, never silently dropped.
+      expect((await fetch(`${running.url}/admin/api/v1/access/api-keys`, {
+        method: "POST",
+        headers: rootHeaders,
+        body: JSON.stringify({ name: "Typed", role: "integration", expires_at: 12345 })
+      })).status).toBe(422);
+      expect((await fetch(`${running.url}/admin/api/v1/access/api-keys/rotate`, {
+        method: "POST",
+        headers: rootHeaders,
+        body: JSON.stringify({ key_id: createdKey.api_key.key_id, expires_at: 12345 })
+      })).status).toBe(422);
+      expect((await fetch(`${running.url}/admin/api/v1/access/api-keys/rotate`, {
+        method: "POST",
+        headers: rootHeaders,
+        body: JSON.stringify({ key_id: "key_missing" })
+      })).status).toBe(404);
+      expect((await fetch(`${running.url}/admin/api/v1/access/api-keys/rotate`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ key_id: createdKey.api_key.key_id })
+      })).status).toBe(401);
+      // An authenticated principal without access:manage is forbidden.
+      const operator = await fetch(`${running.url}/admin/api/v1/access/api-keys`, {
+        method: "POST",
+        headers: rootHeaders,
+        body: JSON.stringify({ name: "Operator", role: "operator" })
+      });
+      expect(operator.status).toBe(201);
+      const operatorKey = await operator.json() as { secret: string };
+      expect((await fetch(`${running.url}/admin/api/v1/access/api-keys/rotate`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${operatorKey.secret}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({ key_id: createdKey.api_key.key_id })
+      })).status).toBe(403);
+    } finally {
+      await running.close();
+      await platform.close();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects one tenant's API key on another tenant's runtime", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "lip-cross-tenant-"));
+    const platformA = await createDemoPlatform({
+      databasePath: join(directory, "tenant-a.db"),
+      reset: true,
+      seed: false,
+      program: makeProgram()
+    });
+    const platformB = await createDemoPlatform({
+      databasePath: join(directory, "tenant-b.db"),
+      reset: true,
+      seed: false,
+      program: { ...makeProgram(), program_id: "program-tenant-b" }
+    });
+    const serverA = await startReferenceServer(platformA.engine, {
+      apiKey: "tenant-a-root-key-16c",
+      persistState: (state) => platformA.store.save(state),
+      admin: { access: platformA.access, storage: platformA.store.status }
+    });
+    const serverB = await startReferenceServer(platformB.engine, {
+      apiKey: "tenant-b-root-key-16c",
+      persistState: (state) => platformB.store.save(state),
+      admin: { access: platformB.access, storage: platformB.store.status }
+    });
+    try {
+      const created = await fetch(`${serverA.url}/admin/api/v1/access/api-keys`, {
+        method: "POST",
+        headers: {
+          authorization: "Bearer tenant-a-root-key-16c",
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({ name: "Tenant A key", role: "admin" })
+      });
+      expect(created.status).toBe(201);
+      const key = await created.json() as { secret: string };
+
+      // Tenant A's key works on tenant A only.
+      expect((await fetch(`${serverA.url}/lip/v1/capabilities`, {
+        headers: { authorization: `Bearer ${key.secret}` }
+      })).status).toBe(200);
+      expect((await fetch(`${serverB.url}/lip/v1/capabilities`, {
+        headers: { authorization: `Bearer ${key.secret}` }
+      })).status).toBe(401);
+      expect((await fetch(`${serverB.url}/admin/api/v1/snapshot`, {
+        headers: { authorization: `Bearer ${key.secret}` }
+      })).status).toBe(401);
+    } finally {
+      await serverA.close();
+      await serverB.close();
+      await platformA.close();
+      await platformB.close();
       rmSync(directory, { recursive: true, force: true });
     }
   });

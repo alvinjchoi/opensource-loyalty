@@ -12,17 +12,32 @@
  *     --env-slug production --env-name Production \
  *     --kind production --region us-east-1 --program-id demo-rewards
  *
+ * Optionally add `--webhook-url https://... --webhook-secret <>=16 chars>` to
+ * create the tenant's first webhook subscription at provision time (mints and
+ * prints the merchant credential as a side effect; requires network reach to
+ * the tenant runtime).
+ *
+ * Rotate (or first-retrieve) the merchant credential of a provisioned
+ * environment — PLA-416 replaces reading credentials files off the disk:
+ *
+ *   LIP_CLOUD_API_KEY=... npm run cloud:provision -- rotate-credentials \
+ *     --cloud-url https://lip-cloud.example.com \
+ *     --subject org_business_manager_123 \
+ *     --environment env_... \
+ *     [--overlap-seconds 0]   # emergency cutover: replaced key dies at once
+ *
  * The control-plane key comes ONLY from `LIP_CLOUD_API_KEY` (never a flag, to
- * keep it out of shell history). PLA-416 boundary: the merchant data-plane
- * key is written server-side to the environment's credentials file and is not
- * printed here; see docs/runbooks/shared-cluster-provisioning.md.
+ * keep it out of shell history); see
+ * docs/runbooks/shared-cluster-provisioning.md.
  */
 
 import { parseArgs } from "node:util";
-import { provisionTenant } from "./tenant-onboarding.js";
+import { provisionTenant, rotateTenantCredentials } from "./tenant-onboarding.js";
 
-const { values } = parseArgs({
+const { values, positionals } = parseArgs({
+  allowPositionals: true,
   options: {
+    environment: { type: "string" },
     "cloud-url": { type: "string" },
     subject: { type: "string" },
     email: { type: "string" },
@@ -35,7 +50,10 @@ const { values } = parseArgs({
     kind: { type: "string", default: "production" },
     region: { type: "string" },
     "program-id": { type: "string" },
-    "timeout-seconds": { type: "string", default: "120" }
+    "timeout-seconds": { type: "string", default: "120" },
+    "overlap-seconds": { type: "string" },
+    "webhook-url": { type: "string" },
+    "webhook-secret": { type: "string" }
   }
 });
 
@@ -53,6 +71,49 @@ if (!apiKey || apiKey.length < 16) {
   console.error("LIP_CLOUD_API_KEY (>= 16 characters) is required in the environment");
   process.exit(1);
 }
+
+const command = positionals[0] ?? "provision";
+if (!["provision", "rotate-credentials"].includes(command)) {
+  console.error(`Unknown command ${command}; use provision or rotate-credentials`);
+  process.exit(1);
+}
+
+if (command === "rotate-credentials") {
+  let overlapSeconds: number | undefined;
+  if (values["overlap-seconds"] !== undefined) {
+    overlapSeconds = Number.parseInt(values["overlap-seconds"], 10);
+    if (!Number.isInteger(overlapSeconds) || overlapSeconds < 0) {
+      console.error("--overlap-seconds must be a non-negative integer (0 = immediate cutover)");
+      process.exit(1);
+    }
+  }
+  try {
+    const rotated = await rotateTenantCredentials(
+      {
+        cloudUrl: required("cloud-url"),
+        apiKey,
+        subject: required("subject"),
+        ...(values.email ? { email: values.email } : {})
+      },
+      required("environment"),
+      overlapSeconds !== undefined ? { overlapSeconds } : {}
+    );
+    console.log(JSON.stringify({ event: "tenant_credentials_rotated", ...rotated }, undefined, 2));
+    console.error(
+      "[note] Store merchant_api_key in the password manager and update the " +
+      "consuming BFF now; the replaced key stops working at " +
+      `${rotated.replaced_api_key_expires_at ?? "the end of the overlap window"}.`
+    );
+  } catch (error) {
+    console.error(JSON.stringify({
+      event: "tenant_credential_rotation_failed",
+      message: error instanceof Error ? error.message : String(error)
+    }));
+    process.exit(1);
+  }
+  process.exit(0);
+}
+
 const kind = required("kind");
 if (!["development", "staging", "production"].includes(kind)) {
   console.error("--kind must be development, staging, or production");
@@ -61,6 +122,11 @@ if (!["development", "staging", "production"].includes(kind)) {
 const timeoutSeconds = Number.parseInt(required("timeout-seconds"), 10);
 if (!Number.isInteger(timeoutSeconds) || timeoutSeconds < 1) {
   console.error("--timeout-seconds must be a positive integer");
+  process.exit(1);
+}
+
+if (Boolean(values["webhook-url"]) !== Boolean(values["webhook-secret"])) {
+  console.error("--webhook-url and --webhook-secret must be provided together");
   process.exit(1);
 }
 
@@ -82,15 +148,23 @@ try {
         region: required("region"),
         programId: required("program-id")
       },
+      ...(values["webhook-url"] && values["webhook-secret"]
+        ? { webhook: { url: values["webhook-url"], secret: values["webhook-secret"] } }
+        : {}),
       poll: { timeoutMs: timeoutSeconds * 1_000 }
     }
   );
   console.log(JSON.stringify({ event: "tenant_provisioned", ...result }, undefined, 2));
-  if (result.status === "ready") {
+  if (result.credentials) {
     console.error(
-      "[note] The merchant API key is in " +
-      `<LIP_CLOUD_DATA_DIR>/${result.environment_id}.credentials.json on the ` +
-      "data-plane host (tenant-scoped keys pending PLA-416)."
+      "[note] Webhook onboarding minted the merchant API key above " +
+      "(credentials.merchant_api_key): store it in the password manager and " +
+      "set it on the consuming BFF now."
+    );
+  } else if (result.status === "ready") {
+    console.error(
+      "[note] Retrieve the merchant API key with: npm run cloud:provision -- " +
+      `rotate-credentials --cloud-url <url> --subject <subject> --environment ${result.environment_id}`
     );
   }
   if (result.status !== "ready" || result.timed_out) process.exit(1);

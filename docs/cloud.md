@@ -53,17 +53,55 @@ environment inside the control-plane process. Each `create` job:
    `LIP_CLOUD_DATA_PLANE_DATABASE_URL` is set;
 3. allocates a **stable port** from `LIP_CLOUD_DATA_PLANE_BASE_PORT` (default
    `13210`) recorded in `<data-dir>/ports.json`;
-4. generates (or reuses) a merchant API key and writes a `0600` credentials
-   file (`<data-dir>/<environment_id>.credentials.json`); and
+4. bootstraps an owner-role **merchant API key** through the tenant's own
+   access-control service (hashed, audited, rotatable) and writes a `0600`
+   credentials file (`<data-dir>/<environment_id>.credentials.json`, format
+   v2: `merchant_api_key` + a deprecated root `api_key` kept for backward
+   compatibility; legacy v1 files are upgraded in place on restore); and
 5. marks the environment `ready` with its reachable `api_url` and `admin_url`.
+
+Merchant credentials are retrieved and rotated through the control plane:
+`POST /cloud/v1/environments/{id}/credentials/rotate` (org owner/admin;
+audited cloud-side, and tenant-side as actor `cloud:<subject>`), with an
+optional body `{"overlap_seconds": <0..604800>}` — `0` is an emergency
+immediate cutover; the default keeps the replaced key valid for 24 h. The
+response includes `replaced_api_key_expires_at`, the moment the previous
+merchant key stops working. The equivalent CLI verb (all shown flags
+required except `--overlap-seconds`; the key comes from the environment,
+never a flag):
+
+```bash
+LIP_CLOUD_API_KEY=<shared key> npm run cloud:provision -- rotate-credentials \
+  --cloud-url https://<control-plane-host> \
+  --subject <operator subject> \
+  --environment env_... \
+  [--overlap-seconds 0]
+```
+
+The root runtime key is never returned by any API. Tenants can additionally
+self-rotate any of their keys via `POST /admin/api/v1/access/api-keys/rotate`
+on their runtime; a rotated key's replacement inherits its expiry (an
+explicit `expires_at` may shorten it, never extend it). If the tenant
+self-rotates the merchant key, the control-plane rotation surface recovers by
+re-adopting the live `cloud-merchant` lineage instead of failing.
+
+New tenants start with zero webhook subscriptions. `provisionTenant` /
+`npm run cloud:provision` accept an optional `--webhook-url` +
+`--webhook-secret` (>= 16 chars) pair that creates the tenant's first
+subscription through the runtime's admin API at provision time (stable
+subscription id, so re-runs upsert), minting the merchant credential as a
+side effect and returning it in the result.
 
 On control-plane startup the provisioner calls `restore()` and relaunches every
 credentialed environment on the same port and API key so BFF `LIP_URL` values
-survive restarts. Set `LIP_CLOUD_DATA_PLANE_HOST` to control the bind address
-and `LIP_CLOUD_DATA_PLANE_PUBLIC_HOST` to control the hostname written into
-each runtime's `api_url` (for example a private-network service name). Only
-`create` operations are supported; credentials remain files rather than an
-encrypted secret store. Regional adapters still replace this for production.
+survive restarts. A weak, tampered, or unreadable credentials file is skipped
+with a `cloud_environment_restore_failed` log line instead of aborting the
+other tenants' restore. Set `LIP_CLOUD_DATA_PLANE_HOST` to control the bind
+address and `LIP_CLOUD_DATA_PLANE_PUBLIC_HOST` to control the hostname written
+into each runtime's `api_url` (for example a private-network service name).
+Only `create` operations are supported; credentials remain files (`0600`,
+written atomically) rather than an encrypted secret store. Regional adapters
+still replace this for production.
 
 `npm run cloud:migrate` applies the engine and control-plane schemas ahead of
 boot (for release/preDeploy steps), and `npm run cloud:provision` onboards one
@@ -202,6 +240,7 @@ details.
 - `POST /cloud/v1/invitations/accept`
 - `GET|POST /cloud/v1/projects/{project_id}/environments`
 - `POST /cloud/v1/environments/{environment_id}/attach`
+- `POST /cloud/v1/environments/{environment_id}/credentials/rotate`
 - `POST /cloud/v1/environments/{environment_id}/usage-events`
 - `GET /cloud/v1/environments/{environment_id}/usage`
 
@@ -238,6 +277,7 @@ points issued are not a billing metric.
    through the existing claim-safe worker.
 2. Implement the Stripe adapter behind `CloudBillingProvider`, including signed
    webhook handling.
-3. Add encrypted environment credentials and API-key rotation.
+3. Add encrypted environment credentials (API-key rotation shipped with
+   PLA-416; the credentials file itself is still plaintext-on-disk `0600`).
 4. Aggregate runtime usage into the control plane automatically.
 5. Add backups, restore, region migration, and suspension workflows.

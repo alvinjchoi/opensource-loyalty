@@ -3,8 +3,12 @@ import type {
   CloudOrganization,
   CloudProject,
   EnvironmentKind,
-  ProvisioningStatus
+  ProvisioningStatus,
+  RotatedEnvironmentCredentials
 } from "./types.js";
+
+/** Merchant credential returned by the control-plane rotation endpoint. */
+export type RotatedTenantCredentials = RotatedEnvironmentCredentials;
 
 /**
  * HTTP client for onboarding one brand (= one tenant) onto the shared LIP
@@ -13,13 +17,13 @@ import type {
  * `POST .../environments`, and the environment list endpoint used to poll
  * provisioning status. It creates nothing the API cannot already create.
  *
- * Authentication boundary (PLA-416): the control plane is called with the
- * shared trusted-gateway key (`LIP_CLOUD_API_KEY`) plus an operator subject.
- * Tenant-scoped API keys are not implemented yet; the merchant data-plane key
- * generated during provisioning is written server-side to
- * `<LIP_CLOUD_DATA_DIR>/<environment_id>.credentials.json` and is NOT
- * returned by any API. Until PLA-416 lands, operators must read that file on
- * the data-plane host to hand the key to the consuming BFF.
+ * Authentication boundary: the control plane is called with the shared
+ * trusted-gateway key (`LIP_CLOUD_API_KEY`) plus an operator subject. The
+ * merchant credential is a tenant-scoped owner API key (PLA-416); retrieve or
+ * rotate it with `rotateTenantCredentials`, which calls
+ * `POST /cloud/v1/environments/{id}/credentials/rotate` — no more reading
+ * credentials files off the data-plane host, and the deprecated root runtime
+ * key is never handed out.
  */
 export interface TenantOnboardingTarget {
   /** Base URL of the control plane, e.g. https://lip-cloud.internal:3220 */
@@ -42,6 +46,16 @@ export interface TenantOnboardingRequest {
     region: string;
     programId: string;
   };
+  /**
+   * Optional first webhook subscription for the tenant. Without one a new
+   * tenant starts with zero subscriptions and delivers nothing; providing it
+   * here creates the subscription through the runtime's admin API as soon as
+   * the environment is ready. Requires network reach to the tenant's
+   * `api_url` (run from the private network, like step 4d verification), and
+   * mints the merchant credential via the control-plane rotation surface —
+   * returned in `TenantOnboardingResult.credentials`.
+   */
+  webhook?: { url: string; secret: string };
   /** Provisioning-status polling; defaults: 120s timeout, 2s interval. */
   poll?: { timeoutMs?: number; intervalMs?: number };
 }
@@ -60,6 +74,31 @@ export interface TenantOnboardingResult {
   timed_out: boolean;
   /** Which resources this run created (false = reused an existing slug). */
   created: { organization: boolean; project: boolean; environment: boolean };
+  /**
+   * Merchant credential minted for webhook wiring (only when `webhook` was
+   * requested). Store it in the password manager and the consuming BFF.
+   */
+  credentials?: RotatedTenantCredentials;
+  /** The tenant's first webhook subscription (only when `webhook` was requested). */
+  webhook?: { subscription_id: string };
+}
+
+/** Stable id so re-running onboarding upserts one subscription, not many. */
+const ONBOARDING_WEBHOOK_SUBSCRIPTION_ID = "webhook_onboarding";
+
+function assertWebhookConfig(webhook: { url: string; secret: string }): void {
+  let parsed: URL;
+  try {
+    parsed = new URL(webhook.url);
+  } catch {
+    throw new Error("Webhook URL must be a valid HTTP(S) URL");
+  }
+  if (!["http:", "https:"].includes(parsed.protocol)) {
+    throw new Error("Webhook URL must be an HTTP(S) URL");
+  }
+  if (webhook.secret.length < 16) {
+    throw new Error("Webhook secret must contain at least 16 characters");
+  }
 }
 
 export class TenantOnboardingError extends Error {
@@ -243,6 +282,7 @@ export async function provisionTenant(
   if (!target.cloudUrl.trim()) throw new Error("A control-plane URL is required");
   if (!target.apiKey.trim()) throw new Error("A control-plane API key is required");
   if (!target.subject.trim()) throw new Error("An operator subject is required");
+  if (request.webhook) assertWebhookConfig(request.webhook);
 
   const { organization, created: organizationCreated } = await ensureOrganization(
     target,
@@ -268,6 +308,17 @@ export async function provisionTenant(
     }
   );
 
+  let credentials: RotatedTenantCredentials | undefined;
+  let webhook: { subscription_id: string } | undefined;
+  if (request.webhook && environment.status === "ready" && environment.api_url) {
+    credentials = await rotateTenantCredentials(target, environment.environment_id);
+    webhook = await ensureWebhookSubscription(
+      credentials.api_url,
+      credentials.merchant_api_key,
+      request.webhook
+    );
+  }
+
   return {
     organization_id: organization.organization_id,
     project_id: project.project_id,
@@ -283,6 +334,82 @@ export async function provisionTenant(
       organization: organizationCreated,
       project: projectCreated,
       environment: environmentCreated
-    }
+    },
+    ...(credentials ? { credentials } : {}),
+    ...(webhook ? { webhook } : {})
   };
+}
+
+/**
+ * Upserts the tenant's onboarding webhook subscription through the runtime's
+ * own admin API (the same self-serve surface documented for tenants), using
+ * a stable subscription id so re-runs update rather than duplicate.
+ */
+async function ensureWebhookSubscription(
+  apiUrl: string,
+  merchantApiKey: string,
+  webhook: { url: string; secret: string }
+): Promise<{ subscription_id: string }> {
+  const base = apiUrl.replace(/\/+$/, "");
+  const response = await fetch(`${base}/admin/api/v1/webhooks/subscription`, {
+    method: "PUT",
+    headers: {
+      authorization: `Bearer ${merchantApiKey}`,
+      "content-type": "application/json"
+    },
+    body: JSON.stringify({
+      subscription_id: ONBOARDING_WEBHOOK_SUBSCRIPTION_ID,
+      url: webhook.url,
+      secret: webhook.secret
+    }),
+    signal: AbortSignal.timeout(10_000)
+  });
+  const payload = (await response.json().catch(() => ({}))) as
+    | { subscription_id?: string }
+    | ProblemBody;
+  if (!response.ok) {
+    const problem = payload as ProblemBody;
+    throw new TenantOnboardingError(
+      response.status,
+      problem.code ?? "webhook_subscription_failed",
+      problem.detail ?? problem.title ??
+        `Creating the webhook subscription failed with ${response.status}`
+    );
+  }
+  const summary = payload as { subscription_id?: string };
+  if (!summary.subscription_id) {
+    throw new TenantOnboardingError(
+      502,
+      "webhook_subscription_failed",
+      "The runtime did not return a webhook subscription id"
+    );
+  }
+  return { subscription_id: summary.subscription_id };
+}
+
+/**
+ * Rotates (and thereby retrieves) the merchant credential for a provisioned
+ * environment through the control plane. The response carries the fresh
+ * owner-role merchant API key plus `replaced_api_key_expires_at`; by default
+ * the replaced key stays valid for the standard overlap window so consuming
+ * BFFs can swap without downtime. Pass `overlapSeconds: 0` for an emergency
+ * immediate cutover (the replaced key dies at once).
+ */
+export async function rotateTenantCredentials(
+  target: TenantOnboardingTarget,
+  environmentId: string,
+  options: { overlapSeconds?: number } = {}
+): Promise<RotatedTenantCredentials> {
+  if (!target.cloudUrl.trim()) throw new Error("A control-plane URL is required");
+  if (!target.apiKey.trim()) throw new Error("A control-plane API key is required");
+  if (!target.subject.trim()) throw new Error("An operator subject is required");
+  if (!environmentId.trim()) throw new Error("An environment id is required");
+  return call<RotatedTenantCredentials>(
+    target,
+    "POST",
+    `/cloud/v1/environments/${encodeURIComponent(environmentId)}/credentials/rotate`,
+    options.overlapSeconds !== undefined
+      ? { overlap_seconds: options.overlapSeconds }
+      : undefined
+  );
 }

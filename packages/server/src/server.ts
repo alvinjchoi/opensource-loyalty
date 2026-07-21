@@ -51,6 +51,35 @@ import type { LocationDirectoryService } from "./locations.js";
 const MAX_BODY_BYTES = 1_048_576;
 const DEFAULT_LOCAL_API_KEY = "lip-dev-key";
 
+/**
+ * Static-key hygiene for shared/Postgres deployments: the local development
+ * default and short keys are fine for a laptop SQLite runtime but must never
+ * reach a multi-tenant or network-exposed host. Call at boot before serving.
+ */
+export function assertStrongApiKey(apiKey: string): void {
+  if (apiKey === DEFAULT_LOCAL_API_KEY) {
+    throw new Error(
+      "The default local API key (lip-dev-key) is not allowed for shared deployments; set a strong LIP_API_KEY"
+    );
+  }
+  if (apiKey.length < 16) {
+    throw new Error("Shared-deployment API keys must contain at least 16 characters");
+  }
+}
+
+/**
+ * True when a listen host can only be reached from the local machine. Any
+ * other binding is network-exposed and must enforce `assertStrongApiKey`
+ * regardless of the storage backend behind the runtime.
+ */
+function isLoopbackHost(host: string): boolean {
+  const normalized = host.trim().toLowerCase().replace(/^\[|\]$/g, "");
+  return normalized === "localhost" ||
+    normalized === "::1" ||
+    normalized === "::ffff:127.0.0.1" ||
+    normalized.startsWith("127.");
+}
+
 interface Route {
   schema: TSchema;
   status: number;
@@ -551,6 +580,25 @@ function readAllowedLocationIds(
   );
 }
 
+/**
+ * Reads an optional `expires_at` body field. A present-but-non-string value
+ * is rejected instead of silently dropped — dropping it would mint a key
+ * with a different lifetime than the caller asked for.
+ */
+function readOptionalExpiresAt(values: Record<string, unknown>): string | undefined {
+  const value = values["expires_at"];
+  if (value === undefined) return undefined;
+  if (typeof value !== "string") {
+    throw new TransportError(
+      422,
+      "validation_failed",
+      "Request validation failed",
+      "expires_at must be an ISO 8601 timestamp string"
+    );
+  }
+  return value;
+}
+
 function problem(status: number, title: string, code: string, detail?: string): ProblemDetails {
   return {
     type: `https://loyalty-interchange.org/problems/${code}`,
@@ -740,6 +788,7 @@ export function createReferenceServer(engine: LoyaltyEngine, options: ServerOpti
       allowedMethods.set("/admin/api/v1/access/users", ["PUT"]);
       allowedMethods.set("/admin/api/v1/access/api-keys", ["POST"]);
       allowedMethods.set("/admin/api/v1/access/api-keys/revoke", ["POST"]);
+      allowedMethods.set("/admin/api/v1/access/api-keys/rotate", ["POST"]);
     }
     if (options.admin?.programs) {
       allowedMethods.set("/admin/api/v1/program/draft", ["PUT", "DELETE"]);
@@ -1239,13 +1288,42 @@ export function createReferenceServer(engine: LoyaltyEngine, options: ServerOpti
             values["allowed_location_ids"],
             { allowNull: false }
           );
+          const createExpiresAt = readOptionalExpiresAt(values);
           sendJson(response, 201, await access.createApiKey({
             name: values["name"],
             role: values["role"] as TenantRole,
-            ...(typeof values["expires_at"] === "string"
-              ? { expires_at: values["expires_at"] }
-              : {}),
+            ...(createExpiresAt !== undefined ? { expires_at: createExpiresAt } : {}),
             ...(allowedLocationIds ? { allowed_location_ids: allowedLocationIds } : {})
+          }, principal));
+          return;
+        }
+        if (method === "POST" && path === "/admin/api/v1/access/api-keys/rotate") {
+          if (typeof values["key_id"] !== "string") {
+            throw new TransportError(
+              422,
+              "validation_failed",
+              "Request validation failed",
+              "key_id is required"
+            );
+          }
+          if (
+            values["overlap_seconds"] !== undefined &&
+            typeof values["overlap_seconds"] !== "number"
+          ) {
+            throw new TransportError(
+              422,
+              "validation_failed",
+              "Request validation failed",
+              "overlap_seconds must be a number"
+            );
+          }
+          const rotateExpiresAt = readOptionalExpiresAt(values);
+          sendJson(response, 200, await access.rotateApiKey({
+            key_id: values["key_id"],
+            ...(typeof values["overlap_seconds"] === "number"
+              ? { overlap_seconds: values["overlap_seconds"] }
+              : {}),
+            ...(rotateExpiresAt !== undefined ? { expires_at: rotateExpiresAt } : {})
           }, principal));
           return;
         }
@@ -1890,8 +1968,11 @@ export async function startReferenceServer(
   engine: LoyaltyEngine,
   options: ServerOptions & { host?: string; port?: number }
 ): Promise<RunningServer> {
-  const server = createReferenceServer(engine, options);
   const host = options.host ?? "127.0.0.1";
+  // A non-loopback binding accepts traffic from the network: the local
+  // development default key must be rejected even for demo/SQLite runtimes.
+  if (!isLoopbackHost(host)) assertStrongApiKey(options.apiKey);
+  const server = createReferenceServer(engine, options);
   const port = options.port ?? 0;
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);

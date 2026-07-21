@@ -7,6 +7,7 @@ import { PostgresCloudRepository } from "./postgres-repository.js";
 import { CloudProvisioningWorker } from "./provisioning.js";
 import { CloudControlPlane } from "./service.js";
 import { startCloudServer } from "./server.js";
+import type { EnvironmentCredentialRotationOptions } from "./types.js";
 
 const connectionString =
   process.env["LIP_CLOUD_DATABASE_URL"] ??
@@ -94,6 +95,14 @@ if (programDirectory) {
 
 const running = await startCloudServer(controlPlane, {
   ...(authenticator ? { authenticator } : { apiKey: apiKey! }),
+  ...(provisioner
+    ? {
+        rotateEnvironmentCredentials: (
+          environmentId: string,
+          rotateOptions: EnvironmentCredentialRotationOptions
+        ) => provisioner!.rotateCredentials(environmentId, rotateOptions)
+      }
+    : {}),
   host: process.env["LIP_CLOUD_HOST"] ?? "0.0.0.0",
   port: Number.parseInt(process.env["LIP_CLOUD_PORT"] ?? "3220", 10),
   ...(process.env["LIP_CLOUD_ALLOWED_ORIGINS"]
