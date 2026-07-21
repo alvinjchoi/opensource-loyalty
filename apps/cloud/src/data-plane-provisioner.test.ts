@@ -1,4 +1,4 @@
-import { mkdtempSync, statSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -196,6 +196,119 @@ describe("LocalDataPlaneProvisioner", () => {
     expect(provisioned).toHaveLength(1);
   });
 
+  it("bootstraps a rotatable merchant key alongside the deprecated root key", async () => {
+    const { provisioner, provisioned, repository, environment, worker } = await fixture();
+    close = () => provisioner.close();
+    expect(await worker.runOnce()).toBe("succeeded");
+    const ready = await repository.environmentById(environment.environment_id);
+    const runtime = provisioned[0]!;
+
+    // The merchant credential is an owner-role access-control key, not the root key.
+    expect(runtime.merchant_api_key).toMatch(/^lip_sk_/);
+    expect(runtime.merchant_api_key).not.toBe(runtime.api_key);
+    expect(runtime.merchant_api_key_id).toMatch(/^key_/);
+
+    const credential = JSON.parse(readFileSync(runtime.credentials_path, "utf8")) as {
+      version: number;
+      api_key: string;
+      api_key_deprecated: boolean;
+      merchant_api_key: string;
+      merchant_api_key_id: string;
+    };
+    expect(credential).toMatchObject({
+      version: 2,
+      api_key: runtime.api_key,
+      api_key_deprecated: true,
+      merchant_api_key: runtime.merchant_api_key,
+      merchant_api_key_id: runtime.merchant_api_key_id
+    });
+
+    // The merchant key works on both surfaces of its own runtime.
+    const protocol = await fetch(`${ready!.api_url}/lip/v1/programs/get`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${runtime.merchant_api_key}`,
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({ context: requestContext(), program_id: "acme-rewards" })
+    });
+    expect(protocol.status).toBe(200);
+    const admin = await fetch(`${ready!.api_url}/admin/api/v1/snapshot`, {
+      headers: { authorization: `Bearer ${runtime.merchant_api_key}` }
+    });
+    expect(admin.status).toBe(200);
+  });
+
+  it("rotates merchant credentials in place with an overlap window", async () => {
+    const { provisioner, provisioned, repository, environment, worker } = await fixture();
+    close = () => provisioner.close();
+    expect(await worker.runOnce()).toBe("succeeded");
+    const ready = await repository.environmentById(environment.environment_id);
+    const before = provisioned[0]!;
+
+    const rotated = await provisioner.rotateCredentials(environment.environment_id);
+    expect(rotated.merchant_api_key).toMatch(/^lip_sk_/);
+    expect(rotated.merchant_api_key).not.toBe(before.merchant_api_key);
+    expect(rotated.merchant_api_key_id).not.toBe(before.merchant_api_key_id);
+
+    // File and in-memory runtime reflect the new credential.
+    const credential = JSON.parse(readFileSync(before.credentials_path, "utf8")) as {
+      merchant_api_key: string;
+    };
+    expect(credential.merchant_api_key).toBe(rotated.merchant_api_key);
+    expect(provisioner.runtimes()[0]!.merchant_api_key).toBe(rotated.merchant_api_key);
+
+    // Old and new merchant keys are both valid during the default overlap.
+    for (const secret of [before.merchant_api_key, rotated.merchant_api_key]) {
+      const probe = await fetch(`${ready!.api_url}/admin/api/v1/snapshot`, {
+        headers: { authorization: `Bearer ${secret}` }
+      });
+      expect(probe.status).toBe(200);
+    }
+
+    await expect(provisioner.rotateCredentials("env_unknown"))
+      .rejects.toThrowError(/env_unknown/);
+  });
+
+  it("does not seed tenant runtimes from host-level webhook env vars", async () => {
+    process.env["LIP_WEBHOOK_URL"] = "https://host-level.example/hooks";
+    process.env["LIP_WEBHOOK_SECRET"] = "host-level-shared-secret";
+    try {
+      const { provisioner, provisioned, repository, environment, worker } = await fixture();
+      close = () => provisioner.close();
+      expect(await worker.runOnce()).toBe("succeeded");
+      const ready = await repository.environmentById(environment.environment_id);
+      const health = await fetch(`${ready!.api_url}/admin/api/v1/webhooks/health`, {
+        headers: { authorization: `Bearer ${provisioned[0]!.merchant_api_key}` }
+      });
+      expect(health.status).toBe(200);
+      expect(await health.json()).toMatchObject({
+        enabled: false,
+        subscription_count: 0
+      });
+    } finally {
+      delete process.env["LIP_WEBHOOK_URL"];
+      delete process.env["LIP_WEBHOOK_SECRET"];
+    }
+  });
+
+  it("refuses to restore a credentials file carrying a weak root key", async () => {
+    const programDirectory = mkdtempSync(join(tmpdir(), "lip-cloud-programs-"));
+    const dataDirectory = mkdtempSync(join(tmpdir(), "lip-cloud-data-"));
+    writeFileSync(join(programDirectory, "acme-rewards.json"), JSON.stringify(program));
+    writeFileSync(join(dataDirectory, "env_weak.credentials.json"), JSON.stringify({
+      environment_id: "env_weak",
+      tenant_id: "tenant_weak",
+      program_id: "acme-rewards",
+      api_url: "http://127.0.0.1:19999",
+      api_key: "lip-dev-key",
+      port: 19_999
+    }));
+    const second = new LocalDataPlaneProvisioner({ programDirectory, dataDirectory });
+    close = () => second.close();
+    await expect(second.restore()).rejects.toThrowError(/lip-dev-key|16 characters|default/);
+  });
+
   it("restores the same port and API key after close", async () => {
     const programDirectory = mkdtempSync(join(tmpdir(), "lip-cloud-programs-"));
     const dataDirectory = mkdtempSync(join(tmpdir(), "lip-cloud-data-"));
@@ -233,6 +346,17 @@ describe("LocalDataPlaneProvisioner", () => {
     const original = first.runtimes()[0]!;
     await first.close();
 
+    // Downgrade the credentials file to the v1 layout (root key only) to
+    // prove restore keeps accepting legacy files and upgrades them in place.
+    writeFileSync(original.credentials_path, JSON.stringify({
+      environment_id: environment.environment_id,
+      tenant_id: original.tenant_id,
+      program_id: original.program_id,
+      api_url: original.api_url,
+      api_key: original.api_key,
+      port: original.port
+    }));
+
     const second = new LocalDataPlaneProvisioner({
       programDirectory,
       dataDirectory,
@@ -248,5 +372,18 @@ describe("LocalDataPlaneProvisioner", () => {
       port: original.port
     });
     expect(await fetch(`${original.api_url}/health`).then((r) => r.status)).toBe(200);
+
+    // The legacy file was upgraded to v2 with a freshly minted merchant key.
+    const upgraded = JSON.parse(readFileSync(original.credentials_path, "utf8")) as {
+      version: number;
+      api_key: string;
+      merchant_api_key: string;
+    };
+    expect(upgraded.version).toBe(2);
+    expect(upgraded.api_key).toBe(original.api_key);
+    expect(upgraded.merchant_api_key).toMatch(/^lip_sk_/);
+    expect(await fetch(`${original.api_url}/admin/api/v1/snapshot`, {
+      headers: { authorization: `Bearer ${upgraded.merchant_api_key}` }
+    }).then((r) => r.status)).toBe(200);
   });
 });

@@ -3,9 +3,11 @@ import { mkdirSync, readdirSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import {
+  assertStrongApiKey,
   createDemoPlatform,
   createPostgresProtocolPlatform,
-  startReferenceServer
+  startReferenceServer,
+  type AccessControlService
 } from "@loyalty-interchange/server";
 import type { ProgramDefinition } from "@loyalty-interchange/reference";
 import type { CloudProvisioner } from "./provisioning.js";
@@ -49,24 +51,40 @@ export interface ProvisionedRuntime {
   program_id: string;
   api_url: string;
   admin_url: string;
+  /** DEPRECATED root runtime key. Hand out merchant_api_key instead. */
   api_key: string;
+  /** Owner-role access-control key — the credential merchants receive. */
+  merchant_api_key: string;
+  merchant_api_key_id: string;
   credentials_path: string;
   port: number;
 }
 
+/**
+ * v1 files carry only the root `api_key`; v2 adds the merchant access-control
+ * key and marks the root key deprecated. v1 files are accepted on restore and
+ * upgraded in place.
+ */
 interface CredentialFile {
+  version?: number;
   environment_id: string;
   tenant_id: string;
   program_id: string;
   api_url: string;
   api_key: string;
+  api_key_deprecated?: boolean;
+  merchant_api_key?: string;
+  merchant_api_key_id?: string;
   port: number;
 }
 
 interface RunningRuntime {
   runtime: ProvisionedRuntime;
+  access: AccessControlService;
   close: () => Promise<void>;
 }
+
+const MERCHANT_KEY_NAME = "cloud-merchant";
 
 function generateApiKey(): string {
   return `lip_sk_${randomBytes(32).toString("base64url")}`;
@@ -131,6 +149,12 @@ export class LocalDataPlaneProvisioner implements CloudProvisioner {
       const port = credential.port || this.portAssignments.get(credential.environment_id);
       const runtime = await this.startRuntime(environment, {
         apiKey: credential.api_key,
+        ...(credential.merchant_api_key && credential.merchant_api_key_id
+          ? {
+              merchantApiKey: credential.merchant_api_key,
+              merchantApiKeyId: credential.merchant_api_key_id
+            }
+          : {}),
         ...(port ? { port } : {})
       });
       restored.push(runtime);
@@ -170,6 +194,12 @@ export class LocalDataPlaneProvisioner implements CloudProvisioner {
       existingCredential?.port ?? this.portAssignments.get(environment.environment_id);
     const runtime = await this.startRuntime(environment, {
       ...(existingCredential?.api_key ? { apiKey: existingCredential.api_key } : {}),
+      ...(existingCredential?.merchant_api_key && existingCredential.merchant_api_key_id
+        ? {
+            merchantApiKey: existingCredential.merchant_api_key,
+            merchantApiKeyId: existingCredential.merchant_api_key_id
+          }
+        : {}),
       ...(port ? { port } : {})
     });
     return { api_url: runtime.api_url, admin_url: runtime.admin_url };
@@ -177,6 +207,31 @@ export class LocalDataPlaneProvisioner implements CloudProvisioner {
 
   public runtimes(): ProvisionedRuntime[] {
     return [...this.running.values()].map((entry) => ({ ...entry.runtime }));
+  }
+
+  /**
+   * Mints a replacement merchant key through the tenant's own access-control
+   * service (bounded overlap on the old key, fully audited) and rewrites the
+   * credentials file. This is the control-plane rotation surface: operators
+   * receive the returned merchant key and never touch the root key.
+   */
+  public async rotateCredentials(environmentId: string): Promise<ProvisionedRuntime> {
+    const entry = this.running.get(environmentId);
+    if (!entry) {
+      throw new Error(`No running data-plane runtime exists for ${environmentId}`);
+    }
+    const rotated = await entry.access.rotateApiKey(
+      { key_id: entry.runtime.merchant_api_key_id },
+      entry.access.rootPrincipal()
+    );
+    const runtime: ProvisionedRuntime = {
+      ...entry.runtime,
+      merchant_api_key: rotated.secret,
+      merchant_api_key_id: rotated.api_key.key_id
+    };
+    await this.writeCredentials(runtime);
+    this.running.set(environmentId, { ...entry, runtime });
+    return { ...runtime };
   }
 
   public async close(): Promise<void> {
@@ -187,19 +242,31 @@ export class LocalDataPlaneProvisioner implements CloudProvisioner {
 
   private async startRuntime(
     environment: CloudEnvironment,
-    options: { apiKey?: string; port?: number }
+    options: {
+      apiKey?: string;
+      merchantApiKey?: string;
+      merchantApiKeyId?: string;
+      port?: number;
+    }
   ): Promise<ProvisionedRuntime> {
-    const program = await this.loadProgram(environment.program_id);
     const apiKey = options.apiKey?.trim() || generateApiKey();
+    // Shared-cluster runtimes must never boot on a weak or default key, even
+    // one smuggled in through a tampered or legacy credentials file.
+    assertStrongApiKey(apiKey);
+    const program = await this.loadProgram(environment.program_id);
     const port = await this.allocatePort(environment.environment_id, options.port);
     const host = this.options.host ?? "127.0.0.1";
     const publicHost = this.options.publicHost ?? (host === "0.0.0.0" ? "127.0.0.1" : host);
+    // webhooks: [] keeps host-level LIP_WEBHOOK_URL/SECRET env config out of
+    // tenant runtimes — webhook subscriptions (and their signing secrets) are
+    // always tenant-owned, created through each runtime's admin API.
     const platform = this.options.connectionString
       ? await createPostgresProtocolPlatform({
           connectionString: this.options.connectionString,
           tenantId: environment.tenant_id,
           program,
-          seed: false
+          seed: false,
+          webhooks: []
         })
       : await createDemoPlatform({
           databasePath: join(
@@ -207,8 +274,24 @@ export class LocalDataPlaneProvisioner implements CloudProvisioner {
             `${environment.tenant_id}.db`
           ),
           program,
-          seed: false
+          seed: false,
+          webhooks: []
         });
+    let merchantApiKey = options.merchantApiKey;
+    let merchantApiKeyId = options.merchantApiKeyId;
+    if (!merchantApiKey || !merchantApiKeyId) {
+      try {
+        const minted = await platform.access.createApiKey(
+          { name: MERCHANT_KEY_NAME, role: "owner" },
+          platform.access.rootPrincipal()
+        );
+        merchantApiKey = minted.secret;
+        merchantApiKeyId = minted.api_key.key_id;
+      } catch (error) {
+        await Promise.resolve(platform.close());
+        throw error;
+      }
+    }
     let server;
     try {
       server = await startReferenceServer(platform.engine, {
@@ -245,6 +328,8 @@ export class LocalDataPlaneProvisioner implements CloudProvisioner {
       api_url: apiUrl,
       admin_url: `${apiUrl}/admin/`,
       api_key: apiKey,
+      merchant_api_key: merchantApiKey,
+      merchant_api_key_id: merchantApiKeyId,
       credentials_path: join(
         resolve(this.options.dataDirectory),
         `${environment.environment_id}.credentials.json`
@@ -252,22 +337,7 @@ export class LocalDataPlaneProvisioner implements CloudProvisioner {
       port
     };
     try {
-      await writeFile(
-        runtime.credentials_path,
-        `${JSON.stringify(
-          {
-            environment_id: runtime.environment_id,
-            tenant_id: runtime.tenant_id,
-            program_id: runtime.program_id,
-            api_url: runtime.api_url,
-            api_key: runtime.api_key,
-            port: runtime.port
-          },
-          undefined,
-          2
-        )}\n`,
-        { mode: 0o600 }
-      );
+      await this.writeCredentials(runtime);
       await this.savePortRegistry();
     } catch (error) {
       await server.close();
@@ -276,6 +346,7 @@ export class LocalDataPlaneProvisioner implements CloudProvisioner {
     }
     this.running.set(environment.environment_id, {
       runtime,
+      access: platform.access,
       close: async () => {
         await server.close();
         await Promise.resolve(platform.close());
@@ -283,6 +354,26 @@ export class LocalDataPlaneProvisioner implements CloudProvisioner {
     });
     this.options.onProvisioned?.(runtime);
     return runtime;
+  }
+
+  private async writeCredentials(runtime: ProvisionedRuntime): Promise<void> {
+    const credential: Required<Omit<CredentialFile, "version">> & { version: number } = {
+      version: 2,
+      environment_id: runtime.environment_id,
+      tenant_id: runtime.tenant_id,
+      program_id: runtime.program_id,
+      api_url: runtime.api_url,
+      api_key: runtime.api_key,
+      api_key_deprecated: true,
+      merchant_api_key: runtime.merchant_api_key,
+      merchant_api_key_id: runtime.merchant_api_key_id,
+      port: runtime.port
+    };
+    await writeFile(
+      runtime.credentials_path,
+      `${JSON.stringify(credential, undefined, 2)}\n`,
+      { mode: 0o600 }
+    );
   }
 
   private async allocatePort(environmentId: string, preferred?: number): Promise<number> {
