@@ -826,6 +826,84 @@ describe("reference HTTP server", () => {
     }
   });
 
+  it("fails closed: location-scoped principals are denied tenant-wide admin reads", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "lip-scope-fail-closed-"));
+    const databasePath = join(directory, "reference.db");
+    const platform = await createDemoPlatform({
+      databasePath,
+      reset: true,
+      seed: false,
+      program: makeProgram()
+    });
+    const running = await startReferenceServer(platform.engine, {
+      apiKey: "fail-closed-key",
+      persistState: (state) => platform.store.save(state),
+      admin: {
+        programs: platform.programs,
+        campaigns: platform.campaigns,
+        memberships: platform.memberships,
+        access: platform.access,
+        engagement: platform.engagement,
+        locations: platform.locations,
+        storage: platform.store.status
+      }
+    });
+    try {
+      const scoped = await platform.access.createApiKey({
+        name: "Franchisee 42 dashboard",
+        role: "viewer",
+        allowed_location_ids: ["location-42"]
+      }, platform.access.rootPrincipal());
+      const scopedHeaders = { authorization: `Bearer ${scoped.secret}` };
+
+      for (const path of [
+        "/admin/api/v1/snapshot",
+        "/admin/api/v1/analytics",
+        "/admin/api/v1/exports/members",
+        "/admin/api/v1/maintenance"
+      ]) {
+        const denied = await fetch(`${running.url}${path}`, { headers: scopedHeaders });
+        expect(denied.status, path).toBe(403);
+        const body = await denied.json() as { code: string; detail?: string };
+        expect(body.code, path).toBe("location_scoped_forbidden");
+        expect(body.detail, path).toContain("/admin/api/v1/reports/locations");
+      }
+
+      const scopedReport = await fetch(`${running.url}/admin/api/v1/reports/locations`, {
+        headers: scopedHeaders
+      });
+      expect(scopedReport.status).toBe(200);
+      const scopedRegistry = await fetch(`${running.url}/admin/api/v1/locations`, {
+        headers: scopedHeaders
+      });
+      expect(scopedRegistry.status).toBe(200);
+
+      // Unscoped principals keep full tenant-wide access.
+      const rootHeaders = { authorization: "Bearer fail-closed-key" };
+      for (const path of [
+        "/admin/api/v1/snapshot",
+        "/admin/api/v1/analytics",
+        "/admin/api/v1/exports/members",
+        "/admin/api/v1/maintenance"
+      ]) {
+        const allowed = await fetch(`${running.url}${path}`, { headers: rootHeaders });
+        expect(allowed.status, path).toBe(200);
+      }
+      const unscoped = await platform.access.createApiKey({
+        name: "HQ dashboard",
+        role: "viewer"
+      }, platform.access.rootPrincipal());
+      const unscopedSnapshot = await fetch(`${running.url}/admin/api/v1/snapshot`, {
+        headers: { authorization: `Bearer ${unscoped.secret}` }
+      });
+      expect(unscopedSnapshot.status).toBe(200);
+    } finally {
+      await running.close();
+      await platform.close();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it("manages the location registry and serves location-scoped reports", async () => {
     const directory = mkdtempSync(join(tmpdir(), "lip-location-admin-"));
     const databasePath = join(directory, "reference.db");

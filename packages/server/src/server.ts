@@ -221,6 +221,20 @@ async function protocolAuthorized(
   );
 }
 
+/**
+ * Admin API endpoints that resolve and enforce the caller's location scope
+ * themselves. Every other admin read returns tenant-wide data, so a
+ * location-scoped principal is denied there (fail closed) instead of being
+ * silently over-served — new admin endpoints are safe by default until they
+ * declare scope handling here.
+ */
+const scopeAwareAdminPaths = new Set([
+  "/admin/api/v1/bootstrap",
+  "/admin/api/v1/locations",
+  "/admin/api/v1/locations/delete",
+  "/admin/api/v1/reports/locations"
+]);
+
 const protocolReadPaths = new Set([
   "/lip/v1/capabilities",
   "/lip/v1/members/lookup",
@@ -932,6 +946,32 @@ export function createReferenceServer(engine: LoyaltyEngine, options: ServerOpti
         });
         response.end();
         return;
+      }
+
+      if (
+        adminEnabled &&
+        method === "GET" &&
+        path.startsWith("/admin/api/v1/") &&
+        !scopeAwareAdminPaths.has(path)
+      ) {
+        const principal = await adminPrincipal(request, options, adminSessions);
+        const scope = principal && options.admin?.access
+          ? options.admin.access.locationScopeFor(principal)
+          : undefined;
+        if (scope) {
+          sendJson(
+            response,
+            403,
+            problem(
+              403,
+              "Forbidden",
+              "location_scoped_forbidden",
+              "This admin endpoint returns tenant-wide data; location-scoped principals must use /admin/api/v1/reports/locations and /admin/api/v1/locations"
+            ),
+            "application/problem+json"
+          );
+          return;
+        }
       }
 
       if (adminEnabled && method === "GET" && path === "/admin/api/v1/snapshot") {
