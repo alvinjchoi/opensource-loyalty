@@ -742,6 +742,7 @@ export class LoyaltyEngine {
         reward_id: reward.reward_id,
         ...(issuedReward ? { issued_reward_id: issuedReward.issued_reward_id } : {}),
         order_id: request.order.order_id,
+        location_id: request.order.scope.location_id,
         status: "reserved",
         cost: { unit: rewardCost.unit, amount: issuedReward ? 0 : rewardCost.amount },
         effect: clone(reward.effect),
@@ -794,6 +795,9 @@ export class LoyaltyEngine {
           unit,
           amount: -reservation.cost.amount,
           order_id: reservation.order_id,
+          // The redemption belongs to the reserving order's location, not the
+          // location that originally earned the balance.
+          ...(reservation.location_id ? { location_id: reservation.location_id } : {}),
           reservation_id: reservation.reservation_id
         });
       }
@@ -832,6 +836,7 @@ export class LoyaltyEngine {
             unit,
             amount: reservation.cost.amount,
             order_id: reservation.order_id,
+            ...(reservation.location_id ? { location_id: reservation.location_id } : {}),
             reservation_id: reservation.reservation_id
           });
           this.expirePointLots(reservation.member_id, unit);

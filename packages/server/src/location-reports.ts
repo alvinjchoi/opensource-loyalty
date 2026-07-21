@@ -98,11 +98,13 @@ function sortedActivity(bucket: MutableBucket): LocationActivity[] {
 }
 
 /**
- * Aggregates the engine's admin state per operating location. Accrual entries
- * carry the order's location directly; redemption, reversal, and adjustment
- * entries reference the originating order, so they are attributed through an
- * order-to-location map built from accruals. Everything else lands in the
- * unattributed bucket, which is withheld from location-scoped callers.
+ * Aggregates the engine's admin state per operating location. Ledger entries
+ * stamped with `location_id` at write time (accruals from the accrued order,
+ * redemptions/reversals from the reserving order) are attributed directly;
+ * entries recorded before stamping existed fall back to the reservation's
+ * stamped location and then to an order-to-location map built from accruals.
+ * Everything else lands in the unattributed bucket, which is withheld from
+ * location-scoped callers.
  */
 export function locationReport(
   engine: LoyaltyEngine,
@@ -115,6 +117,12 @@ export function locationReport(
       orderLocations.set(entry.order_id, entry.location_id);
     }
   }
+  const reservationLocations = new Map<string, string>();
+  for (const reservation of snapshot.reservations) {
+    if (reservation.location_id) {
+      reservationLocations.set(reservation.reservation_id, reservation.location_id);
+    }
+  }
 
   const buckets = new Map<string, MutableBucket>();
   const unattributed = emptyBucket();
@@ -125,6 +133,7 @@ export function locationReport(
   };
   const resolveLocation = (entry: LedgerEntry): string | undefined =>
     entry.location_id ??
+    (entry.reservation_id ? reservationLocations.get(entry.reservation_id) : undefined) ??
     (entry.order_id ? orderLocations.get(entry.order_id) : undefined);
 
   for (const entry of snapshot.ledger) {
@@ -136,7 +145,7 @@ export function locationReport(
     }
   }
   for (const reservation of snapshot.reservations) {
-    const locationId = orderLocations.get(reservation.order_id);
+    const locationId = reservation.location_id ?? orderLocations.get(reservation.order_id);
     const bucket = locationId ? bucketFor(locationId) : unattributed;
     if (reservation.status === "reserved") bucket.reservations.reserved += 1;
     if (reservation.status === "captured") bucket.reservations.captured += 1;
