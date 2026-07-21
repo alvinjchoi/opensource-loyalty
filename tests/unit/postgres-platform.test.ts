@@ -30,6 +30,11 @@ postgresDescribe("Postgres protocol platform with admin services", () => {
         valid_until: "2099-01-01T00:00:00.000Z"
       }, "test-admin");
       expect(membership.status).toBe("active");
+      await first.locations.upsertLocation({
+        location_id: "location-42",
+        name: "Downtown Drive-Thru",
+        franchisee_id: "franchisee-7"
+      }, "test-admin");
     } finally {
       await first.close();
     }
@@ -49,6 +54,14 @@ postgresDescribe("Postgres protocol platform with admin services", () => {
           membership: expect.objectContaining({ plan_id: "premium", status: "active" })
         })
       ]));
+      expect(second.locations.snapshot().locations).toEqual([
+        expect.objectContaining({
+          location_id: "location-42",
+          name: "Downtown Drive-Thru",
+          franchisee_id: "franchisee-7",
+          active: true
+        })
+      ]);
     } finally {
       await second.close();
     }
@@ -72,6 +85,10 @@ postgresDescribe("Postgres protocol platform with admin services", () => {
         plan_id: "premium",
         valid_until: "2099-01-01T00:00:00.000Z"
       }, "tenant-a-admin");
+      await platformA.locations.upsertLocation({
+        location_id: "location-a",
+        name: "Tenant A Flagship"
+      }, "tenant-a-admin");
     } finally {
       await platformA.close();
     }
@@ -81,6 +98,7 @@ postgresDescribe("Postgres protocol platform with admin services", () => {
     });
     try {
       expect(platformB.memberships.snapshot().audit).toEqual([]);
+      expect(platformB.locations.snapshot().locations).toEqual([]);
     } finally {
       await platformB.close();
     }

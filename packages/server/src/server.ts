@@ -45,6 +45,8 @@ import type {
   TenantPrincipal,
   TenantRole
 } from "./access-control.js";
+import { locationReport } from "./location-reports.js";
+import type { LocationDirectoryService } from "./locations.js";
 
 const MAX_BODY_BYTES = 1_048_576;
 const DEFAULT_LOCAL_API_KEY = "lip-dev-key";
@@ -101,6 +103,7 @@ export interface ServerOptions {
     memberships?: MembershipService;
     access?: AccessControlService;
     engagement?: EngagementService;
+    locations?: LocationDirectoryService;
   };
 }
 
@@ -724,6 +727,11 @@ export function createReferenceServer(engine: LoyaltyEngine, options: ServerOpti
       allowedMethods.set("/admin/api/v1/memberships/grant", ["POST"]);
       allowedMethods.set("/admin/api/v1/memberships/status", ["POST"]);
     }
+    if (options.admin?.locations) {
+      allowedMethods.set("/admin/api/v1/locations", ["GET", "PUT"]);
+      allowedMethods.set("/admin/api/v1/locations/delete", ["POST"]);
+      allowedMethods.set("/admin/api/v1/reports/locations", ["GET"]);
+    }
   }
 
   return createServer((request, response) => {
@@ -1139,7 +1147,14 @@ export function createReferenceServer(engine: LoyaltyEngine, options: ServerOpti
             email: values["email"],
             role: values["role"] as TenantRole,
             ...(typeof values["name"] === "string" ? { name: values["name"] } : {}),
-            ...(typeof values["active"] === "boolean" ? { active: values["active"] } : {})
+            ...(typeof values["active"] === "boolean" ? { active: values["active"] } : {}),
+            ...(Array.isArray(values["allowed_location_ids"])
+              ? {
+                  allowed_location_ids: values["allowed_location_ids"].filter(
+                    (value): value is string => typeof value === "string"
+                  )
+                }
+              : {})
           }, principal));
           return;
         }
@@ -1157,6 +1172,13 @@ export function createReferenceServer(engine: LoyaltyEngine, options: ServerOpti
             role: values["role"] as TenantRole,
             ...(typeof values["expires_at"] === "string"
               ? { expires_at: values["expires_at"] }
+              : {}),
+            ...(Array.isArray(values["allowed_location_ids"])
+              ? {
+                  allowed_location_ids: values["allowed_location_ids"].filter(
+                    (value): value is string => typeof value === "string"
+                  )
+                }
               : {})
           }, principal));
           return;
@@ -1238,6 +1260,87 @@ export function createReferenceServer(engine: LoyaltyEngine, options: ServerOpti
           )
         );
         return;
+      }
+
+      const locationDirectory = options.admin?.locations;
+      if (
+        adminEnabled &&
+        locationDirectory &&
+        ["/admin/api/v1/locations", "/admin/api/v1/locations/delete",
+          "/admin/api/v1/reports/locations"].includes(path) &&
+        ["GET", "PUT", "POST"].includes(method)
+      ) {
+        if (!(await isAdminAuthorized(request, options, adminSessions))) {
+          sendJson(response, 401, problem(401, "Unauthorized", "unauthorized"), "application/problem+json");
+          return;
+        }
+        const principal = await adminPrincipal(request, options, adminSessions);
+        const scope = principal && options.admin?.access
+          ? options.admin.access.locationScopeFor(principal)
+          : undefined;
+        if (method === "GET" && path === "/admin/api/v1/locations") {
+          const locations = locationDirectory.snapshot().locations.filter((location) =>
+            !scope || scope.includes(location.location_id)
+          );
+          sendJson(response, 200, { locations });
+          return;
+        }
+        if (method === "GET" && path === "/admin/api/v1/reports/locations") {
+          const registry = locationDirectory.snapshot().locations;
+          const reportOptions = { locations: registry, ...(scope ? { scope } : {}) };
+          const report = options.executeEngineOperation
+            ? await options.executeEngineOperation(() => locationReport(engine, reportOptions))
+            : locationReport(engine, reportOptions);
+          if (!options.executeEngineOperation) options.persistState?.(engine.exportState());
+          sendJson(response, 200, report);
+          return;
+        }
+        if (!(await isAdminWriteAuthorized(request, options, adminSessions))) {
+          sendJson(
+            response,
+            403,
+            problem(403, "Forbidden", "csrf_failed", "Admin writes require a valid CSRF token"),
+            "application/problem+json"
+          );
+          return;
+        }
+        const body = await readBody(request);
+        const values = body && typeof body === "object" && !Array.isArray(body)
+          ? body as Record<string, unknown>
+          : {};
+        const actor = await adminActor(request, options, adminSessions);
+        if (method === "PUT" && path === "/admin/api/v1/locations") {
+          if (typeof values["location_id"] !== "string" || typeof values["name"] !== "string") {
+            throw new TransportError(
+              422,
+              "validation_failed",
+              "Request validation failed",
+              "location_id and name are required"
+            );
+          }
+          sendJson(response, 200, await locationDirectory.upsertLocation({
+            location_id: values["location_id"],
+            name: values["name"],
+            ...(typeof values["franchisee_id"] === "string"
+              ? { franchisee_id: values["franchisee_id"] }
+              : {}),
+            ...(typeof values["active"] === "boolean" ? { active: values["active"] } : {})
+          }, actor));
+          return;
+        }
+        if (method === "POST" && path === "/admin/api/v1/locations/delete") {
+          if (typeof values["location_id"] !== "string") {
+            throw new TransportError(
+              422,
+              "validation_failed",
+              "Request validation failed",
+              "location_id is required"
+            );
+          }
+          await locationDirectory.removeLocation(values["location_id"], actor);
+          sendJson(response, 200, { deleted: true });
+          return;
+        }
       }
 
       const campaigns = options.admin?.campaigns;

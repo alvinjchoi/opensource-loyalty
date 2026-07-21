@@ -105,7 +105,8 @@ const running = await startReferenceServer(platform.engine, {
           campaigns: platform.campaigns,
           memberships: platform.memberships,
           access: platform.access,
-          engagement: platform.engagement
+          engagement: platform.engagement,
+          locations: platform.locations
         }
       : {}),
     webhookManager: platform.webhooks
