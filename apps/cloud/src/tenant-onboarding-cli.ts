@@ -12,13 +12,19 @@
  *     --env-slug production --env-name Production \
  *     --kind production --region us-east-1 --program-id demo-rewards
  *
+ * Optionally add `--webhook-url https://... --webhook-secret <>=16 chars>` to
+ * create the tenant's first webhook subscription at provision time (mints and
+ * prints the merchant credential as a side effect; requires network reach to
+ * the tenant runtime).
+ *
  * Rotate (or first-retrieve) the merchant credential of a provisioned
  * environment — PLA-416 replaces reading credentials files off the disk:
  *
  *   LIP_CLOUD_API_KEY=... npm run cloud:provision -- rotate-credentials \
  *     --cloud-url https://lip-cloud.example.com \
  *     --subject org_business_manager_123 \
- *     --environment env_...
+ *     --environment env_... \
+ *     [--overlap-seconds 0]   # emergency cutover: replaced key dies at once
  *
  * The control-plane key comes ONLY from `LIP_CLOUD_API_KEY` (never a flag, to
  * keep it out of shell history); see
@@ -44,7 +50,10 @@ const { values, positionals } = parseArgs({
     kind: { type: "string", default: "production" },
     region: { type: "string" },
     "program-id": { type: "string" },
-    "timeout-seconds": { type: "string", default: "120" }
+    "timeout-seconds": { type: "string", default: "120" },
+    "overlap-seconds": { type: "string" },
+    "webhook-url": { type: "string" },
+    "webhook-secret": { type: "string" }
   }
 });
 
@@ -70,6 +79,14 @@ if (!["provision", "rotate-credentials"].includes(command)) {
 }
 
 if (command === "rotate-credentials") {
+  let overlapSeconds: number | undefined;
+  if (values["overlap-seconds"] !== undefined) {
+    overlapSeconds = Number.parseInt(values["overlap-seconds"], 10);
+    if (!Number.isInteger(overlapSeconds) || overlapSeconds < 0) {
+      console.error("--overlap-seconds must be a non-negative integer (0 = immediate cutover)");
+      process.exit(1);
+    }
+  }
   try {
     const rotated = await rotateTenantCredentials(
       {
@@ -78,12 +95,14 @@ if (command === "rotate-credentials") {
         subject: required("subject"),
         ...(values.email ? { email: values.email } : {})
       },
-      required("environment")
+      required("environment"),
+      overlapSeconds !== undefined ? { overlapSeconds } : {}
     );
     console.log(JSON.stringify({ event: "tenant_credentials_rotated", ...rotated }, undefined, 2));
     console.error(
       "[note] Store merchant_api_key in the password manager and update the " +
-      "consuming BFF now; the replaced key expires after the overlap window."
+      "consuming BFF now; the replaced key stops working at " +
+      `${rotated.replaced_api_key_expires_at ?? "the end of the overlap window"}.`
     );
   } catch (error) {
     console.error(JSON.stringify({
@@ -106,6 +125,11 @@ if (!Number.isInteger(timeoutSeconds) || timeoutSeconds < 1) {
   process.exit(1);
 }
 
+if (Boolean(values["webhook-url"]) !== Boolean(values["webhook-secret"])) {
+  console.error("--webhook-url and --webhook-secret must be provided together");
+  process.exit(1);
+}
+
 try {
   const result = await provisionTenant(
     {
@@ -124,11 +148,20 @@ try {
         region: required("region"),
         programId: required("program-id")
       },
+      ...(values["webhook-url"] && values["webhook-secret"]
+        ? { webhook: { url: values["webhook-url"], secret: values["webhook-secret"] } }
+        : {}),
       poll: { timeoutMs: timeoutSeconds * 1_000 }
     }
   );
   console.log(JSON.stringify({ event: "tenant_provisioned", ...result }, undefined, 2));
-  if (result.status === "ready") {
+  if (result.credentials) {
+    console.error(
+      "[note] Webhook onboarding minted the merchant API key above " +
+      "(credentials.merchant_api_key): store it in the password manager and " +
+      "set it on the consuming BFF now."
+    );
+  } else if (result.status === "ready") {
     console.error(
       "[note] Retrieve the merchant API key with: npm run cloud:provision -- " +
       `rotate-credentials --cloud-url <url> --subject <subject> --environment ${result.environment_id}`

@@ -1,4 +1,5 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { MAX_ROTATION_OVERLAP_SECONDS } from "@loyalty-interchange/server";
 import { RemoteEnvironmentAttacher } from "./remote-attach.js";
 import { CloudRepositoryConflictError } from "./types.js";
 import type {
@@ -16,6 +17,8 @@ import type {
   CloudSubscription,
   CloudUsageCounter,
   CloudUsageEvent,
+  EnvironmentCredentialRotation,
+  EnvironmentCredentialRotationOptions,
   EnvironmentKind,
   RotatedEnvironmentCredentials,
   UsageMetric
@@ -563,24 +566,35 @@ export class CloudControlPlane {
    * PLA-416 rotation surface: authorizes the caller as an owner/admin of the
    * environment's organization, delegates minting to the wired data-plane
    * provisioner, audits the rotation, and returns the fresh merchant
-   * credential. The deprecated root runtime key is never returned.
+   * credential. The operator subject is threaded down so tenant-side audit
+   * attributes the rotation to `cloud:<subject>`, and an optional
+   * `overlap_seconds` supports emergency zero-overlap cutovers. The
+   * deprecated root runtime key is never returned.
    */
   public async rotateEnvironmentCredentials(
     principal: CloudPrincipal,
     environmentId: string,
-    rotate?: (environmentId: string) => Promise<{
-      environment_id: string;
-      tenant_id: string;
-      program_id: string;
-      api_url: string;
-      admin_url: string;
-      merchant_api_key: string;
-      merchant_api_key_id: string;
-    }>
+    rotate?: (
+      environmentId: string,
+      options: EnvironmentCredentialRotationOptions
+    ) => Promise<EnvironmentCredentialRotation>,
+    input: { overlap_seconds?: number } = {}
   ): Promise<RotatedEnvironmentCredentials> {
     const environment = await this.requiredEnvironment(environmentId);
     const project = await this.requiredProject(environment.project_id);
     await this.requireRole(principal, project.organization_id, managementRoles);
+    if (
+      input.overlap_seconds !== undefined &&
+      (!Number.isInteger(input.overlap_seconds) ||
+        input.overlap_seconds < 0 ||
+        input.overlap_seconds > MAX_ROTATION_OVERLAP_SECONDS)
+    ) {
+      throw new CloudError(
+        422,
+        "validation_failed",
+        `overlap_seconds must be an integer between 0 and ${MAX_ROTATION_OVERLAP_SECONDS}`
+      );
+    }
     if (!rotate) {
       throw new CloudError(
         409,
@@ -590,7 +604,12 @@ export class CloudControlPlane {
     }
     let rotated;
     try {
-      rotated = await rotate(environmentId);
+      rotated = await rotate(environmentId, {
+        subject: principal.subject,
+        ...(input.overlap_seconds !== undefined
+          ? { overlap_seconds: input.overlap_seconds }
+          : {})
+      });
     } catch (error) {
       throw new CloudError(
         409,
@@ -606,8 +625,15 @@ export class CloudControlPlane {
       "environment",
       environmentId,
       rotatedAt,
-      { merchant_api_key_id: rotated.merchant_api_key_id }
+      {
+        merchant_api_key_id: rotated.merchant_api_key_id,
+        ...(input.overlap_seconds !== undefined
+          ? { overlap_seconds: input.overlap_seconds }
+          : {})
+      }
     ));
+    // Fields are picked explicitly so a provisioner returning extra runtime
+    // state (for example the deprecated root key) can never leak through.
     return {
       environment_id: rotated.environment_id,
       tenant_id: rotated.tenant_id,
@@ -616,6 +642,9 @@ export class CloudControlPlane {
       admin_url: rotated.admin_url,
       merchant_api_key: rotated.merchant_api_key,
       merchant_api_key_id: rotated.merchant_api_key_id,
+      ...(rotated.replaced_api_key_expires_at
+        ? { replaced_api_key_expires_at: rotated.replaced_api_key_expires_at }
+        : {}),
       rotated_at: rotatedAt
     };
   }

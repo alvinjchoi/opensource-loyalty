@@ -1,17 +1,23 @@
 import { createHash, randomBytes } from "node:crypto";
 import { mkdirSync, readdirSync } from "node:fs";
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import {
   assertStrongApiKey,
   createDemoPlatform,
   createPostgresProtocolPlatform,
   startReferenceServer,
-  type AccessControlService
+  type AccessControlService,
+  type TenantPrincipal
 } from "@loyalty-interchange/server";
-import type { ProgramDefinition } from "@loyalty-interchange/reference";
+import { EngineError, type ProgramDefinition } from "@loyalty-interchange/reference";
 import type { CloudProvisioner } from "./provisioning.js";
-import type { CloudEnvironment, CloudProvisioningJob, CloudProvisioningResult } from "./types.js";
+import type {
+  CloudEnvironment,
+  CloudProvisioningJob,
+  CloudProvisioningResult,
+  EnvironmentCredentialRotationOptions
+} from "./types.js";
 
 export interface LocalDataPlaneProvisionerOptions {
   /**
@@ -104,6 +110,8 @@ function preferredPort(environmentId: string, basePort: number, portRange: numbe
 export class LocalDataPlaneProvisioner implements CloudProvisioner {
   private readonly options: LocalDataPlaneProvisionerOptions;
   private readonly running = new Map<string, RunningRuntime>();
+  /** Per-environment rotation mutex: concurrent rotations run one at a time. */
+  private readonly rotationQueues = new Map<string, Promise<void>>();
   private readonly portsPath: string;
   private readonly basePort: number;
   private readonly portRange: number;
@@ -127,39 +135,54 @@ export class LocalDataPlaneProvisioner implements CloudProvisioner {
     const dataDir = resolve(this.options.dataDirectory);
     for (const name of readdirSync(dataDir)) {
       if (!name.endsWith(".credentials.json")) continue;
-      const raw = await readFile(join(dataDir, name), "utf8");
-      const credential = JSON.parse(raw) as CredentialFile;
-      if (!credential.environment_id || !credential.tenant_id || !credential.program_id) {
-        continue;
+      // One weak, tampered, or unreadable credentials file must never abort
+      // the loop and keep every other tenant offline: log it and move on.
+      try {
+        const runtime = await this.restoreCredentialFile(join(dataDir, name));
+        if (runtime) restored.push(runtime);
+      } catch (error) {
+        console.error(JSON.stringify({
+          event: "cloud_environment_restore_failed",
+          credentials_file: name,
+          environment_id: name.slice(0, -".credentials.json".length),
+          message: error instanceof Error ? error.message : String(error)
+        }));
       }
-      if (this.running.has(credential.environment_id)) continue;
-      const environment: CloudEnvironment = {
-        environment_id: credential.environment_id,
-        project_id: "restored",
-        slug: credential.environment_id,
-        name: credential.environment_id,
-        kind: "development",
-        region: "local",
-        tenant_id: credential.tenant_id,
-        program_id: credential.program_id,
-        status: "ready",
-        created_at: new Date(0).toISOString(),
-        updated_at: new Date(0).toISOString()
-      };
-      const port = credential.port || this.portAssignments.get(credential.environment_id);
-      const runtime = await this.startRuntime(environment, {
-        apiKey: credential.api_key,
-        ...(credential.merchant_api_key && credential.merchant_api_key_id
-          ? {
-              merchantApiKey: credential.merchant_api_key,
-              merchantApiKeyId: credential.merchant_api_key_id
-            }
-          : {}),
-        ...(port ? { port } : {})
-      });
-      restored.push(runtime);
     }
     return restored;
+  }
+
+  private async restoreCredentialFile(path: string): Promise<ProvisionedRuntime | undefined> {
+    const raw = await readFile(path, "utf8");
+    const credential = JSON.parse(raw) as CredentialFile;
+    if (!credential.environment_id || !credential.tenant_id || !credential.program_id) {
+      return undefined;
+    }
+    if (this.running.has(credential.environment_id)) return undefined;
+    const environment: CloudEnvironment = {
+      environment_id: credential.environment_id,
+      project_id: "restored",
+      slug: credential.environment_id,
+      name: credential.environment_id,
+      kind: "development",
+      region: "local",
+      tenant_id: credential.tenant_id,
+      program_id: credential.program_id,
+      status: "ready",
+      created_at: new Date(0).toISOString(),
+      updated_at: new Date(0).toISOString()
+    };
+    const port = credential.port || this.portAssignments.get(credential.environment_id);
+    return this.startRuntime(environment, {
+      apiKey: credential.api_key,
+      ...(credential.merchant_api_key && credential.merchant_api_key_id
+        ? {
+            merchantApiKey: credential.merchant_api_key,
+            merchantApiKeyId: credential.merchant_api_key_id
+          }
+        : {}),
+      ...(port ? { port } : {})
+    });
   }
 
   public async provision(input: {
@@ -214,16 +237,53 @@ export class LocalDataPlaneProvisioner implements CloudProvisioner {
    * service (bounded overlap on the old key, fully audited) and rewrites the
    * credentials file. This is the control-plane rotation surface: operators
    * receive the returned merchant key and never touch the root key.
+   *
+   * Rotations are serialized per environment (two concurrent calls would
+   * otherwise both rotate the same pinned key and mint an orphaned lineage),
+   * and a stale pinned key id — the tenant self-rotated, or the key expired —
+   * recovers by re-adopting the live `cloud-merchant` lineage instead of
+   * failing forever.
    */
-  public async rotateCredentials(environmentId: string): Promise<ProvisionedRuntime> {
+  public async rotateCredentials(
+    environmentId: string,
+    options: EnvironmentCredentialRotationOptions | { subject?: undefined } = {}
+  ): Promise<ProvisionedRuntime & { replaced_api_key_expires_at?: string }> {
+    const previous = this.rotationQueues.get(environmentId) ?? Promise.resolve();
+    const next = previous.then(
+      () => this.rotateCredentialsExclusive(environmentId, options),
+      () => this.rotateCredentialsExclusive(environmentId, options)
+    );
+    this.rotationQueues.set(environmentId, next.then(() => undefined, () => undefined));
+    return next;
+  }
+
+  private async rotateCredentialsExclusive(
+    environmentId: string,
+    options: EnvironmentCredentialRotationOptions | { subject?: undefined }
+  ): Promise<ProvisionedRuntime & { replaced_api_key_expires_at?: string }> {
     const entry = this.running.get(environmentId);
     if (!entry) {
       throw new Error(`No running data-plane runtime exists for ${environmentId}`);
     }
-    const rotated = await entry.access.rotateApiKey(
-      { key_id: entry.runtime.merchant_api_key_id },
-      entry.access.rootPrincipal()
-    );
+    // Attribute tenant-side audit entries to the acting cloud operator.
+    const principal: TenantPrincipal = options.subject
+      ? { ...entry.access.rootPrincipal(), actor_id: `cloud:${options.subject}` }
+      : entry.access.rootPrincipal();
+    const overlap = "overlap_seconds" in options && options.overlap_seconds !== undefined
+      ? { overlap_seconds: options.overlap_seconds }
+      : {};
+    let rotated;
+    try {
+      rotated = await entry.access.rotateApiKey(
+        { key_id: entry.runtime.merchant_api_key_id, ...overlap },
+        principal
+      );
+    } catch (error) {
+      // Validation problems (for example a bad overlap) are the caller's to
+      // fix; only a dead pinned key falls back to lineage recovery.
+      if (error instanceof EngineError && error.code === "validation_failed") throw error;
+      rotated = await this.adoptMerchantLineage(entry.access, principal, overlap);
+    }
     const runtime: ProvisionedRuntime = {
       ...entry.runtime,
       merchant_api_key: rotated.secret,
@@ -231,7 +291,41 @@ export class LocalDataPlaneProvisioner implements CloudProvisioner {
     };
     await this.writeCredentials(runtime);
     this.running.set(environmentId, { ...entry, runtime });
-    return { ...runtime };
+    return {
+      ...runtime,
+      ...(rotated.replaced_api_key?.expires_at
+        ? { replaced_api_key_expires_at: rotated.replaced_api_key.expires_at }
+        : {})
+    };
+  }
+
+  /**
+   * Re-adopts the tenant's live `cloud-merchant` lineage: rotate the standing
+   * (no-expiry) key when one exists; otherwise mint a fresh owner key — the
+   * recovery path for self-rotated, expired, or lost credentials. Overlap
+   * remnants (active but expiry-bounded keys) age out on their own, keeping
+   * at most one standing lineage alive.
+   */
+  private async adoptMerchantLineage(
+    access: AccessControlService,
+    principal: TenantPrincipal,
+    overlap: { overlap_seconds?: number } = {}
+  ): Promise<{
+    api_key: { key_id: string; expires_at?: string };
+    secret: string;
+    replaced_api_key?: { expires_at?: string };
+  }> {
+    const standing = access.snapshot().api_keys.find((key) =>
+      key.name === MERCHANT_KEY_NAME && key.active && !key.expires_at
+    );
+    if (standing) {
+      return access.rotateApiKey({ key_id: standing.key_id, ...overlap }, principal);
+    }
+    const minted = await access.createApiKey(
+      { name: MERCHANT_KEY_NAME, role: "owner" },
+      principal
+    );
+    return { api_key: minted.api_key, secret: minted.secret };
   }
 
   public async close(): Promise<void> {
@@ -277,21 +371,6 @@ export class LocalDataPlaneProvisioner implements CloudProvisioner {
           seed: false,
           webhooks: []
         });
-    let merchantApiKey = options.merchantApiKey;
-    let merchantApiKeyId = options.merchantApiKeyId;
-    if (!merchantApiKey || !merchantApiKeyId) {
-      try {
-        const minted = await platform.access.createApiKey(
-          { name: MERCHANT_KEY_NAME, role: "owner" },
-          platform.access.rootPrincipal()
-        );
-        merchantApiKey = minted.secret;
-        merchantApiKeyId = minted.api_key.key_id;
-      } catch (error) {
-        await Promise.resolve(platform.close());
-        throw error;
-      }
-    }
     let server;
     try {
       server = await startReferenceServer(platform.engine, {
@@ -320,6 +399,28 @@ export class LocalDataPlaneProvisioner implements CloudProvisioner {
       await Promise.resolve(platform.close());
       throw error;
     }
+    // The merchant key is minted only after the runtime is actually up: a
+    // failed server start must never leave an orphaned owner key behind.
+    let merchantApiKey = options.merchantApiKey;
+    let merchantApiKeyId = options.merchantApiKeyId;
+    let adoptedKeyId: string | undefined;
+    if (!merchantApiKey || !merchantApiKeyId) {
+      try {
+        // Re-adopt the persisted lineage (rotate) when one exists — a lost
+        // credentials file must not accumulate parallel owner keys.
+        const adopted = await this.adoptMerchantLineage(
+          platform.access,
+          platform.access.rootPrincipal()
+        );
+        merchantApiKey = adopted.secret;
+        merchantApiKeyId = adopted.api_key.key_id;
+        adoptedKeyId = adopted.api_key.key_id;
+      } catch (error) {
+        await server.close();
+        await Promise.resolve(platform.close());
+        throw error;
+      }
+    }
     const apiUrl = `http://${publicHost}:${port}`;
     const runtime: ProvisionedRuntime = {
       environment_id: environment.environment_id,
@@ -340,6 +441,20 @@ export class LocalDataPlaneProvisioner implements CloudProvisioner {
       await this.writeCredentials(runtime);
       await this.savePortRegistry();
     } catch (error) {
+      // Compensation: a credential that was never persisted or handed out
+      // must not survive as a live orphan key.
+      if (adoptedKeyId) {
+        try {
+          await platform.access.revokeApiKey(adoptedKeyId, platform.access.rootPrincipal());
+        } catch (revokeError) {
+          console.error(JSON.stringify({
+            event: "cloud_merchant_key_revocation_failed",
+            environment_id: environment.environment_id,
+            key_id: adoptedKeyId,
+            message: revokeError instanceof Error ? revokeError.message : String(revokeError)
+          }));
+        }
+      }
       await server.close();
       await Promise.resolve(platform.close());
       throw error;
@@ -369,11 +484,20 @@ export class LocalDataPlaneProvisioner implements CloudProvisioner {
       merchant_api_key_id: runtime.merchant_api_key_id,
       port: runtime.port
     };
+    // Atomic replace (temp file + rename): a crash mid-write must never leave
+    // a truncated or corrupted credentials file behind.
+    const tempPath = `${runtime.credentials_path}.tmp`;
     await writeFile(
-      runtime.credentials_path,
+      tempPath,
       `${JSON.stringify(credential, undefined, 2)}\n`,
       { mode: 0o600 }
     );
+    try {
+      await rename(tempPath, runtime.credentials_path);
+    } catch (error) {
+      await rm(tempPath, { force: true }).catch(() => undefined);
+      throw error;
+    }
   }
 
   private async allocatePort(environmentId: string, preferred?: number): Promise<number> {

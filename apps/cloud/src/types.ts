@@ -167,7 +167,23 @@ export interface RotatedEnvironmentCredentials {
   admin_url: string;
   merchant_api_key: string;
   merchant_api_key_id: string;
+  /** When the replaced key stops working (absent when nothing was replaced). */
+  replaced_api_key_expires_at?: string;
   rotated_at: string;
+}
+
+/**
+ * What a data-plane rotation hook must return: the rotated credential without
+ * the control-plane timestamp (the control plane stamps `rotated_at` itself).
+ */
+export type EnvironmentCredentialRotation = Omit<RotatedEnvironmentCredentials, "rotated_at">;
+
+/** Options the control plane threads into a data-plane rotation hook. */
+export interface EnvironmentCredentialRotationOptions {
+  /** Operator subject, recorded as `cloud:<subject>` in tenant-side audit. */
+  subject: string;
+  /** Replaced-key validity after rotation, 0..604800 s. Defaults to 24 h. */
+  overlap_seconds?: number;
 }
 
 export interface CloudDashboard {

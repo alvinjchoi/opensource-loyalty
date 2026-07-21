@@ -11,6 +11,8 @@ import { CloudControlPlane, CloudError } from "./service.js";
 import type {
   CloudPrincipal,
   CloudRole,
+  EnvironmentCredentialRotation,
+  EnvironmentCredentialRotationOptions,
   EnvironmentKind,
   UsageMetric
 } from "./types.js";
@@ -26,15 +28,10 @@ export interface CloudServerOptions {
    * (PLA-416). When absent the route answers 409
    * credential_rotation_unavailable.
    */
-  rotateEnvironmentCredentials?: (environmentId: string) => Promise<{
-    environment_id: string;
-    tenant_id: string;
-    program_id: string;
-    api_url: string;
-    admin_url: string;
-    merchant_api_key: string;
-    merchant_api_key_id: string;
-  }>;
+  rotateEnvironmentCredentials?: (
+    environmentId: string,
+    options: EnvironmentCredentialRotationOptions
+  ) => Promise<EnvironmentCredentialRotation>;
 }
 
 export interface RunningCloudServer {
@@ -384,11 +381,17 @@ export function createCloudServer(
         /^\/cloud\/v1\/environments\/([^/]+)\/credentials\/rotate$/
       );
       if (environmentRotateId && method === "POST") {
+        const body = await readBody(request);
+        const overlap = body["overlap_seconds"];
+        if (overlap !== undefined && typeof overlap !== "number") {
+          throw new CloudError(422, "validation_failed", "overlap_seconds must be a number");
+        }
         sendJson(response, 200, {
           data: await controlPlane.rotateEnvironmentCredentials(
             actor,
             environmentRotateId,
-            options.rotateEnvironmentCredentials
+            options.rotateEnvironmentCredentials,
+            typeof overlap === "number" ? { overlap_seconds: overlap } : {}
           )
         }, headers);
         return;

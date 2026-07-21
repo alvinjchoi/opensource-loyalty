@@ -120,6 +120,17 @@ describe("provisionTenant", () => {
     }
   });
 
+  it("rejects an invalid webhook configuration before touching the control plane", async () => {
+    await expect(provisionTenant(target("http://127.0.0.1:9"), {
+      ...request(),
+      webhook: { url: "https://hooks.example.com/loyalty", secret: "short" }
+    })).rejects.toThrow(/16/);
+    await expect(provisionTenant(target("http://127.0.0.1:9"), {
+      ...request(),
+      webhook: { url: "ftp://hooks.example.com/loyalty", secret: "a-webhook-secret-16ch" }
+    })).rejects.toThrow(/HTTP/i);
+  });
+
   it("surfaces control-plane authentication failures", async () => {
     const { url, close } = await fixture();
     try {
@@ -139,18 +150,26 @@ describe("rotateTenantCredentials", () => {
   it("returns the fresh merchant credential from the rotation endpoint", async () => {
     const repository = new MemoryCloudRepository();
     const cloud = new CloudControlPlane({ repository, regions: ["us-east-1"] });
+    const rotateCalls: Array<{
+      environmentId: string;
+      options: { subject: string; overlap_seconds?: number };
+    }> = [];
     const running = await startCloudServer(cloud, {
       apiKey,
       port: 0,
-      rotateEnvironmentCredentials: async (environmentId) => ({
-        environment_id: environmentId,
-        tenant_id: "tenant_rotated",
-        program_id: "demo-rewards",
-        api_url: "http://data-plane.internal:13999",
-        admin_url: "http://data-plane.internal:13999/admin/",
-        merchant_api_key: "lip_sk_rotated_merchant_secret",
-        merchant_api_key_id: "key_rotated"
-      })
+      rotateEnvironmentCredentials: async (environmentId, options) => {
+        rotateCalls.push({ environmentId, options });
+        return {
+          environment_id: environmentId,
+          tenant_id: "tenant_rotated",
+          program_id: "demo-rewards",
+          api_url: "http://data-plane.internal:13999",
+          admin_url: "http://data-plane.internal:13999/admin/",
+          merchant_api_key: "lip_sk_rotated_merchant_secret",
+          merchant_api_key_id: "key_rotated",
+          replaced_api_key_expires_at: "2099-01-01T00:00:00.000Z"
+        };
+      }
     });
     const worker = new CloudProvisioningWorker({
       repository,
@@ -180,8 +199,20 @@ describe("rotateTenantCredentials", () => {
         tenant_id: "tenant_rotated",
         merchant_api_key: "lip_sk_rotated_merchant_secret",
         merchant_api_key_id: "key_rotated",
+        replaced_api_key_expires_at: "2099-01-01T00:00:00.000Z",
         rotated_at: expect.any(String)
       });
+      // The operator subject is threaded down for tenant-side attribution.
+      expect(rotateCalls.at(-1)?.options.subject).toBe("operator_biz_manager");
+      expect(rotateCalls.at(-1)?.options.overlap_seconds).toBeUndefined();
+
+      // An explicit overlap (emergency cutover) reaches the data plane.
+      await rotateTenantCredentials(
+        target(running.url),
+        provisioned.environment_id,
+        { overlapSeconds: 0 }
+      );
+      expect(rotateCalls.at(-1)?.options.overlap_seconds).toBe(0);
 
       await expect(rotateTenantCredentials(target(running.url), "env_unknown"))
         .rejects.toMatchObject({ status: 404 });
