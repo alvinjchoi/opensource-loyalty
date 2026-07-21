@@ -6,6 +6,7 @@ import {
 } from "node:crypto";
 import { EngineError } from "@loyalty-interchange/reference";
 import type { AsyncStateStore } from "@loyalty-interchange/storage";
+import { assertLocationId } from "./location-ids.js";
 
 export type TenantRole = "owner" | "admin" | "operator" | "developer" | "viewer" | "integration";
 export type TenantPermission =
@@ -128,8 +129,9 @@ function now(): string {
 
 /**
  * Normalizes an optional allowed-location list: trims entries, removes
- * duplicates, and rejects lists that resolve to nothing (an empty scope would
- * silently lock the principal out of every scoped view).
+ * duplicates, validates each id against the protocol id constraints, and
+ * rejects lists that resolve to nothing (an empty scope would silently lock
+ * the principal out of every scoped view).
  */
 function normalizeAllowedLocationIds(input: string[] | undefined): string[] | undefined {
   if (input === undefined) return undefined;
@@ -140,6 +142,9 @@ function normalizeAllowedLocationIds(input: string[] | undefined): string[] | un
       "allowed_location_ids must contain at least one non-empty location id",
       422
     );
+  }
+  for (const locationId of normalized) {
+    assertLocationId(locationId, "allowed_location_ids entries");
   }
   return normalized;
 }
@@ -274,7 +279,8 @@ export class AccessControlService {
     name?: string;
     role: TenantRole;
     active?: boolean;
-    allowed_location_ids?: string[];
+    /** Omit to preserve the stored scope; null clears it explicitly. */
+    allowed_location_ids?: string[] | null;
   }, principal: TenantPrincipal): Promise<TenantUser> {
     this.requirePermission(principal, "access:manage");
     const email = input.email.trim().toLowerCase();
@@ -282,7 +288,6 @@ export class AccessControlService {
       throw new EngineError("validation_failed", "A valid user email is required", 422);
     }
     this.assertRole(input.role);
-    const allowedLocationIds = normalizeAllowedLocationIds(input.allowed_location_ids);
     const timestamp = now();
     const userId = input.user_id ?? `user_${randomUUID()}`;
     const existing = this.state.users.find((user) => user.user_id === userId);
@@ -290,6 +295,12 @@ export class AccessControlService {
       user.user_id !== userId && user.email === email
     );
     if (duplicate) throw new EngineError("conflict", "User email already exists", 409);
+    const allowedLocationIds = input.allowed_location_ids === undefined
+      ? existing?.allowed_location_ids
+      : input.allowed_location_ids === null
+        ? undefined
+        : normalizeAllowedLocationIds(input.allowed_location_ids);
+    this.assertWithinPrincipalScope(principal, allowedLocationIds);
     const user: TenantUser = {
       user_id: userId,
       tenant_id: this.state.tenant.tenant_id,
@@ -314,7 +325,9 @@ export class AccessControlService {
       active: user.active,
       ...(user.allowed_location_ids
         ? { allowed_location_ids: user.allowed_location_ids }
-        : {})
+        : input.allowed_location_ids === null
+          ? { allowed_location_ids: null }
+          : {})
     });
     return structuredClone(user);
   }
@@ -341,6 +354,7 @@ export class AccessControlService {
       throw new EngineError("validation_failed", "API key expiration must be in the future", 422);
     }
     const allowedLocationIds = normalizeAllowedLocationIds(input.allowed_location_ids);
+    this.assertWithinPrincipalScope(principal, allowedLocationIds);
     const secret = `lip_sk_${randomBytes(32).toString("base64url")}`;
     const timestamp = now();
     const key: TenantApiKey = {
@@ -416,6 +430,37 @@ export class AccessControlService {
 
   public async close(): Promise<void> {
     await this.store.close();
+  }
+
+  /**
+   * A location-scoped principal may only grant access that stays inside its
+   * own scope: the effective scope of any user or API key it creates or
+   * updates must be a non-empty subset of the creator's. Unscoped creators
+   * are unrestricted.
+   */
+  private assertWithinPrincipalScope(
+    principal: TenantPrincipal,
+    allowedLocationIds: string[] | undefined
+  ): void {
+    const creatorScope = this.locationScopeFor(principal);
+    if (!creatorScope) return;
+    if (!allowedLocationIds || allowedLocationIds.length === 0) {
+      throw new EngineError(
+        "forbidden",
+        "A location-scoped principal must grant a non-empty subset of its own location scope",
+        403
+      );
+    }
+    const escaped = allowedLocationIds.filter((locationId) =>
+      !creatorScope.includes(locationId)
+    );
+    if (escaped.length > 0) {
+      throw new EngineError(
+        "forbidden",
+        `Locations outside the caller's scope: ${escaped.join(", ")}`,
+        403
+      );
+    }
   }
 
   private requirePermission(

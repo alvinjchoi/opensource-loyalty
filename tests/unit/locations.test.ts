@@ -35,20 +35,38 @@ describe("location directory", () => {
       });
       await first.upsertLocation({
         location_id: "location-77",
-        name: "Airport Kiosk"
+        name: "Airport Kiosk",
+        franchisee_id: "franchisee-9"
       }, "test-admin");
 
+      // A partial update that omits franchisee_id must preserve the owner.
       const retired = await first.upsertLocation({
         location_id: "location-77",
         name: "Airport Kiosk",
         active: false
       }, "test-admin");
       expect(retired).toMatchObject({ active: false, created_at: expect.any(String) });
-      expect(retired.franchisee_id).toBeUndefined();
+      expect(retired.franchisee_id).toBe("franchisee-9");
+
+      // Only an explicit null clears the franchisee attribution.
+      const released = await first.upsertLocation({
+        location_id: "location-77",
+        name: "Airport Kiosk",
+        franchisee_id: null
+      }, "test-admin");
+      expect(released.franchisee_id).toBeUndefined();
 
       await expect(first.upsertLocation({
         location_id: "  ",
         name: "Nameless"
+      }, "test-admin")).rejects.toThrowError(/location_id/);
+      await expect(first.upsertLocation({
+        location_id: "bad id!",
+        name: "Invalid id"
+      }, "test-admin")).rejects.toThrowError(/location_id/);
+      await expect(first.upsertLocation({
+        location_id: `x${"y".repeat(128)}`,
+        name: "Too long"
       }, "test-admin")).rejects.toThrowError(/location_id/);
       await expect(first.upsertLocation({
         location_id: "location-99",
@@ -70,6 +88,13 @@ describe("location directory", () => {
         expect.arrayContaining(["location.upserted"])
       );
       expect(snapshot.audit[0]).toMatchObject({ actor: "test-admin" });
+      // Audit entries surface the attribution fields so ownership changes are visible.
+      const creationAudit = [...snapshot.audit].reverse()
+        .find((entry) => entry.location_id === "location-42");
+      expect(creationAudit?.metadata).toMatchObject({
+        active: true,
+        franchisee_id: "franchisee-7"
+      });
 
       await second.removeLocation("location-77", "test-admin");
       expect(second.snapshot().locations.map(({ location_id }) => location_id))

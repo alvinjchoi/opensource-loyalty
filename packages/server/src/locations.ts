@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { EngineError } from "@loyalty-interchange/reference";
 import type { AsyncStateStore } from "@loyalty-interchange/storage";
+import { assertLocationId } from "./location-ids.js";
 
 export interface LocationEntry {
   location_id: string;
@@ -17,6 +18,8 @@ export interface LocationAuditEntry {
   action: "location.upserted" | "location.removed";
   actor: string;
   occurred_at: string;
+  /** Attribution fields at the time of the change (upserts only). */
+  metadata?: Record<string, unknown>;
 }
 
 export interface LocationDirectoryState {
@@ -96,22 +99,28 @@ export class LocationDirectoryService {
   public async upsertLocation(input: {
     location_id: string;
     name: string;
-    franchisee_id?: string;
+    /** Omit to preserve the stored franchisee; null clears it explicitly. */
+    franchisee_id?: string | null;
     active?: boolean;
   }, actor: string): Promise<LocationEntry> {
     const locationId = input.location_id.trim();
     if (!locationId) {
       throw new EngineError("validation_failed", "A non-empty location_id is required", 422);
     }
+    assertLocationId(locationId, "location_id");
     const name = input.name.trim();
     if (!name) {
       throw new EngineError("validation_failed", "A non-empty location name is required", 422);
     }
-    const franchiseeId = input.franchisee_id?.trim();
     const timestamp = now();
     const existing = this.state.locations.find((location) =>
       location.location_id === locationId
     );
+    const franchiseeId = input.franchisee_id === undefined
+      ? existing?.franchisee_id
+      : input.franchisee_id === null
+        ? undefined
+        : input.franchisee_id.trim() || undefined;
     const location: LocationEntry = {
       location_id: locationId,
       name,
@@ -130,7 +139,14 @@ export class LocationDirectoryService {
             left.location_id.localeCompare(right.location_id)
           )
     };
-    await this.recordAudit("location.upserted", locationId, actor);
+    await this.recordAudit("location.upserted", locationId, actor, {
+      active: location.active,
+      ...(location.franchisee_id
+        ? { franchisee_id: location.franchisee_id }
+        : input.franchisee_id === null
+          ? { franchisee_id: null }
+          : {})
+    });
     return structuredClone(location);
   }
 
@@ -154,14 +170,16 @@ export class LocationDirectoryService {
   private async recordAudit(
     action: LocationAuditEntry["action"],
     locationId: string,
-    actor: string
+    actor: string,
+    metadata?: Record<string, unknown>
   ): Promise<void> {
     const entry: LocationAuditEntry = {
       audit_id: `location-audit_${randomUUID()}`,
       location_id: locationId,
       action,
       actor,
-      occurred_at: now()
+      occurred_at: now(),
+      ...(metadata ? { metadata: structuredClone(metadata) } : {})
     };
     this.state = {
       ...this.state,

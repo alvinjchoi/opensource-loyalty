@@ -904,6 +904,134 @@ describe("reference HTTP server", () => {
     }
   });
 
+  it("validates scope payloads strictly and confines scoped principals' registry writes", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "lip-scope-writes-"));
+    const databasePath = join(directory, "reference.db");
+    const platform = await createDemoPlatform({
+      databasePath,
+      reset: true,
+      seed: false,
+      program: makeProgram()
+    });
+    const running = await startReferenceServer(platform.engine, {
+      apiKey: "scope-writes-key",
+      persistState: (state) => platform.store.save(state),
+      admin: {
+        programs: platform.programs,
+        campaigns: platform.campaigns,
+        memberships: platform.memberships,
+        access: platform.access,
+        engagement: platform.engagement,
+        locations: platform.locations,
+        storage: platform.store.status
+      }
+    });
+    const root = { authorization: "Bearer scope-writes-key", "content-type": "application/json" };
+    try {
+      // Mixed-type scope arrays are rejected, not silently filtered.
+      const mixedUser = await fetch(`${running.url}/admin/api/v1/access/users`, {
+        method: "PUT",
+        headers: root,
+        body: JSON.stringify({
+          email: "mixed@acme.example",
+          role: "viewer",
+          allowed_location_ids: ["location-42", 7]
+        })
+      });
+      expect(mixedUser.status).toBe(422);
+      const mixedKey = await fetch(`${running.url}/admin/api/v1/access/api-keys`, {
+        method: "POST",
+        headers: root,
+        body: JSON.stringify({
+          name: "Mixed key",
+          role: "viewer",
+          allowed_location_ids: [null]
+        })
+      });
+      expect(mixedKey.status).toBe(422);
+
+      // allowed_location_ids: null clears a user's stored scope over HTTP.
+      const created = await fetch(`${running.url}/admin/api/v1/access/users`, {
+        method: "PUT",
+        headers: root,
+        body: JSON.stringify({
+          email: "clearable@acme.example",
+          role: "viewer",
+          allowed_location_ids: ["location-42"]
+        })
+      });
+      expect(created.status).toBe(200);
+      const createdUser = await created.json() as { user_id: string };
+      const clearedResponse = await fetch(`${running.url}/admin/api/v1/access/users`, {
+        method: "PUT",
+        headers: root,
+        body: JSON.stringify({
+          user_id: createdUser.user_id,
+          email: "clearable@acme.example",
+          role: "viewer",
+          allowed_location_ids: null
+        })
+      });
+      expect(clearedResponse.status).toBe(200);
+      const cleared = await clearedResponse.json() as { allowed_location_ids?: string[] };
+      expect(cleared.allowed_location_ids).toBeUndefined();
+
+      // Registry writes validate location_id against protocol id constraints.
+      const badId = await fetch(`${running.url}/admin/api/v1/locations`, {
+        method: "PUT",
+        headers: root,
+        body: JSON.stringify({ location_id: "bad id!", name: "Invalid" })
+      });
+      expect(badId.status).toBe(422);
+
+      // A scoped principal may only touch registry rows inside its scope.
+      await fetch(`${running.url}/admin/api/v1/locations`, {
+        method: "PUT",
+        headers: root,
+        body: JSON.stringify({ location_id: "location-99", name: "HQ Pilot" })
+      });
+      const scopedOperator = await platform.access.createApiKey({
+        name: "Franchisee 42 operator",
+        role: "operator",
+        allowed_location_ids: ["location-42"]
+      }, platform.access.rootPrincipal());
+      const scoped = {
+        authorization: `Bearer ${scopedOperator.secret}`,
+        "content-type": "application/json"
+      };
+      const insideScope = await fetch(`${running.url}/admin/api/v1/locations`, {
+        method: "PUT",
+        headers: scoped,
+        body: JSON.stringify({ location_id: "location-42", name: "Downtown Drive-Thru" })
+      });
+      expect(insideScope.status).toBe(200);
+      const outsideScope = await fetch(`${running.url}/admin/api/v1/locations`, {
+        method: "PUT",
+        headers: scoped,
+        body: JSON.stringify({ location_id: "location-99", name: "Hijacked" })
+      });
+      expect(outsideScope.status).toBe(403);
+      const outsideDelete = await fetch(`${running.url}/admin/api/v1/locations/delete`, {
+        method: "POST",
+        headers: scoped,
+        body: JSON.stringify({ location_id: "location-99" })
+      });
+      expect(outsideDelete.status).toBe(403);
+      const insideDelete = await fetch(`${running.url}/admin/api/v1/locations/delete`, {
+        method: "POST",
+        headers: scoped,
+        body: JSON.stringify({ location_id: "location-42" })
+      });
+      expect(insideDelete.status).toBe(200);
+      expect(platform.locations.snapshot().locations.map(({ location_id }) => location_id))
+        .toEqual(["location-99"]);
+    } finally {
+      await running.close();
+      await platform.close();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it("manages the location registry and serves location-scoped reports", async () => {
     const directory = mkdtempSync(join(tmpdir(), "lip-location-admin-"));
     const databasePath = join(directory, "reference.db");

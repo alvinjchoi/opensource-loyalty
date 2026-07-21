@@ -523,6 +523,34 @@ async function serveAdminAsset(
   }
 }
 
+/**
+ * Coerces an `allowed_location_ids` request field. Omitted fields pass
+ * through, `null` clears the scope where the endpoint supports clearing, and
+ * arrays must contain only strings — mixed-type arrays are rejected with 422
+ * instead of being silently filtered.
+ */
+function readAllowedLocationIds(
+  value: unknown,
+  options: { allowNull: boolean }
+): string[] | null | undefined {
+  if (value === undefined) return undefined;
+  if (value === null && options.allowNull) return null;
+  if (
+    Array.isArray(value) &&
+    value.every((entry): entry is string => typeof entry === "string")
+  ) {
+    return [...value];
+  }
+  throw new TransportError(
+    422,
+    "validation_failed",
+    "Request validation failed",
+    options.allowNull
+      ? "allowed_location_ids must be an array of strings, or null to clear the scope"
+      : "allowed_location_ids must be an array of strings"
+  );
+}
+
 function problem(status: number, title: string, code: string, detail?: string): ProblemDetails {
   return {
     type: `https://loyalty-interchange.org/problems/${code}`,
@@ -1182,18 +1210,18 @@ export function createReferenceServer(engine: LoyaltyEngine, options: ServerOpti
               "email and role are required"
             );
           }
+          const allowedLocationIds = readAllowedLocationIds(
+            values["allowed_location_ids"],
+            { allowNull: true }
+          );
           sendJson(response, 200, await access.upsertUser({
             ...(typeof values["user_id"] === "string" ? { user_id: values["user_id"] } : {}),
             email: values["email"],
             role: values["role"] as TenantRole,
             ...(typeof values["name"] === "string" ? { name: values["name"] } : {}),
             ...(typeof values["active"] === "boolean" ? { active: values["active"] } : {}),
-            ...(Array.isArray(values["allowed_location_ids"])
-              ? {
-                  allowed_location_ids: values["allowed_location_ids"].filter(
-                    (value): value is string => typeof value === "string"
-                  )
-                }
+            ...(allowedLocationIds !== undefined
+              ? { allowed_location_ids: allowedLocationIds }
               : {})
           }, principal));
           return;
@@ -1207,19 +1235,17 @@ export function createReferenceServer(engine: LoyaltyEngine, options: ServerOpti
               "name and role are required"
             );
           }
+          const allowedLocationIds = readAllowedLocationIds(
+            values["allowed_location_ids"],
+            { allowNull: false }
+          );
           sendJson(response, 201, await access.createApiKey({
             name: values["name"],
             role: values["role"] as TenantRole,
             ...(typeof values["expires_at"] === "string"
               ? { expires_at: values["expires_at"] }
               : {}),
-            ...(Array.isArray(values["allowed_location_ids"])
-              ? {
-                  allowed_location_ids: values["allowed_location_ids"].filter(
-                    (value): value is string => typeof value === "string"
-                  )
-                }
-              : {})
+            ...(allowedLocationIds ? { allowed_location_ids: allowedLocationIds } : {})
           }, principal));
           return;
         }
@@ -1349,6 +1375,17 @@ export function createReferenceServer(engine: LoyaltyEngine, options: ServerOpti
           ? body as Record<string, unknown>
           : {};
         const actor = await adminActor(request, options, adminSessions);
+        // A location-scoped principal may only write registry rows it can see.
+        const assertRegistryWriteInScope = (locationId: string): void => {
+          if (scope && !scope.includes(locationId)) {
+            throw new TransportError(
+              403,
+              "location_scoped_forbidden",
+              "Forbidden",
+              `Location ${locationId} is outside the caller's location scope`
+            );
+          }
+        };
         if (method === "PUT" && path === "/admin/api/v1/locations") {
           if (typeof values["location_id"] !== "string" || typeof values["name"] !== "string") {
             throw new TransportError(
@@ -1358,10 +1395,11 @@ export function createReferenceServer(engine: LoyaltyEngine, options: ServerOpti
               "location_id and name are required"
             );
           }
+          assertRegistryWriteInScope(values["location_id"].trim());
           sendJson(response, 200, await locationDirectory.upsertLocation({
             location_id: values["location_id"],
             name: values["name"],
-            ...(typeof values["franchisee_id"] === "string"
+            ...(typeof values["franchisee_id"] === "string" || values["franchisee_id"] === null
               ? { franchisee_id: values["franchisee_id"] }
               : {}),
             ...(typeof values["active"] === "boolean" ? { active: values["active"] } : {})
@@ -1377,6 +1415,7 @@ export function createReferenceServer(engine: LoyaltyEngine, options: ServerOpti
               "location_id is required"
             );
           }
+          assertRegistryWriteInScope(values["location_id"]);
           await locationDirectory.removeLocation(values["location_id"], actor);
           sendJson(response, 200, { deleted: true });
           return;
