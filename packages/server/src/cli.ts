@@ -97,7 +97,10 @@ const running = await startReferenceServer(platform.engine, {
     requestLogger: (entry) => console.log(JSON.stringify({ event: "http_request", ...entry }))
   }),
   ...("executeEngineOperation" in platform
-    ? { executeEngineOperation: platform.executeEngineOperation }
+    ? {
+        executeEngineOperation: platform.executeEngineOperation,
+        readEngineSnapshot: platform.readEngineSnapshot
+      }
     : { persistState: (state) => platform.store.save(state) }),
   admin: {
     ...(platform.adminAssetRoot ? { assetRoot: platform.adminAssetRoot } : {}),

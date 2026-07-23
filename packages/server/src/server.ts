@@ -111,6 +111,15 @@ export interface ServerOptions {
    * engine revision before the HTTP response is sent.
    */
   executeEngineOperation?: <T>(operation: () => T | Promise<T>) => Promise<T>;
+  /**
+   * Runs a read-only computation against a snapshot of the engine without the
+   * write-path locking of executeEngineOperation. A Postgres deployment wires
+   * this to a lock-free load that hydrates a scratch engine, so polling
+   * report endpoints never stall tenant writes. The snapshot may lag
+   * in-flight mutations by one revision. Optional: when absent, read-only
+   * endpoints fall back to executeEngineOperation (or the live engine).
+   */
+  readEngineSnapshot?: <T>(read: (engine: LoyaltyEngine) => T | Promise<T>) => Promise<T>;
   rateLimit?: false | {
     maxRequests?: number;
     windowMs?: number;
@@ -1432,10 +1441,21 @@ export function createReferenceServer(engine: LoyaltyEngine, options: ServerOpti
         if (method === "GET" && path === "/admin/api/v1/reports/locations") {
           const registry = locationDirectory.listLocations();
           const reportOptions = { locations: registry, ...(scope ? { scope } : {}) };
-          const report = options.executeEngineOperation
-            ? await options.executeEngineOperation(() => locationReport(engine, reportOptions))
-            : locationReport(engine, reportOptions);
-          if (!options.executeEngineOperation) options.persistState?.(engine.exportState());
+          // Reports are read-only: prefer the lock-free snapshot path when the
+          // platform provides one so polling dashboards never queue behind
+          // tenant writes. The snapshot may lag in-flight mutations by one
+          // revision (see docs/postgres.md).
+          const report = options.readEngineSnapshot
+            ? await options.readEngineSnapshot((snapshot) => locationReport(snapshot, reportOptions))
+            : options.executeEngineOperation
+              ? await options.executeEngineOperation(() => locationReport(engine, reportOptions))
+              : locationReport(engine, reportOptions);
+          // The snapshot path never touches the live engine, so there is
+          // nothing to persist; the demo fallback still saves the expiry side
+          // effects locationReport() applies to the live engine.
+          if (!options.executeEngineOperation && !options.readEngineSnapshot) {
+            options.persistState?.(engine.exportState());
+          }
           sendJson(response, 200, report);
           return;
         }
