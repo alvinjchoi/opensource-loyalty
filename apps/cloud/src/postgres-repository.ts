@@ -7,10 +7,14 @@ import {
   type PoolConfig,
   type QueryResultRow
 } from "pg";
+import { PostgresOperatorStore } from "./postgres-operators.js";
 import {
   CloudRepositoryConflictError,
   type CloudAuditEntry,
   type CloudEnvironment,
+  type CloudOperator,
+  type CloudOperatorApiKey,
+  type CloudOperatorAuditEntry,
   type CloudOrganization,
   type CloudOrganizationInvitation,
   type CloudOrganizationMembership,
@@ -46,6 +50,11 @@ const migrations = [
     version: 4,
     name: "environment_key_fingerprint",
     url: new URL("../migrations/004_environment_key_fingerprint.sql", import.meta.url)
+  },
+  {
+    version: 5,
+    name: "operators",
+    url: new URL("../migrations/005_operators.sql", import.meta.url)
   }
 ] as const;
 
@@ -249,6 +258,7 @@ async function insertAudit(
 export class PostgresCloudRepository implements CloudRepository {
   private readonly pool: Pool;
   private readonly ownsPool: boolean;
+  private readonly operators: PostgresOperatorStore;
 
   public constructor(options: PostgresCloudRepositoryOptions) {
     if (options.pool) {
@@ -263,6 +273,7 @@ export class PostgresCloudRepository implements CloudRepository {
       });
       this.ownsPool = true;
     }
+    this.operators = new PostgresOperatorStore(this.pool);
   }
 
   public async migrate(): Promise<void> {
@@ -802,6 +813,111 @@ export class PostgresCloudRepository implements CloudRepository {
     } finally {
       client.release();
     }
+  }
+
+  public async auditForOrganization(
+    organizationId: string
+  ): Promise<CloudAuditEntry[]> {
+    const result = await this.pool.query(`
+      SELECT *
+      FROM lip_cloud_audit_log
+      WHERE organization_id = $1
+      ORDER BY occurred_at DESC
+    `, [organizationId]);
+    return result.rows.map((row: Record<string, unknown>) => ({
+      audit_id: String(row["audit_id"]),
+      organization_id: String(row["organization_id"]),
+      actor_subject: String(row["actor_subject"]),
+      action: String(row["action"]),
+      resource_type: String(row["resource_type"]),
+      resource_id: String(row["resource_id"]),
+      occurred_at: iso(row["occurred_at"] as Date | string),
+      ...(row["metadata"]
+        ? { metadata: row["metadata"] as Record<string, unknown> }
+        : {})
+    }));
+  }
+
+  public async listOrganizations(): Promise<CloudOrganization[]> {
+    const result = await this.pool.query(
+      "SELECT * FROM lip_cloud_organizations ORDER BY created_at"
+    );
+    return result.rows.map(organization);
+  }
+
+  public async createOperator(input: {
+    operator: CloudOperator;
+    key: CloudOperatorApiKey;
+    audit: CloudOperatorAuditEntry;
+  }): Promise<void> {
+    await this.operators.createOperator(input);
+  }
+
+  public async operatorById(operatorId: string): Promise<CloudOperator | undefined> {
+    return this.operators.operatorById(operatorId);
+  }
+
+  public async operatorBySubject(subject: string): Promise<CloudOperator | undefined> {
+    return this.operators.operatorBySubject(subject);
+  }
+
+  public async listOperators(): Promise<CloudOperator[]> {
+    return this.operators.listOperators();
+  }
+
+  public async countOperators(): Promise<number> {
+    return this.operators.countOperators();
+  }
+
+  public async updateOperator(input: {
+    operatorId: string;
+    active?: boolean;
+    updatedAt: string;
+    audit: CloudOperatorAuditEntry;
+  }): Promise<CloudOperator | undefined> {
+    return this.operators.updateOperator(input);
+  }
+
+  public async operatorApiKeys(operatorId: string): Promise<CloudOperatorApiKey[]> {
+    return this.operators.operatorApiKeys(operatorId);
+  }
+
+  public async createOperatorApiKey(input: {
+    key: CloudOperatorApiKey;
+    audit: CloudOperatorAuditEntry;
+  }): Promise<void> {
+    await this.operators.createOperatorApiKey(input);
+  }
+
+  public async rotateOperatorApiKey(input: {
+    replacement: CloudOperatorApiKey;
+    replacedKeyId: string;
+    replacedExpiresAt: string;
+    audits: CloudOperatorAuditEntry[];
+  }): Promise<void> {
+    await this.operators.rotateOperatorApiKey(input);
+  }
+
+  public async revokeOperatorApiKey(input: {
+    keyId: string;
+    revokedAt: string;
+    audit: CloudOperatorAuditEntry;
+  }): Promise<CloudOperatorApiKey | undefined> {
+    return this.operators.revokeOperatorApiKey(input);
+  }
+
+  public async operatorByApiKeyHash(secretHash: string): Promise<
+    { operator: CloudOperator; api_key: CloudOperatorApiKey } | undefined
+  > {
+    return this.operators.operatorByApiKeyHash(secretHash);
+  }
+
+  public async markOperatorApiKeyUsed(keyId: string, usedAt: string): Promise<void> {
+    await this.operators.markOperatorApiKeyUsed(keyId, usedAt);
+  }
+
+  public async operatorAuditEntries(): Promise<CloudOperatorAuditEntry[]> {
+    return this.operators.operatorAuditEntries();
   }
 
   public async recordUsage(input: {

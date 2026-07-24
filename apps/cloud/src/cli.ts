@@ -3,6 +3,7 @@
 import { hostname } from "node:os";
 import { OidcAuthenticator } from "./auth.js";
 import { LocalDataPlaneProvisioner } from "./data-plane-provisioner.js";
+import { CloudOperatorService } from "./operator-service.js";
 import { PostgresCloudRepository } from "./postgres-repository.js";
 import { CloudProvisioningWorker } from "./provisioning.js";
 import { CloudControlPlane } from "./service.js";
@@ -16,13 +17,29 @@ if (!connectionString) {
   throw new Error("LIP_CLOUD_DATABASE_URL or LIP_DATABASE_URL is required");
 }
 const apiKey = process.env["LIP_CLOUD_API_KEY"];
+const sharedKeyDisabled = ["true", "1"].includes(
+  (process.env["LIP_CLOUD_SHARED_KEY_DISABLED"] ?? "").toLowerCase()
+);
 const oidcIssuer = process.env["LIP_CLOUD_OIDC_ISSUER"];
 const oidcAudience = process.env["LIP_CLOUD_OIDC_AUDIENCE"];
 if (Boolean(oidcIssuer) !== Boolean(oidcAudience)) {
   throw new Error("LIP_CLOUD_OIDC_ISSUER and LIP_CLOUD_OIDC_AUDIENCE must be set together");
 }
-if (!oidcIssuer && (!apiKey || apiKey.length < 16)) {
-  throw new Error("LIP_CLOUD_API_KEY must contain at least 16 characters");
+if (!oidcIssuer && !sharedKeyDisabled && (!apiKey || apiKey.length < 16)) {
+  throw new Error(
+    "LIP_CLOUD_API_KEY must contain at least 16 characters " +
+    "(or set LIP_CLOUD_SHARED_KEY_DISABLED=true to run on operator keys only)"
+  );
+}
+if (apiKey && !sharedKeyDisabled) {
+  console.warn(JSON.stringify({
+    event: "cloud_shared_key_deprecated",
+    message:
+      "LIP_CLOUD_API_KEY is deprecated (PLA-442): bootstrap the first " +
+      "operator with `npm run cloud:operator -- create`, migrate every " +
+      "caller to LIP_CLOUD_OPERATOR_KEY, then set " +
+      "LIP_CLOUD_SHARED_KEY_DISABLED=true"
+  }));
 }
 const authenticator = oidcIssuer && oidcAudience
   ? new OidcAuthenticator({
@@ -38,6 +55,7 @@ const regions = (process.env["LIP_CLOUD_REGIONS"] ?? "us-east-1")
   .map((region) => region.trim())
   .filter(Boolean);
 const repository = new PostgresCloudRepository({ connectionString });
+const operators = new CloudOperatorService({ repository });
 const controlPlane = new CloudControlPlane({
   repository,
   regions,
@@ -94,7 +112,11 @@ if (programDirectory) {
 }
 
 const running = await startCloudServer(controlPlane, {
-  ...(authenticator ? { authenticator } : { apiKey: apiKey! }),
+  ...(authenticator
+    ? { authenticator }
+    : apiKey ? { apiKey } : {}),
+  operators,
+  ...(sharedKeyDisabled ? { sharedKeyDisabled: true } : {}),
   ...(provisioner
     ? {
         rotateEnvironmentCredentials: (

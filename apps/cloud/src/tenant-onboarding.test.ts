@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { MemoryCloudRepository } from "./memory-repository.js";
+import { CloudOperatorService } from "./operator-service.js";
 import { CloudProvisioningWorker } from "./provisioning.js";
 import { CloudControlPlane } from "./service.js";
 import { startCloudServer } from "./server.js";
@@ -8,6 +9,7 @@ import {
   provisionTenant,
   rotateTenantCredentials
 } from "./tenant-onboarding.js";
+import { TRUSTED_GATEWAY_ISSUER } from "./types.js";
 
 const apiKey = "cloud-onboarding-test-key";
 const target = (url: string, overrides: Partial<{ apiKey: string; subject: string }> = {}) => ({
@@ -32,8 +34,9 @@ const request = (overrides: Partial<{ envSlug: string; programId: string }> = {}
 
 async function fixture() {
   const repository = new MemoryCloudRepository();
+  const operators = new CloudOperatorService({ repository });
   const cloud = new CloudControlPlane({ repository, regions: ["us-east-1"] });
-  const running = await startCloudServer(cloud, { apiKey, port: 0 });
+  const running = await startCloudServer(cloud, { apiKey, operators, port: 0 });
   const worker = new CloudProvisioningWorker({
     repository,
     workerId: "onboarding-test-worker",
@@ -55,7 +58,7 @@ async function fixture() {
     await running.close();
     await cloud.close();
   };
-  return { url: running.url, drive, close };
+  return { url: running.url, operators, drive, close };
 }
 
 describe("provisionTenant", () => {
@@ -131,6 +134,34 @@ describe("provisionTenant", () => {
     })).rejects.toThrow(/HTTP/i);
   });
 
+  it("onboards with an operator API key and no subject flag (PLA-442)", async () => {
+    const { url, operators, drive, close } = await fixture();
+    try {
+      const bootstrap = await operators.createOperator(
+        { issuer: TRUSTED_GATEWAY_ISSUER, subject: "bootstrap" },
+        { subject: "onboarding-operator-001", role: "platform-admin" }
+      );
+      const [result] = await Promise.all([
+        provisionTenant(
+          { cloudUrl: url, apiKey: bootstrap.secret },
+          request()
+        ),
+        drive()
+      ]);
+      expect(result.status).toBe("ready");
+      expect(result.created.organization).toBe(true);
+    } finally {
+      await close();
+    }
+  });
+
+  it("still requires an operator subject with the legacy shared key", async () => {
+    await expect(provisionTenant(
+      { cloudUrl: "http://127.0.0.1:9", apiKey },
+      request()
+    )).rejects.toThrow(/subject/i);
+  });
+
   it("surfaces control-plane authentication failures", async () => {
     const { url, close } = await fixture();
     try {
@@ -149,6 +180,7 @@ describe("provisionTenant", () => {
 describe("rotateTenantCredentials", () => {
   it("returns the fresh merchant credential from the rotation endpoint", async () => {
     const repository = new MemoryCloudRepository();
+    const operators = new CloudOperatorService({ repository });
     const cloud = new CloudControlPlane({ repository, regions: ["us-east-1"] });
     const rotateCalls: Array<{
       environmentId: string;
@@ -156,6 +188,7 @@ describe("rotateTenantCredentials", () => {
     }> = [];
     const running = await startCloudServer(cloud, {
       apiKey,
+      operators,
       port: 0,
       rotateEnvironmentCredentials: async (environmentId, options) => {
         rotateCalls.push({ environmentId, options });
@@ -216,6 +249,22 @@ describe("rotateTenantCredentials", () => {
 
       await expect(rotateTenantCredentials(target(running.url), "env_unknown"))
         .rejects.toMatchObject({ status: 404 });
+
+      // Under an operator key the tenant-side attribution subject is the
+      // VERIFIED operator, regardless of any claimed subject.
+      const bootstrap = await operators.createOperator(
+        { issuer: TRUSTED_GATEWAY_ISSUER, subject: "bootstrap" },
+        { subject: "rotation-operator-001", role: "platform-admin" }
+      );
+      await rotateTenantCredentials(
+        {
+          cloudUrl: running.url,
+          apiKey: bootstrap.secret,
+          subject: "claimed-someone-else"
+        },
+        provisioned.environment_id
+      );
+      expect(rotateCalls.at(-1)?.options.subject).toBe("rotation-operator-001");
     } finally {
       worker.close();
       await running.close();

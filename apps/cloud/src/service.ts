@@ -192,10 +192,25 @@ export class CloudControlPlane {
 
   public async organizations(principal: CloudPrincipal): Promise<CloudOrganization[]> {
     this.assertPrincipal(principal);
-    return this.repository.organizationsForPrincipal(
+    if (principal.operator?.role === "platform-admin") {
+      return this.repository.listOrganizations();
+    }
+    const memberships = await this.repository.organizationsForPrincipal(
       principal.issuer,
       principal.subject
     );
+    if (principal.operator?.role !== "org-scoped") return memberships;
+    // Org-scoped operators see their scoped organizations plus any they own
+    // through a real membership, without duplicates.
+    const byId = new Map(memberships.map(
+      (organization) => [organization.organization_id, organization]
+    ));
+    for (const organizationId of principal.operator.organization_ids ?? []) {
+      if (byId.has(organizationId)) continue;
+      const organization = await this.repository.organizationById(organizationId);
+      if (organization) byId.set(organizationId, organization);
+    }
+    return [...byId.values()];
   }
 
   public async members(
@@ -747,20 +762,52 @@ export class CloudControlPlane {
     }
   }
 
+  /**
+   * Resolves the acting membership for an organization. Operators (PLA-442)
+   * synthesize a virtual membership from their verified credential: a
+   * platform-admin acts as owner everywhere; an org-scoped operator acts as
+   * admin inside its scope and sees 404 elsewhere. Everyone else falls back
+   * to the stored membership records.
+   */
   private async requiredMembership(
     principal: CloudPrincipal,
     organizationId: string
   ): Promise<CloudOrganizationMembership> {
     this.assertPrincipal(principal);
+    if (principal.operator?.role === "platform-admin") {
+      return this.virtualMembership(principal, organizationId, "owner");
+    }
     const membership = await this.repository.membership(
       organizationId,
       principal.issuer,
       principal.subject
     );
-    if (!membership?.active) {
-      throw new CloudError(404, "not_found", "Organization was not found");
+    if (membership?.active) return membership;
+    if (
+      principal.operator?.role === "org-scoped" &&
+      principal.operator.organization_ids?.includes(organizationId)
+    ) {
+      return this.virtualMembership(principal, organizationId, "admin");
     }
-    return membership;
+    throw new CloudError(404, "not_found", "Organization was not found");
+  }
+
+  private virtualMembership(
+    principal: CloudPrincipal,
+    organizationId: string,
+    role: CloudRole
+  ): CloudOrganizationMembership {
+    const timestamp = this.clock().toISOString();
+    return {
+      organization_id: organizationId,
+      issuer: principal.issuer,
+      subject: principal.subject,
+      role,
+      active: true,
+      created_at: timestamp,
+      updated_at: timestamp,
+      ...(principal.email ? { email: principal.email } : {})
+    };
   }
 
   private async requireRole(
@@ -812,6 +859,17 @@ export class CloudControlPlane {
     occurredAt: string,
     metadata?: Record<string, unknown>
   ): CloudAuditEntry {
+    // The verified operator id and the untrusted on-behalf-of annotation are
+    // recorded alongside the action so operator activity is attributable.
+    const annotations: Record<string, unknown> = {
+      ...(principal.operator
+        ? { operator_id: principal.operator.operator_id }
+        : {}),
+      ...(principal.on_behalf_of
+        ? { on_behalf_of: principal.on_behalf_of }
+        : {})
+    };
+    const merged = { ...(metadata ?? {}), ...annotations };
     return {
       audit_id: identifier("audit"),
       organization_id: organizationId,
@@ -820,7 +878,7 @@ export class CloudControlPlane {
       resource_type: resourceType,
       resource_id: resourceId,
       occurred_at: occurredAt,
-      ...(metadata ? { metadata } : {})
+      ...(Object.keys(merged).length > 0 ? { metadata: merged } : {})
     };
   }
 }

@@ -61,8 +61,10 @@ environment inside the control-plane process. Each `create` job:
 5. marks the environment `ready` with its reachable `api_url` and `admin_url`.
 
 Merchant credentials are retrieved and rotated through the control plane:
-`POST /cloud/v1/environments/{id}/credentials/rotate` (org owner/admin;
-audited cloud-side, and tenant-side as actor `cloud:<subject>`), with an
+`POST /cloud/v1/environments/{id}/credentials/rotate` (platform-admin
+operator, org-scoped operator covering that org, or org owner/admin;
+audited cloud-side, and tenant-side as actor `cloud:<subject>` where the
+subject is the **verified** operator identity), with an
 optional body `{"overlap_seconds": <0..604800>}` — `0` is an emergency
 immediate cutover; the default keeps the replaced key valid for 24 h. The
 response includes `replaced_api_key_expires_at`, the moment the previous
@@ -71,9 +73,8 @@ required except `--overlap-seconds`; the key comes from the environment,
 never a flag):
 
 ```bash
-LIP_CLOUD_API_KEY=<shared key> npm run cloud:provision -- rotate-credentials \
+LIP_CLOUD_OPERATOR_KEY=lip_ok_... npm run cloud:provision -- rotate-credentials \
   --cloud-url https://<control-plane-host> \
-  --subject <operator subject> \
   --environment env_... \
   [--overlap-seconds 0]
 ```
@@ -197,7 +198,10 @@ npm run cloud:dev
 Configuration:
 
 - `LIP_CLOUD_DATABASE_URL` (falls back to `LIP_DATABASE_URL`)
-- `LIP_CLOUD_API_KEY`
+- `LIP_CLOUD_API_KEY` — **deprecated** shared bootstrap key (PLA-442); see
+  the authentication boundary below
+- `LIP_CLOUD_SHARED_KEY_DISABLED=true` — reject the shared key outright once
+  operators exist
 - `LIP_CLOUD_OIDC_ISSUER`, `LIP_CLOUD_OIDC_AUDIENCE`, and optional
   `LIP_CLOUD_OIDC_JWKS_URI` for direct JWT validation instead of the shared key
 - `LIP_CLOUD_HOST` and `LIP_CLOUD_PORT`
@@ -207,24 +211,47 @@ Configuration:
 
 ## Authentication boundary
 
-Production can validate OIDC access tokens directly. Configure
-`LIP_CLOUD_OIDC_ISSUER` and `LIP_CLOUD_OIDC_AUDIENCE` together; signature,
-issuer, audience, expiry, allowed algorithm, and subject are validated against
-the provider JWKS. Invitation acceptance only uses the email claim when
-`email_verified` is true.
+Since PLA-442 the acting identity on `/cloud/v1` always comes from a
+**verified credential** — never from a caller-chosen header.
 
-For local development or a private identity-aware gateway, configure
-`LIP_CLOUD_API_KEY`. The gateway authenticates the request and forwards:
+**Operator API keys (primary).** Every human or service operating the
+control plane has an operator record (`platform-admin`, or `org-scoped`
+with an explicit organization list) and authenticates with a personal key:
 
 ```http
-Authorization: Bearer <LIP_CLOUD_API_KEY>
-X-LIP-Cloud-Subject: <stable identity provider subject>
-X-LIP-Cloud-Email: <optional normalized email>
+Authorization: Bearer lip_ok_...
 ```
 
-The shared API key authenticates the trusted gateway; the stable subject drives
-organization membership authorization. Do not expose the shared key directly
-to browsers or mobile applications.
+The resolved operator record supplies the subject; keys are sha256-hashed at
+rest, support `expires_at`, and rotate with the same bounded-overlap
+semantics as tenant keys (`POST /cloud/v1/operators/{id}/keys/rotate`,
+platform-admin only; the replacement inherits and can never extend the
+rotated key's expiry). Platform-admins are unrestricted; org-scoped
+operators can only touch their organizations' projects and environments.
+An `X-LIP-Cloud-Subject` header sent alongside an operator key is recorded
+in audit metadata as `on_behalf_of` — it never grants authority.
+
+Bootstrap the first platform-admin with `npm run cloud:operator -- create`
+(authenticated by the legacy shared key exactly once), then migrate every
+caller to `LIP_CLOUD_OPERATOR_KEY`.
+
+**OIDC bearer mode.** Production can validate OIDC access tokens directly.
+Configure `LIP_CLOUD_OIDC_ISSUER` and `LIP_CLOUD_OIDC_AUDIENCE` together;
+signature, issuer, audience, expiry, allowed algorithm, and subject are
+validated against the provider JWKS. Invitation acceptance only uses the
+email claim when `email_verified` is true. When the verified `sub` matches
+an **active operator record**, the token carries that operator's
+role/scope; other verified subjects act as ordinary invitation-based
+organization members.
+
+**Legacy shared key (deprecated, bootstrap only).** The old trusted-gateway
+mode — `Authorization: Bearer <LIP_CLOUD_API_KEY>` plus caller-chosen
+`X-LIP-Cloud-Subject`/`X-LIP-Cloud-Email` headers — still works during the
+migration window, but every non-bootstrap use logs a
+`cloud_shared_key_used` warning, and setting
+`LIP_CLOUD_SHARED_KEY_DISABLED=true` rejects it with
+`401 shared_key_disabled`. Do not expose any control-plane key directly to
+browsers or mobile applications.
 
 ## API
 
@@ -232,6 +259,13 @@ All successful payloads use `{ "data": ... }`; errors use RFC 9457 problem
 details.
 
 - `GET /cloud/v1/plans`
+- `GET|POST /cloud/v1/operators` (platform-admin; POST also serves the
+  one-time shared-key bootstrap)
+- `PATCH /cloud/v1/operators/{operator_id}` (activate/deactivate;
+  the last active platform-admin cannot be deactivated)
+- `POST /cloud/v1/operators/{operator_id}/keys`
+- `POST /cloud/v1/operators/{operator_id}/keys/rotate`
+- `POST /cloud/v1/operators/{operator_id}/keys/revoke`
 - `GET|POST /cloud/v1/organizations`
 - `GET /cloud/v1/organizations/{organization_id}`
 - `GET|POST /cloud/v1/organizations/{organization_id}/projects`
@@ -248,9 +282,7 @@ Example:
 
 ```bash
 curl -X POST http://127.0.0.1:3220/cloud/v1/organizations \
-  -H "Authorization: Bearer $LIP_CLOUD_API_KEY" \
-  -H "X-LIP-Cloud-Subject: user_123" \
-  -H "X-LIP-Cloud-Email: owner@example.com" \
+  -H "Authorization: Bearer $LIP_CLOUD_OPERATOR_KEY" \
   -H "Content-Type: application/json" \
   -d '{"name":"Demo Restaurants","slug":"demo-restaurants"}'
 ```

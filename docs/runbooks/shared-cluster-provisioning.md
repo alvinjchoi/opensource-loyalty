@@ -22,12 +22,15 @@ scope inside the shared database — never a per-brand deployment.
   extension stores cache per-process revisions; webhook journals assume a
   single dispatcher). `render.yaml` pins `numInstances: 1` and the attached
   disk prevents scale-out. Do not raise the instance count.
-- **Auth model (PLA-416).** Two keys are in play:
-  - `LIP_CLOUD_API_KEY` — one shared trusted-gateway key for all
-    control-plane management calls, paired with an `X-LIP-Cloud-Subject`
-    header. Server-side only, never in a browser or app. **WARNING:** any
-    holder of this one key can pick any subject and thereby mint any
-    tenant's merchant key — see the constraints table.
+- **Auth model (PLA-416 + PLA-442).** Two kinds of keys are in play:
+  - Per-operator **control-plane keys** (`lip_ok_...`) — every human or
+    service gets its own operator record (`platform-admin`, or `org-scoped`
+    to specific organizations) and key (hashed at rest, expiring,
+    rotatable). The acting identity is the verified operator; the
+    `X-LIP-Cloud-Subject` header is only an on-behalf-of audit annotation.
+    The legacy shared `LIP_CLOUD_API_KEY` survives solely to bootstrap the
+    first operator and is then disabled — see the cutover steps in
+    section 4½.
   - Per-environment **merchant keys** (`lip_sk_...`) — owner-role,
     tenant-scoped access-control keys bootstrapped at provision time
     (audited, only valid on their own tenant's runtime; the runtime stores
@@ -72,7 +75,9 @@ service. Skip to step 2.
    it reads `render.yaml`.
 2. Fill the `sync: false` secrets when prompted:
    - `LIP_CLOUD_API_KEY`: ≥ 16 random characters (e.g. `openssl rand -base64 24`).
-     Store it in the team password manager.
+     This is only the **bootstrap** credential now — after section 4½ it is
+     disabled and can be deleted. Store it in the team password manager
+     until then.
    - `LIP_CLOUD_ALLOWED_ORIGINS`: the Business Manager origin(s), e.g.
      `https://dashboard.craveup.com`.
 3. Apply. The deploy runs `preDeployCommand: node apps/cloud/dist/migrate-cli.js`
@@ -114,15 +119,20 @@ surface.
 ### 4a. One command (wraps the API)
 
 ```bash
-LIP_CLOUD_API_KEY=<shared key> npm run cloud:provision -- \
+LIP_CLOUD_OPERATOR_KEY=lip_ok_... npm run cloud:provision -- \
   --cloud-url https://<service>.onrender.com \
-  --subject org_<business_manager_org_id> \
   --org-slug demo-restaurants --org-name "Demo Restaurants" \
   --project-slug loyalty --project-name "Loyalty" \
   --env-slug production --env-name "Production" \
   --kind production --region render-oregon \
   --program-id demo-rewards
 ```
+
+(Identity comes from the operator key; add
+`--subject org_<business_manager_org_id>` only as an optional on-behalf-of
+audit annotation. During bootstrap, before any operator exists, the legacy
+`LIP_CLOUD_API_KEY=<shared key>` still works and then `--subject` is
+required.)
 
 Prints `{"event":"tenant_provisioned", "tenant_id":"tenant_...", "status":"ready",
 "api_url":"http://lip-shared-data-plane:13210...", ...}` and exits non-zero on
@@ -134,8 +144,8 @@ org/project/environment); reusing an environment slug with a different
 ### 4b. Raw API calls (what the command does)
 
 ```bash
-H=(-H "Authorization: Bearer $LIP_CLOUD_API_KEY" \
-   -H "X-LIP-Cloud-Subject: org_..." -H "Content-Type: application/json")
+H=(-H "Authorization: Bearer $LIP_CLOUD_OPERATOR_KEY" \
+   -H "Content-Type: application/json")
 BASE=https://<service>.onrender.com
 
 curl "${H[@]}" -X POST $BASE/cloud/v1/organizations \
@@ -159,9 +169,8 @@ Rotation doubles as retrieval — mint the credential the moment you need it
 instead of reading files off the disk:
 
 ```bash
-LIP_CLOUD_API_KEY=<shared key> npm run cloud:provision -- rotate-credentials \
+LIP_CLOUD_OPERATOR_KEY=lip_ok_... npm run cloud:provision -- rotate-credentials \
   --cloud-url https://<service>.onrender.com \
-  --subject org_<business_manager_org_id> \
   --environment <environment_id>
 # {"event":"tenant_credentials_rotated","merchant_api_key":"lip_sk_...",
 #  "replaced_api_key_expires_at":"...", ...}
@@ -169,9 +178,10 @@ LIP_CLOUD_API_KEY=<shared key> npm run cloud:provision -- rotate-credentials \
 
 (Equivalent raw call: `POST $BASE/cloud/v1/environments/<environment_id>/credentials/rotate`
 with the same auth headers as 4b; optional JSON body
-`{"overlap_seconds": <0..604800>}`. Requires org owner/admin; audited
-cloud-side as `cloud.environment.credentials_rotated` and tenant-side as
-actor `cloud:<subject>`.)
+`{"overlap_seconds": <0..604800>}`. Requires a platform-admin operator, an
+org-scoped operator covering that org, or an org owner/admin; audited
+cloud-side as `cloud.environment.credentials_rotated` (metadata carries the
+verified `operator_id`) and tenant-side as actor `cloud:<verified subject>`.)
 
 Copy `merchant_api_key` into the consuming BFF's secrets (`LIP_URL` +
 `LIP_API_KEY` on the Express API's Render service) and into the password
@@ -202,7 +212,7 @@ nothing is ever delivered. Two ways to wire the first one:
   an idempotent re-run against an already-ready environment):
 
   ```bash
-  LIP_CLOUD_API_KEY=<shared key> npm run cloud:provision -- \
+  LIP_CLOUD_OPERATOR_KEY=lip_ok_... npm run cloud:provision -- \
     ... same flags as 4a ... \
     --webhook-url https://bff.example.com/hooks/loyalty \
     --webhook-secret <at least 16 random characters>
@@ -246,6 +256,50 @@ provisioned tenant:
 LIP_DATABASE_URL='<shared postgres url>' LIP_TENANT_ID='<tenant_id>' \
 npm run lip -- state import --program ./demo-rewards.json --input ./archive.json
 ```
+
+## 4½. Operator cutover: retire the shared control-plane key (PLA-442)
+
+Run once per cluster, right after the first deploy (and on existing
+clusters as a migration):
+
+1. **Bootstrap the first platform-admin** with the shared key — the only
+   thing that key is still for:
+
+   ```bash
+   LIP_CLOUD_API_KEY=<shared key> npm run cloud:operator -- create \
+     --cloud-url https://<service>.onrender.com \
+     --subject alvin@craveup.com --email alvin@craveup.com \
+     --role platform-admin
+   ```
+
+   The printed `secret` (`lip_ok_...`) is shown exactly once — store it in
+   the password manager. A second bootstrap attempt with the shared key
+   returns `403 operator_bootstrap_exhausted`.
+2. **Create one operator per human/service** with the platform-admin key.
+   Give automation the narrowest scope that works, e.g. the
+   Business-Manager provisioning worker:
+
+   ```bash
+   LIP_CLOUD_OPERATOR_KEY=lip_ok_... npm run cloud:operator -- create \
+     --cloud-url ... --subject bm-provisioner \
+     --role org-scoped --org-ids org_...,org_...
+   ```
+
+3. **Swap every caller** from `LIP_CLOUD_API_KEY` to its own
+   `LIP_CLOUD_OPERATOR_KEY` (BFF workers, CI, runbook shells). The service
+   logs `cloud_shared_key_used` with the request path for any straggler
+   still on the shared key — watch that signal until it goes quiet.
+4. **Disable the shared key:** set `LIP_CLOUD_SHARED_KEY_DISABLED=true` on
+   the Render service and redeploy. From then on the shared key gets
+   `401 shared_key_disabled`; the boot log stops warning. Delete the shared
+   key from the password manager and the Render env when convenient.
+5. **Operate:** rotate operator keys like tenant keys
+   (`POST /cloud/v1/operators/{id}/keys/rotate`, default 24 h overlap,
+   `overlap_seconds: 0` for emergency cutover; rotation can shorten but
+   never extend an expiry), revoke with `.../keys/revoke`, and offboard by
+   `PATCH /cloud/v1/operators/{id}` `{"active": false}` — the last active
+   platform-admin cannot be deactivated, so the cluster can never strand
+   itself. All lifecycle events land in `lip_cloud_operator_audit`.
 
 ## 5. Backups and point-in-time recovery
 
@@ -329,15 +383,19 @@ failure + health-check alerts to the engineering Slack. Stream logs (Render
 | Constraint | Tracking |
 | --- | --- |
 | One platform instance per tenant → `numInstances: 1`, no horizontal scaling of the shared host | PLA-428 / PLA-429 |
-| **WARNING — single shared control-plane key:** `LIP_CLOUD_API_KEY` plus a caller-chosen `X-LIP-Cloud-Subject` header is the entire management auth. Anyone holding the one shared key can present any subject and therefore mint **any tenant's merchant key** via 4c. Treat the key as a root credential: server-side only, rotate on any suspicion, audit `cloud.environment.credentials_rotated` events for unexpected subjects. Merchant keys are tenant-scoped + rotatable since PLA-416, but per-operator control-plane auth is a tracked follow-up | follow-up: per-operator control-plane credentials |
+| **Per-operator control-plane auth (PLA-442, shipped):** management calls authenticate as individual operators (`lip_ok_` keys or OIDC subjects mapped to operator records); the subject header no longer grants identity. The shared `LIP_CLOUD_API_KEY` is bootstrap-only — run the section 4½ cutover and set `LIP_CLOUD_SHARED_KEY_DISABLED=true`. Until that flag is set on an existing cluster, the legacy shared-key+header mode still works (deprecation-logged), so finish the cutover promptly | done: PLA-442; residual action = section 4½ cutover per cluster |
 | Tenant runtimes are private-network only (one public port per Render service) | follow-up: per-tenant public hostnames or gateway routing |
 | Credentials files still hold the merchant key (and deprecated root key) in **plaintext on disk** (`0600`, atomic writes; rotation shipped, encryption at rest pending) | listed in `docs/cloud.md` "Next production steps" |
 
 ## Owner actions checklist (dashboard-only steps)
 
 1. Render: **New → Blueprint** on this repo/branch; approve the plan.
-2. Render: set `LIP_CLOUD_API_KEY` and `LIP_CLOUD_ALLOWED_ORIGINS` when
-   prompted; save the key to the password manager.
+2. Render: set `LIP_CLOUD_API_KEY` (bootstrap-only) and
+   `LIP_CLOUD_ALLOWED_ORIGINS` when prompted; save the key to the password
+   manager until the section 4½ cutover retires it.
+2½. Run the section 4½ operator cutover: bootstrap the platform-admin
+   operator, create per-human/service operators, swap callers to
+   `LIP_CLOUD_OPERATOR_KEY`, then set `LIP_CLOUD_SHARED_KEY_DISABLED=true`.
 3. (Neon variant only) Create the Neon project, disable autosuspend, set
    history retention, paste both database URLs into the service env.
 4. Render: enable failure/health notifications; optionally add a log stream.
