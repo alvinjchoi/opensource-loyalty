@@ -2,6 +2,9 @@ import {
   CloudRepositoryConflictError,
   type CloudAuditEntry,
   type CloudEnvironment,
+  type CloudOperator,
+  type CloudOperatorApiKey,
+  type CloudOperatorAuditEntry,
   type CloudOrganization,
   type CloudOrganizationInvitation,
   type CloudOrganizationMembership,
@@ -78,6 +81,9 @@ export class MemoryCloudRepository implements CloudRepository {
   private readonly usageEvents = new Set<string>();
   private readonly usageCounters = new Map<string, number>();
   private readonly audit: CloudAuditEntry[] = [];
+  private readonly operators = new Map<string, CloudOperator>();
+  private readonly operatorKeys = new Map<string, CloudOperatorApiKey>();
+  private readonly operatorAudit: CloudOperatorAuditEntry[] = [];
 
   public async migrate(): Promise<void> {}
 
@@ -406,6 +412,141 @@ export class MemoryCloudRepository implements CloudRepository {
 
   public async recordAudit(entry: CloudAuditEntry): Promise<void> {
     this.audit.unshift(clone(entry));
+  }
+
+  public async auditForOrganization(
+    organizationId: string
+  ): Promise<CloudAuditEntry[]> {
+    return this.audit
+      .filter((entry) => entry.organization_id === organizationId)
+      .map(clone);
+  }
+
+  public async createOperator(input: {
+    operator: CloudOperator;
+    key: CloudOperatorApiKey;
+    audit: CloudOperatorAuditEntry;
+  }): Promise<void> {
+    const duplicate = [...this.operators.values()].some(
+      (candidate) => candidate.subject === input.operator.subject
+    );
+    if (duplicate || this.operators.has(input.operator.operator_id)) {
+      throw new CloudRepositoryConflictError("Operator already exists");
+    }
+    this.operators.set(input.operator.operator_id, clone(input.operator));
+    this.operatorKeys.set(input.key.key_id, clone(input.key));
+    this.operatorAudit.unshift(clone(input.audit));
+  }
+
+  public async operatorById(operatorId: string): Promise<CloudOperator | undefined> {
+    const value = this.operators.get(operatorId);
+    return value ? clone(value) : undefined;
+  }
+
+  public async operatorBySubject(subject: string): Promise<CloudOperator | undefined> {
+    const value = [...this.operators.values()].find(
+      (operator) => operator.subject === subject
+    );
+    return value ? clone(value) : undefined;
+  }
+
+  public async listOperators(): Promise<CloudOperator[]> {
+    return [...this.operators.values()].map(clone);
+  }
+
+  public async countOperators(): Promise<number> {
+    return this.operators.size;
+  }
+
+  public async updateOperator(input: {
+    operatorId: string;
+    active?: boolean;
+    updatedAt: string;
+    audit: CloudOperatorAuditEntry;
+  }): Promise<CloudOperator | undefined> {
+    const existing = this.operators.get(input.operatorId);
+    if (!existing) return undefined;
+    const updated: CloudOperator = {
+      ...existing,
+      ...(input.active !== undefined ? { active: input.active } : {}),
+      updated_at: input.updatedAt
+    };
+    this.operators.set(input.operatorId, clone(updated));
+    this.operatorAudit.unshift(clone(input.audit));
+    return clone(updated);
+  }
+
+  public async listOrganizations(): Promise<CloudOrganization[]> {
+    return [...this.organizations.values()].map(clone);
+  }
+
+  public async operatorApiKeys(operatorId: string): Promise<CloudOperatorApiKey[]> {
+    return [...this.operatorKeys.values()]
+      .filter((key) => key.operator_id === operatorId)
+      .map(clone);
+  }
+
+  public async createOperatorApiKey(input: {
+    key: CloudOperatorApiKey;
+    audit: CloudOperatorAuditEntry;
+  }): Promise<void> {
+    this.operatorKeys.set(input.key.key_id, clone(input.key));
+    this.operatorAudit.unshift(clone(input.audit));
+  }
+
+  public async rotateOperatorApiKey(input: {
+    replacement: CloudOperatorApiKey;
+    replacedKeyId: string;
+    replacedExpiresAt: string;
+    audits: CloudOperatorAuditEntry[];
+  }): Promise<void> {
+    const replaced = this.operatorKeys.get(input.replacedKeyId);
+    if (!replaced) throw new Error("Rotated operator key was not found");
+    this.operatorKeys.set(input.replacedKeyId, {
+      ...clone(replaced),
+      expires_at: input.replacedExpiresAt
+    });
+    this.operatorKeys.set(input.replacement.key_id, clone(input.replacement));
+    this.operatorAudit.unshift(...input.audits.map(clone).reverse());
+  }
+
+  public async revokeOperatorApiKey(input: {
+    keyId: string;
+    revokedAt: string;
+    audit: CloudOperatorAuditEntry;
+  }): Promise<CloudOperatorApiKey | undefined> {
+    const existing = this.operatorKeys.get(input.keyId);
+    if (!existing) return undefined;
+    const revoked: CloudOperatorApiKey = {
+      ...clone(existing),
+      active: false,
+      revoked_at: input.revokedAt
+    };
+    this.operatorKeys.set(input.keyId, revoked);
+    this.operatorAudit.unshift(clone(input.audit));
+    return clone(revoked);
+  }
+
+  public async operatorByApiKeyHash(secretHash: string): Promise<
+    { operator: CloudOperator; api_key: CloudOperatorApiKey } | undefined
+  > {
+    const key = [...this.operatorKeys.values()].find(
+      (candidate) => candidate.secret_hash === secretHash
+    );
+    if (!key) return undefined;
+    const operator = this.operators.get(key.operator_id);
+    if (!operator) return undefined;
+    return { operator: clone(operator), api_key: clone(key) };
+  }
+
+  public async markOperatorApiKeyUsed(keyId: string, usedAt: string): Promise<void> {
+    const key = this.operatorKeys.get(keyId);
+    if (!key) return;
+    this.operatorKeys.set(keyId, { ...clone(key), last_used_at: usedAt });
+  }
+
+  public async operatorAuditEntries(): Promise<CloudOperatorAuditEntry[]> {
+    return this.operatorAudit.map(clone);
   }
 
   public async recordUsage(input: {
