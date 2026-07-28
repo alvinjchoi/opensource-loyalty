@@ -28,10 +28,14 @@ const MIRRORED_PAGES: ReadonlyArray<{ source: string; published: string }> = [
   { source: "docs/ai-prompts.md", published: "docs-site/guides/ai-prompts.mdx" },
   { source: "docs/customer-identity.md", published: "docs-site/guides/customer-identity.mdx" },
   { source: "docs/postgres.md", published: "docs-site/guides/postgres.mdx" },
+  // These two pairs carry different file names on each side, which is exactly
+  // why they were missed on the first pass — nothing links them but intent.
+  { source: "docs/punchh-compatibility.md", published: "docs-site/guides/punchh-migration.mdx" },
   { source: "docs/quickstart.md", published: "docs-site/get-started/quickstart.mdx" },
   { source: "docs/reference-platform.md", published: "docs-site/guides/reference-platform.mdx" },
   { source: "docs/typescript-sdk.md", published: "docs-site/guides/typescript-sdk.mdx" },
-  { source: "docs/using-lip-with-ai.md", published: "docs-site/guides/using-lip-with-ai.mdx" }
+  { source: "docs/using-lip-with-ai.md", published: "docs-site/guides/using-lip-with-ai.mdx" },
+  { source: "docs/webhook-delivery.md", published: "docs-site/guides/webhooks.mdx" }
 ];
 
 function changedFiles(since: string): ReadonlySet<string> {

@@ -14,7 +14,7 @@
   },
   "favicon": "/favicon.svg",
   "banner": {
-    "content": "LIP 0.1.0 is on npm — `npx @loyalty-interchange/cli serve`",
+    "content": "LIP 0.1.2 is on npm — `npx @loyalty-interchange/cli serve`",
     "dismissible": true
   },
   "contextual": {

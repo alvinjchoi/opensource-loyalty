@@ -22,8 +22,9 @@ npm run serve
 ```
 
 Startup applies numbered migrations from
-`@loyalty-interchange/storage-postgres`. `LIP_RESET=true` explicitly deletes
-the selected tenant/program engine state before seeding.
+`@loyalty-interchange/storage-postgres`, which is available on npm.
+`LIP_RESET=true` explicitly deletes the selected tenant/program engine state
+before seeding.
 
 ## Data model
 

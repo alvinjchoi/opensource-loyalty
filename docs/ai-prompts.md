@@ -13,6 +13,9 @@ or enable the `lip` MCP server for accurate spec context.
 Before any prompt: start the local sandbox (`npm start` or `npm run lip -- serve`)
 and confirm with `npm run lip -- doctor http://127.0.0.1:3210 --api-key lip-dev-key`.
 
+The prompts reference `@loyalty-interchange/sdk`, published on npm under the
+`@loyalty-interchange` org.
+
 ## Bootstrap a new integration
 
 ```text
