@@ -11,6 +11,29 @@ permissions:
 jobs:
   verify:
     runs-on: ubuntu-latest
+
+    # Postgres-backed tests gate on LIP_TEST_POSTGRES_URL and silently skip
+    # when it is unset. Without this service the storage, platform, cloud
+    # migration, operator-auth SQL, and lock-free report paths are never
+    # exercised anywhere — the suite reports green while skipping them.
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: lip
+          POSTGRES_PASSWORD: lip
+          POSTGRES_DB: lip_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U lip -d lip_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      LIP_TEST_POSTGRES_URL: postgres://lip:lip@127.0.0.1:5432/lip_test
+
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
@@ -20,3 +43,15 @@ jobs:
       - run: npm ci
       - run: npm run verify
       - run: npm run spec:check
+      # Guard against the gated suites going dormant again: re-run the suite
+      # with a JSON reporter and fail if anything was skipped. Cheap (the
+      # suite takes seconds) and it turns a silent regression into a red run.
+      - run: npm run test -- --reporter=json --outputFile="$RUNNER_TEMP/vitest-report.json"
+      - name: Assert no tests were skipped
+        run: |
+          skipped=$(node -p "require('$RUNNER_TEMP/vitest-report.json').numPendingTests ?? 0")
+          echo "skipped tests: $skipped"
+          if [ "$skipped" != "0" ]; then
+            echo "::error::$skipped test(s) skipped — LIP_TEST_POSTGRES_URL is not reaching the suite"
+            exit 1
+          fi
