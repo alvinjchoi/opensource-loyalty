@@ -19,7 +19,7 @@
 > BFF/customer-data layer without ever being provisioned in a managed customer
 > identity platform.
 
-📖 **Documentation: [loyalty-interchange.mintlify.app](https://loyalty-interchange.mintlify.app)** (the guides in [`docs/`](docs/README.md) are the source). Building with an AI coding agent? Start with **[Getting started with AI](#getting-started-with-ai-)**.
+📖 **Documentation: [loyalty-interchange.mintlify.app](https://loyalty-interchange.mintlify.app)** — new here? Start at **[Get started](https://loyalty-interchange.mintlify.app/get-started)**. (The guides in [`docs/`](docs/README.md) are the source.) Building with an AI coding agent? Start with **[Getting started with AI](#getting-started-with-ai-)**.
 
 ## Key Features of LIP ⭐
 
@@ -320,6 +320,8 @@ Developer guides:
 - [API endpoints](docs/api-endpoints.md) — routes, auth, examples, errors, retries, and webhooks
 - [TypeScript SDK](docs/typescript-sdk.md) — SDK operations, errors, money helpers, and order builder
 - [Reference platform](docs/reference-platform.md) — server, Admin, storage, and implementation boundaries
+- [PostgreSQL storage](docs/postgres.md) — multi-instance engine store, location scoping, and the lock-free report path
+- [Cloud control plane](docs/cloud.md) — organizations, projects, environments, provisioning, operator auth, and metering
 - [Punchh compatibility](docs/punchh-compatibility.md) — migration coverage and adapter gaps
 
 Normative specification (canonical when docs and generated artifacts disagree):
