@@ -5,10 +5,12 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { LocalDataPlaneProvisioner, type ProvisionedRuntime } from "./data-plane-provisioner.js";
 import { MemoryCloudRepository } from "./memory-repository.js";
+import { CloudOperatorService } from "./operator-service.js";
 import { CloudProvisioningWorker } from "./provisioning.js";
 import { startCloudServer } from "./server.js";
 import { CloudControlPlane } from "./service.js";
 import { provisionTenant } from "./tenant-onboarding.js";
+import { TRUSTED_GATEWAY_ISSUER } from "./types.js";
 
 const owner = {
   issuer: "https://identity.example.com",
@@ -533,13 +535,15 @@ describe("LocalDataPlaneProvisioner", () => {
     const provisioner = new LocalDataPlaneProvisioner({ programDirectory, dataDirectory });
     const repository = new MemoryCloudRepository();
     const cloud = new CloudControlPlane({ repository });
-    // apiKey-mode HTTP auth stamps the trusted-gateway issuer, so the
-    // operator's membership must be created under that issuer.
-    const operator = {
-      issuer: "urn:lip:trusted-gateway",
-      subject: "rotate-operator-001",
-      email: "rotate-operator@example.com"
-    };
+    // PLA-442: a platform-admin operator key replaces the shared key + subject
+    // header. It carries a verified identity and virtual owner scope on every
+    // organization, so no membership wiring is needed.
+    const operators = new CloudOperatorService({ repository });
+    const admin = await operators.createOperator(
+      { issuer: TRUSTED_GATEWAY_ISSUER, subject: "bootstrap" },
+      { subject: "rotate-operator-001", role: "platform-admin" }
+    );
+    const operator = operators.principalFor(admin.operator);
     const dashboard = await cloud.createOrganization(operator, {
       name: "Rotate Restaurants",
       slug: "rotate-restaurants"
@@ -566,15 +570,14 @@ describe("LocalDataPlaneProvisioner", () => {
     const runtimeBefore = provisioner.runtimes()[0]!;
     const running = await startCloudServer(cloud, {
       apiKey: "cloud-rotate-test-key",
+      operators,
       port: 0,
       rotateEnvironmentCredentials: (environmentId, rotateOptions) =>
         provisioner.rotateCredentials(environmentId, rotateOptions)
     });
     const operatorHeaders = {
-      authorization: "Bearer cloud-rotate-test-key",
-      "content-type": "application/json",
-      "x-lip-cloud-subject": operator.subject,
-      "x-lip-cloud-email": operator.email
+      authorization: `Bearer ${admin.secret}`,
+      "content-type": "application/json"
     };
     close = async () => {
       await running.close();
@@ -655,9 +658,20 @@ describe("LocalDataPlaneProvisioner", () => {
 
     // Authorization failures.
     expect((await fetch(`${running.url}${path}`, { method: "POST" })).status).toBe(401);
+    // PLA-442: a caller-chosen subject can no longer downgrade or widen a
+    // principal, so out-of-scope access is exercised with a real org-scoped
+    // operator whose scope excludes this environment's organization.
+    const outsiderOperator = await operators.createOperator(operator, {
+      subject: "outsider-001",
+      role: "org-scoped",
+      organization_ids: ["org_some_other_tenant"]
+    });
     const outsider = await fetch(`${running.url}${path}`, {
       method: "POST",
-      headers: { ...operatorHeaders, "x-lip-cloud-subject": "outsider-001" }
+      headers: {
+        ...operatorHeaders,
+        authorization: `Bearer ${outsiderOperator.secret}`
+      }
     });
     expect([403, 404]).toContain(outsider.status);
     expect((await fetch(
@@ -668,6 +682,7 @@ describe("LocalDataPlaneProvisioner", () => {
     // Without a wired provisioner the control plane reports the surface unavailable.
     const detached = await startCloudServer(cloud, {
       apiKey: "cloud-rotate-test-key",
+      operators,
       port: 0
     });
     try {
@@ -693,8 +708,10 @@ describe("LocalDataPlaneProvisioner", () => {
       workerId: "worker-webhook-onboarding",
       onError: () => {}
     });
+    const operators = new CloudOperatorService({ repository });
     const running = await startCloudServer(cloud, {
       apiKey: "cloud-webhook-test-key",
+      operators,
       port: 0,
       rotateEnvironmentCredentials: (environmentId, options) =>
         provisioner.rotateCredentials(environmentId, options)
@@ -703,10 +720,14 @@ describe("LocalDataPlaneProvisioner", () => {
       await running.close();
       await provisioner.close();
     };
+    // PLA-442: onboarding authenticates with a platform-admin operator key.
+    const admin = await operators.createOperator(
+      { issuer: TRUSTED_GATEWAY_ISSUER, subject: "bootstrap" },
+      { subject: "webhook-operator-001", role: "platform-admin" }
+    );
     const target = {
       cloudUrl: running.url,
-      apiKey: "cloud-webhook-test-key",
-      subject: "webhook-operator-001"
+      apiKey: admin.secret
     };
     const request = {
       organization: { name: "Hook Restaurants", slug: "hook-restaurants" },

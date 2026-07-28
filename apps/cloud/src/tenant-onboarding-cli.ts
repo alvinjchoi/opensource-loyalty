@@ -4,9 +4,8 @@
  * Operator CLI for onboarding one brand (= one tenant) onto the shared LIP
  * cluster via the control-plane API:
  *
- *   LIP_CLOUD_API_KEY=... npm run cloud:provision -- \
+ *   LIP_CLOUD_OPERATOR_KEY=lip_ok_... npm run cloud:provision -- \
  *     --cloud-url https://lip-cloud.example.com \
- *     --subject org_business_manager_123 \
  *     --org-slug demo-restaurants --org-name "Demo Restaurants" \
  *     --project-slug loyalty --project-name Loyalty \
  *     --env-slug production --env-name Production \
@@ -20,14 +19,17 @@
  * Rotate (or first-retrieve) the merchant credential of a provisioned
  * environment — PLA-416 replaces reading credentials files off the disk:
  *
- *   LIP_CLOUD_API_KEY=... npm run cloud:provision -- rotate-credentials \
+ *   LIP_CLOUD_OPERATOR_KEY=lip_ok_... npm run cloud:provision -- rotate-credentials \
  *     --cloud-url https://lip-cloud.example.com \
- *     --subject org_business_manager_123 \
  *     --environment env_... \
  *     [--overlap-seconds 0]   # emergency cutover: replaced key dies at once
  *
- * The control-plane key comes ONLY from `LIP_CLOUD_API_KEY` (never a flag, to
- * keep it out of shell history); see
+ * Authentication (PLA-442): `LIP_CLOUD_OPERATOR_KEY` (a per-operator
+ * `lip_ok_` key) is required — identity comes from the key, so `--subject` is
+ * optional and purely an on-behalf-of audit annotation. The legacy shared
+ * `LIP_CLOUD_API_KEY` is rejected: it only bootstraps the first operator and
+ * cannot authenticate these commands. Keys come ONLY from the environment
+ * (never a flag, to keep them out of shell history); see
  * docs/runbooks/shared-cluster-provisioning.md.
  */
 
@@ -66,9 +68,26 @@ function required(name: keyof typeof values): string {
   return value.trim();
 }
 
-const apiKey = process.env["LIP_CLOUD_API_KEY"];
+const operatorKey = process.env["LIP_CLOUD_OPERATOR_KEY"];
+const legacyKey = process.env["LIP_CLOUD_API_KEY"];
+const apiKey = operatorKey ?? legacyKey;
 if (!apiKey || apiKey.length < 16) {
-  console.error("LIP_CLOUD_API_KEY (>= 16 characters) is required in the environment");
+  console.error(
+    "LIP_CLOUD_OPERATOR_KEY (lip_ok_..., >= 16 characters) is required in " +
+    "the environment"
+  );
+  process.exit(1);
+}
+// PLA-442: the shared LIP_CLOUD_API_KEY only bootstraps the first operator,
+// so it cannot drive provisioning or rotation. Reject it up front instead of
+// asking for a --subject that would not make the request succeed.
+if (!apiKey.startsWith("lip_ok_")) {
+  console.error(
+    "LIP_CLOUD_OPERATOR_KEY (lip_ok_...) is required: the shared " +
+    "LIP_CLOUD_API_KEY only bootstraps the first operator and cannot " +
+    "authenticate provisioning or rotation. Create an operator with " +
+    "`npm run cloud:operator -- create --subject <you> --role platform-admin`."
+  );
   process.exit(1);
 }
 
@@ -92,7 +111,7 @@ if (command === "rotate-credentials") {
       {
         cloudUrl: required("cloud-url"),
         apiKey,
-        subject: required("subject"),
+        ...(values.subject ? { subject: values.subject } : {}),
         ...(values.email ? { email: values.email } : {})
       },
       required("environment"),
@@ -135,7 +154,7 @@ try {
     {
       cloudUrl: required("cloud-url"),
       apiKey,
-      subject: required("subject"),
+      ...(values.subject ? { subject: values.subject } : {}),
       ...(values.email ? { email: values.email } : {})
     },
     {
@@ -164,7 +183,7 @@ try {
   } else if (result.status === "ready") {
     console.error(
       "[note] Retrieve the merchant API key with: npm run cloud:provision -- " +
-      `rotate-credentials --cloud-url <url> --subject <subject> --environment ${result.environment_id}`
+      `rotate-credentials --cloud-url <url> --environment ${result.environment_id}`
     );
   }
   if (result.status !== "ready" || result.timed_out) process.exit(1);

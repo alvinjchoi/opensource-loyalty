@@ -7,16 +7,96 @@ export type UsageMetric =
   | "loyalty_transactions"
   | "messages";
 
+/** Issuer recorded for legacy shared-key (trusted gateway) principals. */
+export const TRUSTED_GATEWAY_ISSUER = "urn:lip:trusted-gateway";
+
+export type CloudOperatorRole = "platform-admin" | "org-scoped";
+
+/**
+ * Control-plane operator (PLA-442): the verified identity behind /cloud/v1
+ * management calls. Platform-admins are unrestricted; org-scoped operators
+ * may only touch the organizations listed in `organization_ids`.
+ */
+export interface CloudOperator {
+  operator_id: string;
+  /** Stable identity subject; unique across operators. */
+  subject: string;
+  email?: string;
+  role: CloudOperatorRole;
+  /** Present exactly when `role` is org-scoped. */
+  organization_ids?: string[];
+  active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Hashed-at-rest API key credential for one operator. */
+export interface CloudOperatorApiKey {
+  key_id: string;
+  operator_id: string;
+  name: string;
+  prefix: string;
+  active: boolean;
+  created_at: string;
+  expires_at?: string;
+  last_used_at?: string;
+  revoked_at?: string;
+  secret_hash: string;
+}
+
+/** Platform-level audit entry for operator lifecycle events. */
+export interface CloudOperatorAuditEntry {
+  audit_id: string;
+  /** Verified actor subject (or the trusted-gateway issuer at bootstrap). */
+  actor: string;
+  action: string;
+  resource_type: string;
+  resource_id: string;
+  metadata?: Record<string, unknown>;
+  occurred_at: string;
+}
+
 export interface CloudPrincipal {
   issuer: string;
   subject: string;
   email?: string;
+  /** Present when the principal resolved from an operator credential. */
+  operator?: {
+    operator_id: string;
+    role: CloudOperatorRole;
+    organization_ids?: string[];
+  };
+  /**
+   * Untrusted caller annotation (the X-LIP-Cloud-Subject header under
+   * operator auth). Recorded in audit metadata, never used for authorization.
+   */
+  on_behalf_of?: string;
+  /**
+   * Set by the server only for an OIDC-verified subject in the configured
+   * bootstrap allowlist while zero operators exist (PLA-442 fix 3). Authorizes
+   * the one-time creation of the first platform-admin (for this same subject);
+   * inert once any operator record exists.
+   */
+  bootstrap_admin?: boolean;
 }
 
 export class CloudRepositoryConflictError extends Error {
   public constructor(message = "Cloud resource already exists") {
     super(message);
     this.name = "CloudRepositoryConflictError";
+  }
+}
+
+/**
+ * Raised by the repository when deactivating an operator would strand the
+ * control plane by removing its last active platform-admin. The service maps
+ * this to a 409 `operator_lockout`. The guard lives in the repository so the
+ * count-then-deactivate decision is atomic (PLA-442 fix 6).
+ */
+export class LastPlatformAdminError extends Error {
+  public constructor(message = "The last active platform-admin cannot be deactivated") {
+    super(message);
+    this.name = "LastPlatformAdminError";
   }
 }
 
@@ -276,6 +356,58 @@ export interface CloudRepository {
     audit: CloudAuditEntry
   ): Promise<void>;
   recordAudit(entry: CloudAuditEntry): Promise<void>;
+  auditForOrganization(organizationId: string): Promise<CloudAuditEntry[]>;
+  createOperator(input: {
+    operator: CloudOperator;
+    key: CloudOperatorApiKey;
+    audit: CloudOperatorAuditEntry;
+    /**
+     * First-operator bootstrap: serialize the count-then-insert so two
+     * concurrent bootstraps cannot both mint platform-admins (PLA-442 fix 5).
+     * The repository re-checks `countOperators() === 0` atomically and throws
+     * CloudRepositoryConflictError otherwise.
+     */
+    bootstrap?: boolean;
+  }): Promise<void>;
+  operatorById(operatorId: string): Promise<CloudOperator | undefined>;
+  operatorBySubject(subject: string): Promise<CloudOperator | undefined>;
+  listOperators(): Promise<CloudOperator[]>;
+  countOperators(): Promise<number>;
+  updateOperator(input: {
+    operatorId: string;
+    active?: boolean;
+    updatedAt: string;
+    audit: CloudOperatorAuditEntry;
+    /**
+     * When true, the deactivation is refused atomically (throwing
+     * LastPlatformAdminError) unless another active platform-admin remains —
+     * closing the TOCTOU on the last-admin lockout guard (PLA-442 fix 6).
+     */
+    guardLastPlatformAdmin?: boolean;
+  }): Promise<CloudOperator | undefined>;
+  listOrganizations(): Promise<CloudOrganization[]>;
+  operatorApiKeys(operatorId: string): Promise<CloudOperatorApiKey[]>;
+  createOperatorApiKey(input: {
+    key: CloudOperatorApiKey;
+    audit: CloudOperatorAuditEntry;
+  }): Promise<void>;
+  /** Persists a rotation atomically: replacement + bounded replaced expiry + audit pair. */
+  rotateOperatorApiKey(input: {
+    replacement: CloudOperatorApiKey;
+    replacedKeyId: string;
+    replacedExpiresAt: string;
+    audits: CloudOperatorAuditEntry[];
+  }): Promise<void>;
+  revokeOperatorApiKey(input: {
+    keyId: string;
+    revokedAt: string;
+    audit: CloudOperatorAuditEntry;
+  }): Promise<CloudOperatorApiKey | undefined>;
+  operatorByApiKeyHash(secretHash: string): Promise<
+    { operator: CloudOperator; api_key: CloudOperatorApiKey } | undefined
+  >;
+  markOperatorApiKeyUsed(keyId: string, usedAt: string): Promise<void>;
+  operatorAuditEntries(): Promise<CloudOperatorAuditEntry[]>;
   recordUsage(input: {
     organizationId: string;
     event: CloudUsageEvent;

@@ -7,21 +7,49 @@ import {
 } from "node:http";
 import type { AddressInfo } from "node:net";
 import type { CloudAuthenticator } from "./auth.js";
+import {
+  OPERATOR_KEY_PREFIX,
+  type CloudOperatorService
+} from "./operator-service.js";
 import { CloudControlPlane, CloudError } from "./service.js";
-import type {
-  CloudPrincipal,
-  CloudRole,
-  EnvironmentCredentialRotation,
-  EnvironmentCredentialRotationOptions,
-  EnvironmentKind,
-  UsageMetric
+import {
+  TRUSTED_GATEWAY_ISSUER,
+  type CloudOperatorRole,
+  type CloudPrincipal,
+  type CloudRole,
+  type EnvironmentCredentialRotation,
+  type EnvironmentCredentialRotationOptions,
+  type EnvironmentKind,
+  type UsageMetric
 } from "./types.js";
 
 const maxBodyBytes = 1_048_576;
 
+/** Audit-only on-behalf-of annotation ceiling (PLA-442 fix 8). */
+const maxSubjectHeaderLength = 320;
+
+/** Subject stamped as the audit actor for the shared-key bootstrap request. */
+const CLOUD_BOOTSTRAP_SUBJECT = "urn:lip:cloud-bootstrap";
+
 export interface CloudServerOptions {
+  /**
+   * Legacy shared trusted-gateway key. Deprecated (PLA-442): it authenticates
+   * NOTHING except the first-operator bootstrap route, and only while zero
+   * operators exist. Once any operator exists it is retired (401
+   * `shared_key_retired`) on every route. Set `sharedKeyDisabled` to reject it
+   * outright, including bootstrap.
+   */
   apiKey?: string;
   authenticator?: CloudAuthenticator;
+  /** Operator directory for `lip_ok_` bearer keys and OIDC subject mapping. */
+  operators?: CloudOperatorService;
+  /** Rejects the shared `apiKey` outright, bootstrap included (401 shared_key_disabled). */
+  sharedKeyDisabled?: boolean;
+  /**
+   * OIDC-verified subjects allowed to bootstrap the first platform-admin
+   * operator while zero operators exist (PLA-442 fix 3). Inert thereafter.
+   */
+  bootstrapSubjects?: string[];
   allowedOrigins?: string[];
   /**
    * Data-plane hook for POST /cloud/v1/environments/{id}/credentials/rotate
@@ -51,32 +79,135 @@ function bearer(request: IncomingMessage): string | undefined {
   return value?.startsWith("Bearer ") ? value.slice(7) : undefined;
 }
 
+/**
+ * The audit-only on-behalf-of annotation. Validated before it ever reaches
+ * audit metadata (PLA-442 fix 8): bounded length, no control characters or
+ * newlines. It is never used for authorization.
+ */
+function subjectHeader(request: IncomingMessage): string | undefined {
+  const value = request.headers["x-lip-cloud-subject"];
+  if (typeof value !== "string" || !value.trim()) return undefined;
+  const trimmed = value.trim();
+  if (trimmed.length > maxSubjectHeaderLength) {
+    throw new CloudError(
+      400,
+      "invalid_subject_header",
+      `X-LIP-Cloud-Subject must be at most ${maxSubjectHeaderLength} characters`
+    );
+  }
+  // eslint-disable-next-line no-control-regex
+  if (/[\u0000-\u001f\u007f]/.test(trimmed)) {
+    throw new CloudError(
+      400,
+      "invalid_subject_header",
+      "X-LIP-Cloud-Subject must not contain control characters"
+    );
+  }
+  return trimmed;
+}
+
+/** True for the one route the deprecated shared key legitimately serves. */
+function isOperatorBootstrap(method: string, path: string): boolean {
+  return method === "POST" && path === "/cloud/v1/operators";
+}
+
 async function principal(
   request: IncomingMessage,
-  options: CloudServerOptions
+  options: CloudServerOptions,
+  context: { method: string; path: string }
 ): Promise<CloudPrincipal> {
+  const secret = bearer(request);
+  const claimed = subjectHeader(request);
+
+  // Operator API keys (PLA-442): the acting identity comes from the resolved
+  // operator record. The subject header is ONLY an on-behalf-of annotation.
+  if (secret?.startsWith(OPERATOR_KEY_PREFIX)) {
+    const resolved = options.operators
+      ? await options.operators.authenticate(secret)
+      : undefined;
+    if (!resolved) {
+      throw new CloudError(401, "unauthorized", "Operator API key is invalid");
+    }
+    return {
+      ...resolved,
+      ...(claimed && claimed !== resolved.subject
+        ? { on_behalf_of: claimed }
+        : {})
+    };
+  }
+
   if (options.authenticator) {
-    return options.authenticator.authenticate({
+    const verified = await options.authenticator.authenticate({
       headers: request.headers,
       ...(request.headers.authorization
         ? { authorization: request.headers.authorization }
         : {})
     });
+    // A verified subject with an active operator record gains that
+    // operator's scope; anyone else stays a plain member principal. A verified
+    // subject in the bootstrap allowlist, while zero operators exist, is
+    // flagged to create the first platform-admin for itself (PLA-442 fix 3).
+    const operator = await options.operators?.operatorForSubject(verified.subject);
+    const bootstrapAdmin =
+      !operator &&
+      Boolean(options.bootstrapSubjects?.includes(verified.subject)) &&
+      Boolean(options.operators) &&
+      (await options.operators!.countOperators()) === 0;
+    return {
+      ...verified,
+      ...(operator ? { operator: operatorScope(operator) } : {}),
+      ...(bootstrapAdmin ? { bootstrap_admin: true } : {}),
+      ...(claimed && claimed !== verified.subject
+        ? { on_behalf_of: claimed }
+        : {})
+    };
   }
-  const secret = bearer(request);
+
+  // Legacy shared trusted-gateway key (PLA-442 fix 1): retired to a
+  // bootstrap-only credential. It authenticates NOTHING except the
+  // first-operator bootstrap route, and only while zero operators exist. Once
+  // any operator exists — or on any other route — it is rejected. It never
+  // produces a general data-plane principal again, and the bootstrap request
+  // needs no X-LIP-Cloud-Subject header (fix 2): the new operator's identity
+  // comes from the request body.
   if (!secret || !options.apiKey || !secureEqual(secret, options.apiKey)) {
     throw new CloudError(401, "unauthorized", "Valid Cloud API credentials are required");
   }
-  const subject = request.headers["x-lip-cloud-subject"];
-  const email = request.headers["x-lip-cloud-email"];
-  if (typeof subject !== "string" || !subject.trim()) {
-    throw new CloudError(401, "unauthorized", "x-lip-cloud-subject is required");
+  if (options.sharedKeyDisabled) {
+    throw new CloudError(
+      401,
+      "shared_key_disabled",
+      "The shared Cloud API key is disabled; use an operator API key (lip_ok_...)"
+    );
+  }
+  const operatorCount = options.operators
+    ? await options.operators.countOperators()
+    : 0;
+  if (!isOperatorBootstrap(context.method, context.path) || operatorCount > 0) {
+    throw new CloudError(
+      401,
+      "shared_key_retired",
+      "The shared Cloud API key is retired; it only bootstraps the first " +
+      "operator while none exist. Authenticate with an operator API key (lip_ok_...)."
+    );
   }
   return {
-    issuer: "urn:lip:trusted-gateway",
-    subject: subject.trim(),
-    ...(typeof email === "string" && email.trim()
-      ? { email: email.trim().toLowerCase() }
+    issuer: TRUSTED_GATEWAY_ISSUER,
+    subject: CLOUD_BOOTSTRAP_SUBJECT,
+    ...(claimed ? { on_behalf_of: claimed } : {})
+  };
+}
+
+function operatorScope(operator: {
+  operator_id: string;
+  role: CloudOperatorRole;
+  organization_ids?: string[];
+}): NonNullable<CloudPrincipal["operator"]> {
+  return {
+    operator_id: operator.operator_id,
+    role: operator.role,
+    ...(operator.organization_ids
+      ? { organization_ids: [...operator.organization_ids] }
       : {})
   };
 }
@@ -176,16 +307,144 @@ function pathId(path: string, pattern: RegExp): string | undefined {
   return match?.[1] ? decodeURIComponent(match[1]) : undefined;
 }
 
+interface OperatorRouteResult {
+  status: number;
+  body: unknown;
+  headers?: Record<string, string>;
+}
+
+/**
+ * Operator lifecycle routes (PLA-442). Authorization lives in
+ * CloudOperatorService: platform-admin operators only, except the one-time
+ * shared-key bootstrap of the first operator. Returns undefined when the
+ * request is not an operator route.
+ */
+async function handleOperatorRoutes(
+  actor: CloudPrincipal,
+  options: CloudServerOptions,
+  context: { method: string; path: string; request: IncomingMessage }
+): Promise<OperatorRouteResult | undefined> {
+  const { method, path, request } = context;
+  if (!path.startsWith("/cloud/v1/operators")) return undefined;
+  const operators = options.operators;
+  if (!operators) {
+    throw new CloudError(
+      409,
+      "operator_directory_unavailable",
+      "This control plane has no operator directory configured"
+    );
+  }
+  if (method === "POST" && path === "/cloud/v1/operators") {
+    const body = await readBody(request);
+    const email = body["email"];
+    const organizationIds = body["organization_ids"];
+    const key = body["key"];
+    const created = await operators.createOperator(actor, {
+      subject: requiredString(body, "subject"),
+      role: requiredString(body, "role") as CloudOperatorRole,
+      ...(typeof email === "string" ? { email } : {}),
+      ...(Array.isArray(organizationIds)
+        ? { organization_ids: organizationIds.map(String) }
+        : {}),
+      ...(key && typeof key === "object" && !Array.isArray(key)
+        ? { key: key as { name?: string; expires_at?: string } }
+        : {})
+    });
+    return {
+      status: 201,
+      body: { data: created },
+      headers: { location: `/cloud/v1/operators/${created.operator.operator_id}` }
+    };
+  }
+  if (method === "GET" && path === "/cloud/v1/operators") {
+    return { status: 200, body: { data: await operators.listOperators(actor) } };
+  }
+  const operatorId = pathId(path, /^\/cloud\/v1\/operators\/([^/]+)$/);
+  if (operatorId && method === "PATCH") {
+    const body = await readBody(request);
+    if (typeof body["active"] !== "boolean") {
+      throw new CloudError(422, "validation_failed", "active must be a boolean");
+    }
+    return {
+      status: 200,
+      body: {
+        data: await operators.updateOperator(actor, operatorId, {
+          active: body["active"]
+        })
+      }
+    };
+  }
+  const keysOperatorId = pathId(path, /^\/cloud\/v1\/operators\/([^/]+)\/keys$/);
+  if (keysOperatorId && method === "POST") {
+    const body = await readBody(request);
+    const name = body["name"];
+    const expiresAt = body["expires_at"];
+    return {
+      status: 201,
+      body: {
+        data: await operators.createOperatorKey(actor, keysOperatorId, {
+          ...(typeof name === "string" ? { name } : {}),
+          ...(typeof expiresAt === "string" ? { expires_at: expiresAt } : {})
+        })
+      }
+    };
+  }
+  const rotateOperatorId = pathId(
+    path,
+    /^\/cloud\/v1\/operators\/([^/]+)\/keys\/rotate$/
+  );
+  if (rotateOperatorId && method === "POST") {
+    const body = await readBody(request);
+    const overlap = body["overlap_seconds"];
+    if (overlap !== undefined && typeof overlap !== "number") {
+      throw new CloudError(422, "validation_failed", "overlap_seconds must be a number");
+    }
+    const expiresAt = body["expires_at"];
+    return {
+      status: 200,
+      body: {
+        data: await operators.rotateOperatorKey(actor, rotateOperatorId, {
+          key_id: requiredString(body, "key_id"),
+          ...(typeof overlap === "number" ? { overlap_seconds: overlap } : {}),
+          ...(typeof expiresAt === "string" ? { expires_at: expiresAt } : {})
+        })
+      }
+    };
+  }
+  const revokeOperatorId = pathId(
+    path,
+    /^\/cloud\/v1\/operators\/([^/]+)\/keys\/revoke$/
+  );
+  if (revokeOperatorId && method === "POST") {
+    const body = await readBody(request);
+    await operators.revokeOperatorKey(actor, revokeOperatorId, {
+      key_id: requiredString(body, "key_id")
+    });
+    return { status: 200, body: { data: { revoked: true } } };
+  }
+  throw new CloudError(404, "not_found", "Cloud API route was not found");
+}
+
 export function createCloudServer(
   controlPlane: CloudControlPlane,
   options: CloudServerOptions
 ): Server {
-  if (Boolean(options.authenticator) === Boolean(options.apiKey)) {
-    throw new Error("Configure exactly one Cloud API key or authenticator");
+  if (options.authenticator && options.apiKey) {
+    throw new Error("Configure at most one Cloud API key or authenticator");
+  }
+  if (!options.authenticator && !options.apiKey && !options.operators) {
+    throw new Error(
+      "Configure a Cloud authenticator, API key, or operator directory"
+    );
   }
   if (options.apiKey && options.apiKey.length < 16) {
     throw new Error("Cloud API key must contain at least 16 characters");
   }
+  // The shared key can no longer reach data routes (PLA-442 fix 1), so there
+  // is no per-request deprecation signal to throttle (fix 10): the boot-time
+  // `cloud_shared_key_deprecated` notice in cli.ts is the single, once-per-boot
+  // deprecation warning.
+  const resolvedOptions: CloudServerOptions = options;
   return createServer((request, response) => {
     const method = request.method ?? "GET";
     const url = new URL(request.url ?? "/", "http://cloud.local");
@@ -202,7 +461,22 @@ export function createCloudServer(
         sendJson(response, 200, { status: "ok", service: "lip-cloud-control-plane" });
         return;
       }
-      const actor = await principal(request, options);
+      const actor = await principal(request, resolvedOptions, { method, path });
+
+      const operatorResponse = await handleOperatorRoutes(
+        actor,
+        resolvedOptions,
+        { method, path, request }
+      );
+      if (operatorResponse) {
+        sendJson(
+          response,
+          operatorResponse.status,
+          operatorResponse.body,
+          { ...operatorResponse.headers, ...headers }
+        );
+        return;
+      }
       if (method === "GET" && path === "/cloud/v1/plans") {
         sendJson(response, 200, { data: await controlPlane.plans(actor) }, headers);
         return;

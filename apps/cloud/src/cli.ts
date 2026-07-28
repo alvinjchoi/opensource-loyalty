@@ -3,6 +3,10 @@
 import { hostname } from "node:os";
 import { OidcAuthenticator } from "./auth.js";
 import { LocalDataPlaneProvisioner } from "./data-plane-provisioner.js";
+import {
+  CloudOperatorService,
+  assertOperatorManagementReachable
+} from "./operator-service.js";
 import { PostgresCloudRepository } from "./postgres-repository.js";
 import { CloudProvisioningWorker } from "./provisioning.js";
 import { CloudControlPlane } from "./service.js";
@@ -16,13 +20,38 @@ if (!connectionString) {
   throw new Error("LIP_CLOUD_DATABASE_URL or LIP_DATABASE_URL is required");
 }
 const apiKey = process.env["LIP_CLOUD_API_KEY"];
+const sharedKeyDisabled = ["true", "1"].includes(
+  (process.env["LIP_CLOUD_SHARED_KEY_DISABLED"] ?? "").toLowerCase()
+);
 const oidcIssuer = process.env["LIP_CLOUD_OIDC_ISSUER"];
 const oidcAudience = process.env["LIP_CLOUD_OIDC_AUDIENCE"];
 if (Boolean(oidcIssuer) !== Boolean(oidcAudience)) {
   throw new Error("LIP_CLOUD_OIDC_ISSUER and LIP_CLOUD_OIDC_AUDIENCE must be set together");
 }
-if (!oidcIssuer && (!apiKey || apiKey.length < 16)) {
-  throw new Error("LIP_CLOUD_API_KEY must contain at least 16 characters");
+// OIDC subjects allowed to bootstrap the first operator (PLA-442 fix 3).
+const bootstrapSubjects = (
+  process.env["LIP_CLOUD_BOOTSTRAP_SUBJECTS"] ??
+  process.env["LIP_CLOUD_BOOTSTRAP_SUBJECT"] ??
+  ""
+)
+  .split(",")
+  .map((value) => value.trim())
+  .filter(Boolean);
+if (!oidcIssuer && !sharedKeyDisabled && (!apiKey || apiKey.length < 16)) {
+  throw new Error(
+    "LIP_CLOUD_API_KEY must contain at least 16 characters " +
+    "(or set LIP_CLOUD_SHARED_KEY_DISABLED=true to run on operator keys only)"
+  );
+}
+if (apiKey && !sharedKeyDisabled) {
+  console.warn(JSON.stringify({
+    event: "cloud_shared_key_deprecated",
+    message:
+      "LIP_CLOUD_API_KEY is deprecated (PLA-442): bootstrap the first " +
+      "operator with `npm run cloud:operator -- create`, migrate every " +
+      "caller to LIP_CLOUD_OPERATOR_KEY, then set " +
+      "LIP_CLOUD_SHARED_KEY_DISABLED=true"
+  }));
 }
 const authenticator = oidcIssuer && oidcAudience
   ? new OidcAuthenticator({
@@ -38,12 +67,22 @@ const regions = (process.env["LIP_CLOUD_REGIONS"] ?? "us-east-1")
   .map((region) => region.trim())
   .filter(Boolean);
 const repository = new PostgresCloudRepository({ connectionString });
+const operators = new CloudOperatorService({ repository });
 const controlPlane = new CloudControlPlane({
   repository,
   regions,
   defaultPlanId: process.env["LIP_CLOUD_DEFAULT_PLAN"] ?? "free"
 });
 await controlPlane.migrate();
+
+// Fail-fast (PLA-442 fix 4): refuse to boot if the control plane has zero
+// operators and no viable path to create the first one — otherwise operator
+// management would be silently unreachable.
+assertOperatorManagementReachable({
+  operatorCount: await operators.countOperators(),
+  sharedKeyBootstrap: Boolean(apiKey) && !sharedKeyDisabled,
+  oidcBootstrap: Boolean(authenticator) && bootstrapSubjects.length > 0
+});
 
 const programDirectory = process.env["LIP_CLOUD_PROGRAM_DIR"];
 let provisioner: LocalDataPlaneProvisioner | undefined;
@@ -94,7 +133,12 @@ if (programDirectory) {
 }
 
 const running = await startCloudServer(controlPlane, {
-  ...(authenticator ? { authenticator } : { apiKey: apiKey! }),
+  ...(authenticator
+    ? { authenticator }
+    : apiKey ? { apiKey } : {}),
+  operators,
+  ...(sharedKeyDisabled ? { sharedKeyDisabled: true } : {}),
+  ...(bootstrapSubjects.length > 0 ? { bootstrapSubjects } : {}),
   ...(provisioner
     ? {
         rotateEnvironmentCredentials: (

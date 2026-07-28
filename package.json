@@ -19,6 +19,7 @@
     "cloud": "npm run build --workspace @loyalty-interchange/cloud && node apps/cloud/dist/cli.js",
     "cloud:dev": "tsx apps/cloud/src/cli.ts",
     "cloud:migrate": "tsx apps/cloud/src/migrate-cli.ts",
+    "cloud:operator": "tsx apps/cloud/src/operator-cli.ts",
     "cloud:provision": "tsx apps/cloud/src/tenant-onboarding-cli.ts",
     "clean": "tsc -b --clean && rm -rf coverage spec/schemas",
     "conformance": "vitest run tests/conformance",

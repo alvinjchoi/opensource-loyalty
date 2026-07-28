@@ -17,23 +17,49 @@ export type RotatedTenantCredentials = RotatedEnvironmentCredentials;
  * `POST .../environments`, and the environment list endpoint used to poll
  * provisioning status. It creates nothing the API cannot already create.
  *
- * Authentication boundary: the control plane is called with the shared
- * trusted-gateway key (`LIP_CLOUD_API_KEY`) plus an operator subject. The
- * merchant credential is a tenant-scoped owner API key (PLA-416); retrieve or
- * rotate it with `rotateTenantCredentials`, which calls
- * `POST /cloud/v1/environments/{id}/credentials/rotate` — no more reading
- * credentials files off the data-plane host, and the deprecated root runtime
- * key is never handed out.
+ * Authentication boundary (PLA-442): the control plane is called with a
+ * per-operator API key (`lip_ok_...`, env `LIP_CLOUD_OPERATOR_KEY`) — the
+ * acting identity is the verified operator record, so no subject is
+ * required. The legacy shared trusted-gateway key (`LIP_CLOUD_API_KEY`) is
+ * rejected outright: it authenticates only the first-operator bootstrap
+ * route, which onboarding never calls, so passing it here could never
+ * succeed. The merchant credential is a tenant-scoped owner API
+ * key (PLA-416); retrieve or rotate it with `rotateTenantCredentials`,
+ * which calls `POST /cloud/v1/environments/{id}/credentials/rotate` — no
+ * more reading credentials files off the data-plane host, and the
+ * deprecated root runtime key is never handed out.
  */
 export interface TenantOnboardingTarget {
   /** Base URL of the control plane, e.g. https://lip-cloud.internal:3220 */
   cloudUrl: string;
-  /** Shared trusted-gateway key (`LIP_CLOUD_API_KEY`). */
+  /** Per-operator API key (`lip_ok_...`). The shared key is not accepted. */
   apiKey: string;
-  /** Stable identity subject recorded as the acting operator. */
-  subject: string;
-  /** Optional normalized operator email. */
+  /**
+   * Optional on-behalf-of audit annotation. It never affects authorization —
+   * the acting identity is always the verified operator behind `apiKey`.
+   */
+  subject?: string;
+  /** Optional normalized operator email, recorded for audit only. */
   email?: string;
+}
+
+/** Prefix distinguishing per-operator keys from the legacy shared key. */
+const OPERATOR_KEY_PREFIX = "lip_ok_";
+
+function assertTarget(target: TenantOnboardingTarget): void {
+  if (!target.cloudUrl.trim()) throw new Error("A control-plane URL is required");
+  if (!target.apiKey.trim()) throw new Error("A control-plane API key is required");
+  // PLA-442: the shared LIP_CLOUD_API_KEY only authenticates the
+  // first-operator bootstrap route, which onboarding never calls, so it can
+  // never authorize these requests. Fail here with an actionable message
+  // rather than letting the control plane return an opaque 401.
+  if (!target.apiKey.startsWith(OPERATOR_KEY_PREFIX)) {
+    throw new Error(
+      "A per-operator API key (lip_ok_...) is required; the shared " +
+      "LIP_CLOUD_API_KEY only bootstraps the first operator and cannot " +
+      "authenticate onboarding or rotation requests"
+    );
+  }
 }
 
 export interface TenantOnboardingRequest {
@@ -123,7 +149,9 @@ function headers(target: TenantOnboardingTarget): Record<string, string> {
   return {
     authorization: `Bearer ${target.apiKey}`,
     "content-type": "application/json",
-    "x-lip-cloud-subject": target.subject,
+    ...(target.subject?.trim()
+      ? { "x-lip-cloud-subject": target.subject.trim() }
+      : {}),
     ...(target.email ? { "x-lip-cloud-email": target.email } : {})
   };
 }
@@ -181,7 +209,7 @@ async function ensureOrganization(
       throw new TenantOnboardingError(
         409,
         "slug_owned_elsewhere",
-        `Organization slug ${input.slug} exists but is not visible to ${target.subject}; use a different slug or the owning subject`
+        `Organization slug ${input.slug} exists but is not visible to ${target.subject ?? "this operator"}; use a different slug or the owning credential`
       );
     }
     return { organization: existing, created: false };
@@ -279,9 +307,7 @@ export async function provisionTenant(
   target: TenantOnboardingTarget,
   request: TenantOnboardingRequest
 ): Promise<TenantOnboardingResult> {
-  if (!target.cloudUrl.trim()) throw new Error("A control-plane URL is required");
-  if (!target.apiKey.trim()) throw new Error("A control-plane API key is required");
-  if (!target.subject.trim()) throw new Error("An operator subject is required");
+  assertTarget(target);
   if (request.webhook) assertWebhookConfig(request.webhook);
 
   const { organization, created: organizationCreated } = await ensureOrganization(
@@ -400,9 +426,7 @@ export async function rotateTenantCredentials(
   environmentId: string,
   options: { overlapSeconds?: number } = {}
 ): Promise<RotatedTenantCredentials> {
-  if (!target.cloudUrl.trim()) throw new Error("A control-plane URL is required");
-  if (!target.apiKey.trim()) throw new Error("A control-plane API key is required");
-  if (!target.subject.trim()) throw new Error("An operator subject is required");
+  assertTarget(target);
   if (!environmentId.trim()) throw new Error("An environment id is required");
   return call<RotatedTenantCredentials>(
     target,
