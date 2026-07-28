@@ -36,6 +36,10 @@ jobs:
 
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          # The docs-mirror check diffs against the PR base, so it needs more
+          # than the default shallow single commit.
+          fetch-depth: 0
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
@@ -43,6 +47,19 @@ jobs:
       - run: npm ci
       - run: npm run verify
       - run: npm run spec:check
+      # docs/ is the source of truth; docs-site/ is the published Mintlify
+      # site. Seven pages are mirrored by hand and drifted badly enough by
+      # 2026-07-28 that the published copies stated things that were no longer
+      # true. On a PR, require both halves of a pair to move together.
+      - name: Check documentation mirror
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if [ -n "$BASE_SHA" ]; then
+            npm run docs:check -- --since "$BASE_SHA"
+          else
+            npm run docs:check
+          fi
       # Guard against the gated suites going dormant again: re-run the suite
       # with a JSON reporter and fail if anything was skipped. Cheap (the
       # suite takes seconds) and it turns a silent regression into a red run.
