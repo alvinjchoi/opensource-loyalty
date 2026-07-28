@@ -244,13 +244,16 @@ an **active operator record**, the token carries that operator's
 role/scope; other verified subjects act as ordinary invitation-based
 organization members.
 
-**Legacy shared key (deprecated, bootstrap only).** The old trusted-gateway
-mode — `Authorization: Bearer <LIP_CLOUD_API_KEY>` plus caller-chosen
-`X-LIP-Cloud-Subject`/`X-LIP-Cloud-Email` headers — still works during the
-migration window, but every non-bootstrap use logs a
-`cloud_shared_key_used` warning, and setting
-`LIP_CLOUD_SHARED_KEY_DISABLED=true` rejects it with
-`401 shared_key_disabled`. Do not expose any control-plane key directly to
+**Legacy shared key (retired, bootstrap only).** The old trusted-gateway
+mode — `Authorization: Bearer <LIP_CLOUD_API_KEY>` plus a caller-chosen
+`X-LIP-Cloud-Subject` — no longer grants identity. The shared key now
+authenticates exactly one thing: creating the first operator, and only
+while zero operators exist. Every other route, and every use once an
+operator exists, returns `401 shared_key_retired`. Setting
+`LIP_CLOUD_SHARED_KEY_DISABLED=true` additionally closes the bootstrap
+route, returning `401 shared_key_disabled`. A single
+`cloud_shared_key_deprecated` notice is logged once per boot while the key
+is still configured. Do not expose any control-plane key directly to
 browsers or mobile applications.
 
 ## API
