@@ -13,3 +13,6 @@ packages/mcp/assets/
 
 # Local security reports (gstack /cso)
 .gstack/
+
+# Git worktrees (isolated feature branches)
+.worktrees/
