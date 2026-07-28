@@ -286,13 +286,21 @@ clusters as a migration):
    ```
 
 3. **Swap every caller** from `LIP_CLOUD_API_KEY` to its own
-   `LIP_CLOUD_OPERATOR_KEY` (BFF workers, CI, runbook shells). The service
-   logs `cloud_shared_key_used` with the request path for any straggler
-   still on the shared key — watch that signal until it goes quiet.
+   `LIP_CLOUD_OPERATOR_KEY` (BFF workers, CI, runbook shells). Do this
+   before step 1 lands if you can: the moment the first operator exists,
+   the shared key stops working on every route but the bootstrap one, so
+   a straggler fails immediately rather than degrading. Stragglers show up
+   as `401 shared_key_retired` responses in the caller's own logs — the
+   control plane no longer emits a per-request `cloud_shared_key_used`
+   line, because the key can no longer reach a data route at all. The
+   remaining deprecation signal is the once-per-boot
+   `cloud_shared_key_deprecated` notice.
 4. **Disable the shared key:** set `LIP_CLOUD_SHARED_KEY_DISABLED=true` on
-   the Render service and redeploy. From then on the shared key gets
-   `401 shared_key_disabled`; the boot log stops warning. Delete the shared
-   key from the password manager and the Render env when convenient.
+   the Render service and redeploy. This closes the bootstrap route too —
+   the only thing the key could still do — so the response changes from
+   `401 shared_key_retired` to `401 shared_key_disabled` and the boot
+   notice stops. Delete the shared key from the password manager and the
+   Render env when convenient.
 5. **Operate:** rotate operator keys like tenant keys
    (`POST /cloud/v1/operators/{id}/keys/rotate`, default 24 h overlap,
    `overlap_seconds: 0` for emergency cutover; rotation can shorten but
