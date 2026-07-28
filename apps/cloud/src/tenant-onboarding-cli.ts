@@ -25,10 +25,11 @@
  *     [--overlap-seconds 0]   # emergency cutover: replaced key dies at once
  *
  * Authentication (PLA-442): `LIP_CLOUD_OPERATOR_KEY` (a per-operator
- * `lip_ok_` key; identity comes from the key, `--subject` optional) is
- * preferred. The legacy shared `LIP_CLOUD_API_KEY` still works during the
- * bootstrap window and then requires `--subject`. Keys come ONLY from the
- * environment (never a flag, to keep them out of shell history); see
+ * `lip_ok_` key) is required — identity comes from the key, so `--subject` is
+ * optional and purely an on-behalf-of audit annotation. The legacy shared
+ * `LIP_CLOUD_API_KEY` is rejected: it only bootstraps the first operator and
+ * cannot authenticate these commands. Keys come ONLY from the environment
+ * (never a flag, to keep them out of shell history); see
  * docs/runbooks/shared-cluster-provisioning.md.
  */
 
@@ -72,15 +73,23 @@ const legacyKey = process.env["LIP_CLOUD_API_KEY"];
 const apiKey = operatorKey ?? legacyKey;
 if (!apiKey || apiKey.length < 16) {
   console.error(
-    "LIP_CLOUD_OPERATOR_KEY (preferred) or the legacy LIP_CLOUD_API_KEY " +
-    "(>= 16 characters) is required in the environment"
+    "LIP_CLOUD_OPERATOR_KEY (lip_ok_..., >= 16 characters) is required in " +
+    "the environment"
   );
   process.exit(1);
 }
-// The verified operator identity comes from an operator key; --subject is
-// only required in legacy shared-key mode (and otherwise optional, recorded
-// as an on-behalf-of audit annotation).
-const subjectRequired = !apiKey.startsWith("lip_ok_");
+// PLA-442: the shared LIP_CLOUD_API_KEY only bootstraps the first operator,
+// so it cannot drive provisioning or rotation. Reject it up front instead of
+// asking for a --subject that would not make the request succeed.
+if (!apiKey.startsWith("lip_ok_")) {
+  console.error(
+    "LIP_CLOUD_OPERATOR_KEY (lip_ok_...) is required: the shared " +
+    "LIP_CLOUD_API_KEY only bootstraps the first operator and cannot " +
+    "authenticate provisioning or rotation. Create an operator with " +
+    "`npm run cloud:operator -- create --subject <you> --role platform-admin`."
+  );
+  process.exit(1);
+}
 
 const command = positionals[0] ?? "provision";
 if (!["provision", "rotate-credentials"].includes(command)) {
@@ -102,9 +111,7 @@ if (command === "rotate-credentials") {
       {
         cloudUrl: required("cloud-url"),
         apiKey,
-        ...(subjectRequired
-          ? { subject: required("subject") }
-          : values.subject ? { subject: values.subject } : {}),
+        ...(values.subject ? { subject: values.subject } : {}),
         ...(values.email ? { email: values.email } : {})
       },
       required("environment"),
@@ -147,9 +154,7 @@ try {
     {
       cloudUrl: required("cloud-url"),
       apiKey,
-      ...(subjectRequired
-        ? { subject: required("subject") }
-        : values.subject ? { subject: values.subject } : {}),
+      ...(values.subject ? { subject: values.subject } : {}),
       ...(values.email ? { email: values.email } : {})
     },
     {

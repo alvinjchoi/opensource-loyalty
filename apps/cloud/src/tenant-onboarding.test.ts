@@ -166,23 +166,38 @@ describe("provisionTenant", () => {
     }
   });
 
-  it("retires the shared key once the first operator exists (PLA-442)", async () => {
-    const { url, close } = await fixture();
-    try {
+  it("rejects the legacy shared key before any request is sent (PLA-442)", async () => {
+    // The shared key only authenticates the first-operator bootstrap route,
+    // which onboarding never calls — so this fails client-side, with or
+    // without a subject, and never reaches the network.
+    for (const subject of [undefined, "operator_biz_manager"]) {
       await expect(provisionTenant(
-        { cloudUrl: url, apiKey: sharedKey, subject: "operator_biz_manager" },
+        {
+          cloudUrl: "http://127.0.0.1:9",
+          apiKey: sharedKey,
+          ...(subject ? { subject } : {})
+        },
         request()
-      )).rejects.toMatchObject({ status: 401, code: "shared_key_retired" });
-    } finally {
-      await close();
+      )).rejects.toThrow(/per-operator API key \(lip_ok_\.\.\.\) is required/);
     }
   });
 
-  it("still requires an operator subject with the legacy shared key", async () => {
-    await expect(provisionTenant(
-      { cloudUrl: "http://127.0.0.1:9", apiKey: sharedKey },
-      request()
-    )).rejects.toThrow(/subject/i);
+  it("retires the shared key server-side once an operator exists (PLA-442)", async () => {
+    const { url, close } = await fixture();
+    try {
+      const response = await fetch(`${url}/cloud/v1/organizations`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${sharedKey}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({ name: "Shared Key Org", slug: "shared-key-org" })
+      });
+      expect(response.status).toBe(401);
+      expect(await response.json()).toMatchObject({ code: "shared_key_retired" });
+    } finally {
+      await close();
+    }
   });
 
   it("surfaces control-plane authentication failures", async () => {

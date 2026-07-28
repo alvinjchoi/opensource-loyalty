@@ -130,9 +130,9 @@ LIP_CLOUD_OPERATOR_KEY=lip_ok_... npm run cloud:provision -- \
 
 (Identity comes from the operator key; add
 `--subject org_<business_manager_org_id>` only as an optional on-behalf-of
-audit annotation. During bootstrap, before any operator exists, the legacy
-`LIP_CLOUD_API_KEY=<shared key>` still works and then `--subject` is
-required.)
+audit annotation. The legacy `LIP_CLOUD_API_KEY` is rejected by this command
+— it only authenticates the first-operator bootstrap route, so create an
+operator first with `npm run cloud:operator`.)
 
 Prints `{"event":"tenant_provisioned", "tenant_id":"tenant_...", "status":"ready",
 "api_url":"http://lip-shared-data-plane:13210...", ...}` and exits non-zero on
@@ -383,7 +383,7 @@ failure + health-check alerts to the engineering Slack. Stream logs (Render
 | Constraint | Tracking |
 | --- | --- |
 | One platform instance per tenant → `numInstances: 1`, no horizontal scaling of the shared host | PLA-428 / PLA-429 |
-| **Per-operator control-plane auth (PLA-442, shipped):** management calls authenticate as individual operators (`lip_ok_` keys or OIDC subjects mapped to operator records); the subject header no longer grants identity. The shared `LIP_CLOUD_API_KEY` is bootstrap-only — run the section 4½ cutover and set `LIP_CLOUD_SHARED_KEY_DISABLED=true`. Until that flag is set on an existing cluster, the legacy shared-key+header mode still works (deprecation-logged), so finish the cutover promptly | done: PLA-442; residual action = section 4½ cutover per cluster |
+| **Per-operator control-plane auth (PLA-442, shipped):** management calls authenticate as individual operators (`lip_ok_` keys or OIDC subjects mapped to operator records); the subject header no longer grants identity. The shared `LIP_CLOUD_API_KEY` is bootstrap-only and is retired the moment the first operator exists — every other route returns `401 shared_key_retired`, with or without the `LIP_CLOUD_SHARED_KEY_DISABLED=true` flag (the flag additionally refuses the bootstrap route itself). Run the section 4½ cutover to set it | done: PLA-442; residual action = section 4½ cutover per cluster |
 | Tenant runtimes are private-network only (one public port per Render service) | follow-up: per-tenant public hostnames or gateway routing |
 | Credentials files still hold the merchant key (and deprecated root key) in **plaintext on disk** (`0600`, atomic writes; rotation shipped, encryption at rest pending) | listed in `docs/cloud.md` "Next production steps" |
 

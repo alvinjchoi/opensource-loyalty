@@ -20,9 +20,10 @@ export type RotatedTenantCredentials = RotatedEnvironmentCredentials;
  * Authentication boundary (PLA-442): the control plane is called with a
  * per-operator API key (`lip_ok_...`, env `LIP_CLOUD_OPERATOR_KEY`) — the
  * acting identity is the verified operator record, so no subject is
- * required. The legacy shared trusted-gateway key (`LIP_CLOUD_API_KEY`)
- * still works during the bootstrap/migration window and then requires an
- * explicit `subject`. The merchant credential is a tenant-scoped owner API
+ * required. The legacy shared trusted-gateway key (`LIP_CLOUD_API_KEY`) is
+ * rejected outright: it authenticates only the first-operator bootstrap
+ * route, which onboarding never calls, so passing it here could never
+ * succeed. The merchant credential is a tenant-scoped owner API
  * key (PLA-416); retrieve or rotate it with `rotateTenantCredentials`,
  * which calls `POST /cloud/v1/environments/{id}/credentials/rotate` — no
  * more reading credentials files off the data-plane host, and the
@@ -31,14 +32,14 @@ export type RotatedTenantCredentials = RotatedEnvironmentCredentials;
 export interface TenantOnboardingTarget {
   /** Base URL of the control plane, e.g. https://lip-cloud.internal:3220 */
   cloudUrl: string;
-  /** Operator API key (`lip_ok_...`) or legacy shared trusted-gateway key. */
+  /** Per-operator API key (`lip_ok_...`). The shared key is not accepted. */
   apiKey: string;
   /**
-   * Acting identity subject. Required with the legacy shared key; optional
-   * with an operator key, where it is only an on-behalf-of audit annotation.
+   * Optional on-behalf-of audit annotation. It never affects authorization —
+   * the acting identity is always the verified operator behind `apiKey`.
    */
   subject?: string;
-  /** Optional normalized operator email (legacy shared-key mode only). */
+  /** Optional normalized operator email, recorded for audit only. */
   email?: string;
 }
 
@@ -48,10 +49,15 @@ const OPERATOR_KEY_PREFIX = "lip_ok_";
 function assertTarget(target: TenantOnboardingTarget): void {
   if (!target.cloudUrl.trim()) throw new Error("A control-plane URL is required");
   if (!target.apiKey.trim()) throw new Error("A control-plane API key is required");
-  if (!target.apiKey.startsWith(OPERATOR_KEY_PREFIX) && !target.subject?.trim()) {
+  // PLA-442: the shared LIP_CLOUD_API_KEY only authenticates the
+  // first-operator bootstrap route, which onboarding never calls, so it can
+  // never authorize these requests. Fail here with an actionable message
+  // rather than letting the control plane return an opaque 401.
+  if (!target.apiKey.startsWith(OPERATOR_KEY_PREFIX)) {
     throw new Error(
-      "An operator subject is required with the legacy shared key; " +
-      "prefer an operator API key (lip_ok_...), which needs none"
+      "A per-operator API key (lip_ok_...) is required; the shared " +
+      "LIP_CLOUD_API_KEY only bootstraps the first operator and cannot " +
+      "authenticate onboarding or rotation requests"
     );
   }
 }
