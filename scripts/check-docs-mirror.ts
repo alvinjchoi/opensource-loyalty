@@ -26,6 +26,7 @@ import { existsSync } from "node:fs";
 /** The hand-mirrored pages: repo source → published page. */
 const MIRRORED_PAGES: ReadonlyArray<{ source: string; published: string }> = [
   { source: "docs/ai-prompts.md", published: "docs-site/guides/ai-prompts.mdx" },
+  { source: "docs/cloud.md", published: "docs-site/guides/cloud.mdx" },
   { source: "docs/customer-identity.md", published: "docs-site/guides/customer-identity.mdx" },
   { source: "docs/postgres.md", published: "docs-site/guides/postgres.mdx" },
   // These two pairs carry different file names on each side, which is exactly
@@ -38,11 +39,23 @@ const MIRRORED_PAGES: ReadonlyArray<{ source: string; published: string }> = [
   { source: "docs/webhook-delivery.md", published: "docs-site/guides/webhooks.mdx" }
 ];
 
-function changedFiles(since: string): ReadonlySet<string> {
-  const output = execFileSync("git", ["diff", "--name-only", `${since}...HEAD`], {
+/**
+ * Path → git status letter (`A` added, `M` modified, `D` deleted, …) for the
+ * range. The letter matters: publishing a page that already existed in `docs/`
+ * legitimately touches only one side, so an added file must not be reported as
+ * drift.
+ */
+function changedFiles(since: string): ReadonlyMap<string, string> {
+  const output = execFileSync("git", ["diff", "--name-status", `${since}...HEAD`], {
     encoding: "utf8"
   });
-  return new Set(output.split("\n").map((line) => line.trim()).filter(Boolean));
+  const changes = new Map<string, string>();
+  for (const line of output.split("\n")) {
+    const [status, ...pathParts] = line.trim().split(/\s+/);
+    const path = pathParts.join(" ");
+    if (status && path) changes.set(path, status[0]!);
+  }
+  return changes;
 }
 
 function main(): void {
@@ -64,6 +77,9 @@ function main(): void {
     }
     const changed = changedFiles(since);
     for (const { source, published } of MIRRORED_PAGES) {
+      // A pair being introduced — either side newly added — is not drift.
+      // Publishing an existing `docs/` page adds only the MDX side.
+      if (changed.get(source) === "A" || changed.get(published) === "A") continue;
       const sourceChanged = changed.has(source);
       const publishedChanged = changed.has(published);
       if (sourceChanged && !publishedChanged) {

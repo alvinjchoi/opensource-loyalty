@@ -41,6 +41,7 @@
               "guides/customer-identity",
               "guides/reference-platform",
               "guides/postgres",
+              "guides/cloud",
               "guides/migration",
               "guides/punchh-migration"
             ]

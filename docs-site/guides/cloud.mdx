@@ -1,0 +1,255 @@
+---
+title: "Cloud control plane"
+description: "The managed-service layer around the open protocol: organizations, projects, environments, provisioning, and usage limits."
+icon: "cloud"
+---
+
+Loyalty Interchange Cloud is the managed-service layer around the open protocol and engine. It is intentionally separate from `/lip/v1`: the protocol stays portable and self-hostable, while the control plane manages organizations, projects, environments, plans, subscriptions, provisioning, and usage limits.
+
+<Note>
+  You can leave Cloud and run the same LIP data plane yourself. Cloud earns its keep by removing operational work and risk, not by protocol lock-in.
+</Note>
+
+## Product boundary
+
+<CardGroup cols={3}>
+  <Card title="Open source" icon="code">
+    Protocol, engine, SDKs, CLI, MCP, Admin UI, SQLite and Postgres storage, Docker deployment, and conformance tooling.
+  </Card>
+  <Card title="Cloud" icon="cloud">
+    One-click environments, upgrades, backups, monitoring, regional operation, usage billing, managed messaging, and support.
+  </Card>
+  <Card title="Enterprise" icon="building">
+    SSO/SCIM, dedicated infrastructure, private networking, contractual SLAs, data residency, and migration assistance.
+  </Card>
+</CardGroup>
+
+## Current vertical slice
+
+The `@loyalty-interchange/cloud` workspace includes:
+
+- Tenant-safe organizations, issuer/subject identities, invitations, and membership management
+- Projects, and development, staging, or production environments
+- Generated `tenant_id` and configured `program_id` data-plane scopes
+- Queued provisioning records for each environment
+- A claim-safe provisioning worker with retries and a provider interface
+- Free, Pro, and Business plan definitions, and one subscription per organization
+- Idempotent monthly usage events and counters, with hard quota enforcement under a transaction lock
+- An authenticated management API with operator-key or direct OIDC modes
+- A provider boundary for Stripe or another billing system
+
+<Warning>
+  The control plane does not yet collect payment. New organizations use the `manual` billing provider on the Free plan, and new environments stay `pending` until a provisioning adapter processes their job. A local adapter ships today; regional infrastructure adapters remain future work.
+</Warning>
+
+## Local data-plane provisioner
+
+Setting `LIP_CLOUD_PROGRAM_DIR` starts a provisioning worker with `LocalDataPlaneProvisioner`, which runs one LIP data-plane runtime per environment inside the control-plane process. Each `create` job:
+
+<Steps>
+  <Step title="Load the program">
+    Reads `<program_id>.json` from the program directory.
+  </Step>
+  <Step title="Start an isolated runtime">
+    Per-environment SQLite under `LIP_CLOUD_DATA_DIR` (default `.lip-cloud`), or tenant-scoped Postgres when `LIP_CLOUD_DATA_PLANE_DATABASE_URL` is set.
+  </Step>
+  <Step title="Allocate a stable port">
+    From `LIP_CLOUD_DATA_PLANE_BASE_PORT` (default `13210`), recorded in `<data-dir>/ports.json`.
+  </Step>
+  <Step title="Bootstrap a merchant API key">
+    An owner-role key minted through the tenant's own access-control service — hashed, audited, rotatable — written to a `0600` credentials file.
+  </Step>
+  <Step title="Mark the environment ready">
+    With its reachable `api_url` and `admin_url`.
+  </Step>
+</Steps>
+
+### Retrieving and rotating merchant credentials
+
+Merchant credentials are retrieved and rotated through the control plane with `POST /cloud/v1/environments/{id}/credentials/rotate`, available to a platform-admin operator, an org-scoped operator covering that organization, or an org owner/admin. Rotation is audited cloud-side, and tenant-side as actor `cloud:<subject>` where the subject is the **verified** operator identity.
+
+An optional body `{"overlap_seconds": <0..604800>}` controls the cutover: `0` is an emergency immediate cutover, and the default keeps the replaced key valid for 24 hours. The response includes `replaced_api_key_expires_at`, the moment the previous merchant key stops working.
+
+```bash
+LIP_CLOUD_OPERATOR_KEY=lip_ok_... npm run cloud:provision -- rotate-credentials \
+  --cloud-url https://<control-plane-host> \
+  --environment env_... \
+  [--overlap-seconds 0]
+```
+
+<Note>
+  The root runtime key is never returned by any API. Tenants can also self-rotate any of their keys via `POST /admin/api/v1/access/api-keys/rotate` on their runtime; a replacement inherits the rotated key's expiry, and an explicit `expires_at` may shorten it but never extend it. If a tenant self-rotates the merchant key, the control-plane rotation surface recovers by re-adopting the live `cloud-merchant` lineage rather than failing.
+</Note>
+
+New tenants start with zero webhook subscriptions. `provisionTenant` and `npm run cloud:provision` accept an optional `--webhook-url` plus `--webhook-secret` (16 characters or more) pair that creates the tenant's first subscription through the runtime's admin API at provision time. The subscription id is stable, so re-runs upsert; the merchant credential is minted as a side effect and returned in the result.
+
+### Restart behavior
+
+On startup the provisioner calls `restore()` and relaunches every credentialed environment on the same port and API key, so BFF `LIP_URL` values survive restarts. A weak, tampered, or unreadable credentials file is skipped with a `cloud_environment_restore_failed` log line instead of aborting the other tenants' restore.
+
+Set `LIP_CLOUD_DATA_PLANE_HOST` to control the bind address, and `LIP_CLOUD_DATA_PLANE_PUBLIC_HOST` to control the hostname written into each runtime's `api_url` — a private-network service name, for example.
+
+<Warning>
+  Only `create` operations are supported, and credentials remain files (`0600`, written atomically) rather than an encrypted secret store. Regional adapters still replace this for production.
+</Warning>
+
+## Attaching a data-plane host
+
+`POST /cloud/v1/environments/{environment_id}/attach` binds an environment to a LIP data-plane host you run yourself — anywhere, on any infrastructure — with no cloud-provider API involved. It is the remote counterpart to the in-process provisioner: instead of provisioning a runtime, the control plane validates and records a host you already run.
+
+```json
+{ "endpoint_url": "https://lip.example.com", "api_key": "lip_sk_..." }
+```
+
+Attach is synchronous — no job is queued. The control plane runs five checks before binding:
+
+1. The URL uses TLS (or is a localhost address for local development)
+2. `GET /health` responds and reports `status: "ok"`
+3. `GET /.well-known/lip` matches the expected protocol version and profile
+4. The supplied `api_key` authenticates against `GET /lip/v1/capabilities`, and an unknown key is correctly rejected
+5. `POST /lip/v1/programs/get` confirms the host serves the environment's `program_id`
+
+On success the environment moves to `ready` with its `api_url`, `admin_url`, and an `api_key_fingerprint` — only a masked fingerprint is stored, never the key. On failure it is marked `failed` with a `status_message` naming the failed check, and the request returns `422` with a matching code such as `auth_rejected` or `program_mismatch`.
+
+Re-attaching is allowed for `pending`, `ready`, or `failed` environments, so you can rebind after key rotation or a host migration. A `suspended` environment rejects attach with `409 environment_suspended`.
+
+## Verifying a staging tenant
+
+Attach binds the host, but binding is not proof the tenant is safe to send traffic to. After `/attach` returns `ready`, run the same diagnostics used to gate a local sandbox:
+
+```bash
+lip cloud-verify <api_url> \
+  --api-key <key> \
+  --program-id <id> \
+  --expect-member <token> \
+  --expect-available <n> \
+  [--expect-members <N>]
+```
+
+`cloud-verify` runs `lip doctor` (discovery, health, authentication, capabilities) and baseline conformance, then — given `--program-id`, `--expect-member`, and `--expect-available` — looks up that member's balance and compares it to the expected value. The optional `--expect-members` also checks the total member count.
+
+The command exits non-zero on any failure, so it can gate promoting a newly attached tenant rather than relying on `/attach` having returned `200`.
+
+<Note>
+  `--expect-members` reads the count from the host's admin snapshot endpoint, a non-normative operational surface outside the versioned `/lip/v1` protocol. Treat it as an operator convenience for staging verification, not a protocol guarantee. `lip state import` reports the same number from an independent source.
+</Note>
+
+## Start locally
+
+```bash
+LIP_CLOUD_API_KEY="replace-with-at-least-16-characters" \
+docker compose --profile cloud up --build
+```
+
+The management API listens on `http://127.0.0.1:3220`. From source:
+
+```bash
+LIP_CLOUD_DATABASE_URL="postgres://loyalty:password@localhost:5432/loyalty" \
+LIP_CLOUD_API_KEY="replace-with-at-least-16-characters" \
+npm run cloud:dev
+```
+
+### Configuration
+
+| Variable | Purpose |
+| --- | --- |
+| `LIP_CLOUD_DATABASE_URL` | Control-plane database (falls back to `LIP_DATABASE_URL`) |
+| `LIP_CLOUD_API_KEY` | Deprecated shared bootstrap key — see the authentication boundary below |
+| `LIP_CLOUD_SHARED_KEY_DISABLED` | Reject the shared key outright once operators exist |
+| `LIP_CLOUD_OIDC_ISSUER`, `LIP_CLOUD_OIDC_AUDIENCE` | Direct JWT validation instead of the shared key (optional `LIP_CLOUD_OIDC_JWKS_URI`) |
+| `LIP_CLOUD_HOST`, `LIP_CLOUD_PORT` | Bind address and port |
+| `LIP_CLOUD_REGIONS` | Comma-separated region list |
+| `LIP_CLOUD_DEFAULT_PLAN` | Plan assigned to new organizations |
+| `LIP_CLOUD_ALLOWED_ORIGINS` | Comma-separated CORS origins |
+
+## Authentication boundary
+
+<Warning>
+  The acting identity on `/cloud/v1` always comes from a **verified credential** — never from a caller-chosen header.
+</Warning>
+
+### Operator API keys (primary)
+
+Every human or service operating the control plane has an operator record — `platform-admin`, or `org-scoped` with an explicit organization list — and authenticates with a personal key:
+
+```http
+Authorization: Bearer lip_ok_...
+```
+
+The resolved operator record supplies the subject. Keys are sha256-hashed at rest, support `expires_at`, and rotate with the same bounded-overlap semantics as tenant keys via `POST /cloud/v1/operators/{id}/keys/rotate` (platform-admin only); a replacement inherits and can never extend the rotated key's expiry.
+
+Platform-admins are unrestricted; org-scoped operators can only touch their own organizations' projects and environments. An `X-LIP-Cloud-Subject` header sent alongside an operator key is recorded in audit metadata as `on_behalf_of` — it never grants authority.
+
+Bootstrap the first platform-admin with `npm run cloud:operator -- create`, authenticated by the legacy shared key exactly once, then migrate every caller to `LIP_CLOUD_OPERATOR_KEY`.
+
+### OIDC bearer mode
+
+Production can validate OIDC access tokens directly. Configure `LIP_CLOUD_OIDC_ISSUER` and `LIP_CLOUD_OIDC_AUDIENCE` together; signature, issuer, audience, expiry, allowed algorithm, and subject are validated against the provider JWKS. Invitation acceptance only uses the email claim when `email_verified` is true.
+
+When the verified `sub` matches an **active operator record**, the token carries that operator's role and scope. Other verified subjects act as ordinary invitation-based organization members.
+
+### Legacy shared key (retired)
+
+The old trusted-gateway mode — `Authorization: Bearer <LIP_CLOUD_API_KEY>` plus a caller-chosen `X-LIP-Cloud-Subject` — no longer grants identity. The shared key now authenticates exactly one thing: creating the first operator, and only while zero operators exist.
+
+Every other route, and every use once an operator exists, returns `401 shared_key_retired`. Setting `LIP_CLOUD_SHARED_KEY_DISABLED=true` additionally closes the bootstrap route, returning `401 shared_key_disabled`. A single `cloud_shared_key_deprecated` notice is logged once per boot while the key is still configured.
+
+<Warning>
+  Never expose a control-plane key directly to browsers or mobile applications.
+</Warning>
+
+## API
+
+All successful payloads use a `data` envelope; errors use RFC 9457 problem details.
+
+| Route | Notes |
+| --- | --- |
+| `GET /cloud/v1/plans` | |
+| `GET\|POST /cloud/v1/operators` | Platform-admin; POST also serves the one-time shared-key bootstrap |
+| `PATCH /cloud/v1/operators/{operator_id}` | Activate/deactivate; the last active platform-admin cannot be deactivated |
+| `POST /cloud/v1/operators/{operator_id}/keys` | Issue |
+| `POST /cloud/v1/operators/{operator_id}/keys/rotate` | Bounded overlap |
+| `POST /cloud/v1/operators/{operator_id}/keys/revoke` | |
+| `GET\|POST /cloud/v1/organizations` | |
+| `GET /cloud/v1/organizations/{organization_id}` | |
+| `GET\|POST /cloud/v1/organizations/{organization_id}/projects` | |
+| `GET\|PATCH /cloud/v1/organizations/{organization_id}/members` | |
+| `POST /cloud/v1/organizations/{organization_id}/invitations` | |
+| `POST /cloud/v1/invitations/accept` | |
+| `GET\|POST /cloud/v1/projects/{project_id}/environments` | |
+| `POST /cloud/v1/environments/{environment_id}/attach` | Bind a host you run |
+| `POST /cloud/v1/environments/{environment_id}/credentials/rotate` | Merchant key |
+| `POST /cloud/v1/environments/{environment_id}/usage-events` | Idempotent |
+| `GET /cloud/v1/environments/{environment_id}/usage` | |
+
+```bash
+curl -X POST http://127.0.0.1:3220/cloud/v1/organizations \
+  -H "Authorization: Bearer $LIP_CLOUD_OPERATOR_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Demo Restaurants","slug":"demo-restaurants"}'
+```
+
+## Isolation and metering
+
+Every project belongs to one organization, every environment belongs to one project, and each environment receives a unique `tenant_id`. Repository queries resolve ownership before writes.
+
+Usage writes:
+
+1. Lock the environment, metric, and month
+2. Verify the environment belongs to the expected organization
+3. Deduplicate by environment, metric, and idempotency key
+4. Enforce the plan hard limit
+5. Insert the immutable event and update its monthly counter atomically
+
+Charging by monthly active members and transactions is represented directly; points issued is not a billing metric.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="PostgreSQL storage" icon="database" href="/guides/postgres">
+    The multi-instance engine store the control plane provisions against.
+  </Card>
+  <Card title="Reference platform" icon="server" href="/guides/reference-platform">
+    What each provisioned data-plane runtime actually serves.
+  </Card>
+</CardGroup>
