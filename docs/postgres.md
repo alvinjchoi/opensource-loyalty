@@ -78,6 +78,14 @@ exists outside their view), and they are **denied** (403
 `/admin/api/v1/snapshot`, `/analytics`, and `/exports/members`.
 Location-filtered variants of those tenant-wide views are follow-up work.
 
+`GET /admin/api/v1/reports/locations` is served from a **lock-free read
+path**: the platform loads the last committed engine state and hydrates a
+throwaway engine (`readEngineSnapshot`), so report polling never takes the
+tenant advisory lock and never queues behind accruals or redemptions.
+Staleness contract: a report may lag in-flight mutations by one revision, and
+expiry side effects computed during a read (e.g. lapsed reservations) are
+counted in the report but not persisted until the next real write commits.
+
 > [!IMPORTANT]
 > **Run at most one platform instance per tenant.** The engine repository is
 > multi-instance-safe, but the Admin extension services cache state with

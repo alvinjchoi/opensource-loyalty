@@ -379,7 +379,10 @@ export class LocalDataPlaneProvisioner implements CloudProvisioner {
         port,
         reservationTtlSeconds: program.reservation_ttl_seconds ?? 120,
         ...("executeEngineOperation" in platform
-          ? { executeEngineOperation: platform.executeEngineOperation }
+          ? {
+              executeEngineOperation: platform.executeEngineOperation,
+              readEngineSnapshot: platform.readEngineSnapshot
+            }
           : { persistState: (state) => platform.store.save(state) }),
         // Credentials advertise admin_url, so wire the full Admin service
         // suite the platform constructed (mirrors the server CLI wiring).

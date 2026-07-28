@@ -105,6 +105,19 @@ shipped on this branch:
    pass the full admin service block (the provisioner previously advertised
    `admin_url` with no admin services at all), and demo seeding registers
    `location-014` in the location directory.
+7. **Lock-free report reads (PLA-434).** `GET /admin/api/v1/reports/locations`
+   originally ran inside `executeEngineOperation` on Postgres — a full write
+   round-trip (advisory lock, state reload, `replaceState()`, full-row
+   re-save) for a read-only report, so a polling dashboard periodically
+   stalled every tenant write. The Postgres platform now exposes
+   `readEngineSnapshot()`: a lock-free `load()` hydrates a throwaway plain
+   `LoyaltyEngine` (no emit hook, so reads can never fire webhook events) and
+   the report runs against that scratch copy. Nothing is saved and the
+   revision does not advance; reads may lag in-flight mutations by one
+   revision, and expiry side effects computed during a read stay in the
+   scratch copy until the next real write persists them. The demo (SQLite)
+   platform keeps reading the live engine directly — it never had the lock
+   problem.
 
 ## Out of scope (future work)
 

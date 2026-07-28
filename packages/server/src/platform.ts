@@ -73,6 +73,14 @@ export interface PostgresProtocolPlatform {
   engagement: EngagementService;
   locations: LocationDirectoryService;
   executeEngineOperation<T>(operation: () => T | Promise<T>): Promise<T>;
+  /**
+   * Runs a read-only computation against a scratch engine hydrated from the
+   * latest committed state. Unlike executeEngineOperation this takes no
+   * advisory lock, skips the in-process serialization queue, and never saves,
+   * so it cannot stall concurrent accruals/redemptions. The snapshot may lag
+   * in-flight mutations by one revision — acceptable for reporting.
+   */
+  readEngineSnapshot<T>(read: (engine: LoyaltyEngine) => T | Promise<T>): Promise<T>;
   close(): Promise<void>;
 }
 
@@ -410,6 +418,43 @@ export async function createPostgresProtocolPlatform(
     // executeEngineOperation, so the services' direct persist hook is a no-op.
     const persistEngine = (): void => undefined;
 
+    // True read path (PLA-434): load the latest committed state without the
+    // per-tenant advisory lock or the mutation queue, hydrate a throwaway
+    // engine, and run the read against it. Nothing is saved, so side effects
+    // computed during the read (e.g. reservation expiry inside
+    // inspectLedger()) stay in the scratch copy until a real write persists
+    // them. The scratch engine is a plain LoyaltyEngine — it has no emit
+    // hook, so no webhook events can ever fire from a read. Reads may lag
+    // in-flight mutations by one revision (see docs/postgres.md).
+    const boundPrograms = programs;
+    const readEngineSnapshot = async <T>(
+      read: (snapshot: LoyaltyEngine) => T | Promise<T>
+    ): Promise<T> => {
+      const current = await engineStore.load();
+      const activeProgram = engine.getProgramDefinition();
+      let snapshotState = current?.state;
+      if (
+        snapshotState &&
+        snapshotState.program_fingerprint !== programDefinitionFingerprint(activeProgram)
+      ) {
+        // A program publish can race this read; retarget like boot does.
+        const previousProgram = boundPrograms.programForFingerprint(
+          snapshotState.program_fingerprint
+        );
+        if (!previousProgram) {
+          throw new Error(
+            "Stored engine state uses an unknown program definition; cannot serve a read snapshot"
+          );
+        }
+        snapshotState = retargetProgramState(snapshotState, previousProgram, activeProgram);
+      }
+      const scratch = new LoyaltyEngine(
+        activeProgram,
+        snapshotState ? { state: snapshotState } : {}
+      );
+      return read(scratch);
+    };
+
     campaigns = await CampaignService.create({
       store: stateStore<CampaignState>("campaigns"),
       engine,
@@ -476,6 +521,7 @@ export async function createPostgresProtocolPlatform(
       engagement,
       locations,
       executeEngineOperation,
+      readEngineSnapshot,
       close: async () => {
         await campaigns?.close();
         await memberships?.close();
