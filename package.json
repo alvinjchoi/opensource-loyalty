@@ -23,6 +23,7 @@
     "cloud:provision": "tsx apps/cloud/src/tenant-onboarding-cli.ts",
     "clean": "tsc -b --clean && rm -rf coverage spec/schemas",
     "conformance": "vitest run tests/conformance",
+    "docs:check": "tsx scripts/check-docs-mirror.ts",
     "dev": "tsx packages/server/src/cli.ts",
     "example:sdk": "tsx examples/typescript/full-lifecycle.ts",
     "generate": "tsx scripts/generate-spec.ts && tsx scripts/generate-sdk.ts",
