@@ -313,16 +313,24 @@ npm run verify        # Full local verification pipeline
 
 Full docs site: **[loyalty-interchange.mintlify.app](https://loyalty-interchange.mintlify.app)**
 
-Developer guides:
+Developer guides (rendered on the docs site; sources live in [`docs/`](docs/README.md)):
+
+- [Quickstart](https://loyalty-interchange.mintlify.app/get-started/quickstart) — validation, Docker, reset, seed, and conformance details
+- [Essentials](https://loyalty-interchange.mintlify.app/get-started/essentials) — the six things every new integrator needs to know
+- [TypeScript SDK](https://loyalty-interchange.mintlify.app/guides/typescript-sdk) — SDK operations, errors, money helpers, and order builder
+- [Webhooks](https://loyalty-interchange.mintlify.app/guides/webhooks) — signed CloudEvents after every successful mutation, with a durable retry outbox
+- [Customer identity](https://loyalty-interchange.mintlify.app/guides/customer-identity) — connect an already-authenticated customer to a program-scoped LIP member
+- [Reference platform](https://loyalty-interchange.mintlify.app/guides/reference-platform) — server, Admin, storage, and implementation boundaries
+- [PostgreSQL storage](https://loyalty-interchange.mintlify.app/guides/postgres) — multi-instance engine store, location scoping, and the lock-free report path
+- [Cloud control plane](https://loyalty-interchange.mintlify.app/guides/cloud) — organizations, projects, environments, provisioning, operator auth, and metering
+- [Punchh migration](https://loyalty-interchange.mintlify.app/guides/punchh-migration) — mapping restaurant loyalty capabilities to vendor-neutral LIP contracts
+
+Repo-only docs (no published page):
 
 - [Getting started](docs/getting-started.md) — shortest path from clone to working request
-- [Five-minute quickstart](docs/quickstart.md) — validation, Docker, reset, seed, and conformance details
 - [API endpoints](docs/api-endpoints.md) — routes, auth, examples, errors, retries, and webhooks
-- [TypeScript SDK](docs/typescript-sdk.md) — SDK operations, errors, money helpers, and order builder
-- [Reference platform](docs/reference-platform.md) — server, Admin, storage, and implementation boundaries
-- [PostgreSQL storage](docs/postgres.md) — multi-instance engine store, location scoping, and the lock-free report path
-- [Cloud control plane](docs/cloud.md) — organizations, projects, environments, provisioning, operator auth, and metering
-- [Punchh compatibility](docs/punchh-compatibility.md) — migration coverage and adapter gaps
+- [Engagement](docs/engagement.md) — segments, campaigns, exports, and messaging jobs
+- [Releasing](docs/releasing.md) — release process for maintainers
 
 Normative specification (canonical when docs and generated artifacts disagree):
 
