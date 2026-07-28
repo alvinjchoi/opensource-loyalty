@@ -1,10 +1,14 @@
 import type { Pool, PoolClient } from "pg";
 import {
   CloudRepositoryConflictError,
+  LastPlatformAdminError,
   type CloudOperator,
   type CloudOperatorApiKey,
   type CloudOperatorAuditEntry
 } from "./types.js";
+
+/** Advisory-lock key serializing operator bootstrap + last-admin guards. */
+const OPERATOR_LOCK_KEY = "lip:cloud:operators:admin";
 
 function iso(value: Date | string): string {
   return new Date(value).toISOString();
@@ -131,10 +135,28 @@ export class PostgresOperatorStore {
     operator: CloudOperator;
     key: CloudOperatorApiKey;
     audit: CloudOperatorAuditEntry;
+    bootstrap?: boolean;
   }): Promise<void> {
     try {
       await transaction(this.pool, async (client) => {
         const { operator } = input;
+        if (input.bootstrap) {
+          // Bootstrap atomicity (PLA-442 fix 5): serialize the count + insert
+          // under an advisory lock so two concurrent bootstraps cannot both see
+          // an empty directory and both mint platform-admins.
+          await client.query(
+            "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+            [OPERATOR_LOCK_KEY]
+          );
+          const count = await client.query<{ count: string }>(
+            "SELECT count(*) AS count FROM lip_cloud_operators"
+          );
+          if (Number(count.rows[0]?.count ?? 0) > 0) {
+            throw new CloudRepositoryConflictError(
+              "The first operator was already bootstrapped"
+            );
+          }
+        }
         await client.query(`
           INSERT INTO lip_cloud_operators (
             operator_id, subject, email, role, organization_ids, active,
@@ -198,8 +220,31 @@ export class PostgresOperatorStore {
     active?: boolean;
     updatedAt: string;
     audit: CloudOperatorAuditEntry;
+    guardLastPlatformAdmin?: boolean;
   }): Promise<CloudOperator | undefined> {
     return transaction(this.pool, async (client) => {
+      if (input.guardLastPlatformAdmin && input.active === false) {
+        // Atomic last-admin guard (PLA-442 fix 6): lock, then refuse to
+        // deactivate an active platform-admin unless another remains.
+        await client.query(
+          "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+          [OPERATOR_LOCK_KEY]
+        );
+        const target = await client.query<{ role: string; active: boolean }>(
+          "SELECT role, active FROM lip_cloud_operators WHERE operator_id = $1",
+          [input.operatorId]
+        );
+        const current = target.rows[0];
+        if (current?.active && current.role === "platform-admin") {
+          const admins = await client.query<{ count: string }>(
+            "SELECT count(*) AS count FROM lip_cloud_operators " +
+            "WHERE active AND role = 'platform-admin'"
+          );
+          if (Number(admins.rows[0]?.count ?? 0) <= 1) {
+            throw new LastPlatformAdminError();
+          }
+        }
+      }
       const result = await client.query(`
         UPDATE lip_cloud_operators
         SET active = COALESCE($2, active), updated_at = $3
@@ -288,6 +333,13 @@ export class PostgresOperatorStore {
       JOIN lip_cloud_operators operator
         ON operator.operator_id = key.operator_id
       WHERE key.secret_hash = $1
+        -- Defense in depth (PLA-442 fix 7): the store never surfaces a
+        -- revoked, expired, or inactive key, or a key on an inactive operator,
+        -- independent of the service-layer checks.
+        AND key.active
+        AND key.revoked_at IS NULL
+        AND (key.expires_at IS NULL OR key.expires_at > now())
+        AND operator.active
     `, [secretHash]);
     const row = result.rows[0] as Record<string, unknown> | undefined;
     if (!row) return undefined;

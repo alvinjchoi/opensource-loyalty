@@ -71,12 +71,32 @@ export interface CloudPrincipal {
    * operator auth). Recorded in audit metadata, never used for authorization.
    */
   on_behalf_of?: string;
+  /**
+   * Set by the server only for an OIDC-verified subject in the configured
+   * bootstrap allowlist while zero operators exist (PLA-442 fix 3). Authorizes
+   * the one-time creation of the first platform-admin (for this same subject);
+   * inert once any operator record exists.
+   */
+  bootstrap_admin?: boolean;
 }
 
 export class CloudRepositoryConflictError extends Error {
   public constructor(message = "Cloud resource already exists") {
     super(message);
     this.name = "CloudRepositoryConflictError";
+  }
+}
+
+/**
+ * Raised by the repository when deactivating an operator would strand the
+ * control plane by removing its last active platform-admin. The service maps
+ * this to a 409 `operator_lockout`. The guard lives in the repository so the
+ * count-then-deactivate decision is atomic (PLA-442 fix 6).
+ */
+export class LastPlatformAdminError extends Error {
+  public constructor(message = "The last active platform-admin cannot be deactivated") {
+    super(message);
+    this.name = "LastPlatformAdminError";
   }
 }
 
@@ -341,6 +361,13 @@ export interface CloudRepository {
     operator: CloudOperator;
     key: CloudOperatorApiKey;
     audit: CloudOperatorAuditEntry;
+    /**
+     * First-operator bootstrap: serialize the count-then-insert so two
+     * concurrent bootstraps cannot both mint platform-admins (PLA-442 fix 5).
+     * The repository re-checks `countOperators() === 0` atomically and throws
+     * CloudRepositoryConflictError otherwise.
+     */
+    bootstrap?: boolean;
   }): Promise<void>;
   operatorById(operatorId: string): Promise<CloudOperator | undefined>;
   operatorBySubject(subject: string): Promise<CloudOperator | undefined>;
@@ -351,6 +378,12 @@ export interface CloudRepository {
     active?: boolean;
     updatedAt: string;
     audit: CloudOperatorAuditEntry;
+    /**
+     * When true, the deactivation is refused atomically (throwing
+     * LastPlatformAdminError) unless another active platform-admin remains —
+     * closing the TOCTOU on the last-admin lockout guard (PLA-442 fix 6).
+     */
+    guardLastPlatformAdmin?: boolean;
   }): Promise<CloudOperator | undefined>;
   listOrganizations(): Promise<CloudOrganization[]>;
   operatorApiKeys(operatorId: string): Promise<CloudOperatorApiKey[]>;

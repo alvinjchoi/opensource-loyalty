@@ -777,16 +777,24 @@ export class CloudControlPlane {
     if (principal.operator?.role === "platform-admin") {
       return this.virtualMembership(principal, organizationId, "owner");
     }
+    const inScope =
+      principal.operator?.role === "org-scoped" &&
+      Boolean(principal.operator.organization_ids?.includes(organizationId));
     const membership = await this.repository.membership(
       organizationId,
       principal.issuer,
       principal.subject
     );
-    if (membership?.active) return membership;
-    if (
-      principal.operator?.role === "org-scoped" &&
-      principal.operator.organization_ids?.includes(organizationId)
-    ) {
+    if (membership?.active) {
+      // An org-scoped operator always gets at least virtual admin inside its
+      // scope — a stored lower-role membership must never shadow it (PLA-442
+      // fix 9). Take the higher of the stored role and admin.
+      if (inScope && membership.role !== "owner") {
+        return { ...membership, role: "admin" };
+      }
+      return membership;
+    }
+    if (inScope) {
       return this.virtualMembership(principal, organizationId, "admin");
     }
     throw new CloudError(404, "not_found", "Organization was not found");

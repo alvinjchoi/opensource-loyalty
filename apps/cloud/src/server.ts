@@ -25,20 +25,31 @@ import {
 
 const maxBodyBytes = 1_048_576;
 
+/** Audit-only on-behalf-of annotation ceiling (PLA-442 fix 8). */
+const maxSubjectHeaderLength = 320;
+
+/** Subject stamped as the audit actor for the shared-key bootstrap request. */
+const CLOUD_BOOTSTRAP_SUBJECT = "urn:lip:cloud-bootstrap";
+
 export interface CloudServerOptions {
   /**
-   * Legacy shared trusted-gateway key. Deprecated (PLA-442): valid only as a
-   * bootstrap credential for the first operator; every other use is reported
-   * through `onSharedKeyUse`. Set `sharedKeyDisabled` to reject it outright.
+   * Legacy shared trusted-gateway key. Deprecated (PLA-442): it authenticates
+   * NOTHING except the first-operator bootstrap route, and only while zero
+   * operators exist. Once any operator exists it is retired (401
+   * `shared_key_retired`) on every route. Set `sharedKeyDisabled` to reject it
+   * outright, including bootstrap.
    */
   apiKey?: string;
   authenticator?: CloudAuthenticator;
   /** Operator directory for `lip_ok_` bearer keys and OIDC subject mapping. */
   operators?: CloudOperatorService;
-  /** Rejects the shared `apiKey` outright (401 shared_key_disabled). */
+  /** Rejects the shared `apiKey` outright, bootstrap included (401 shared_key_disabled). */
   sharedKeyDisabled?: boolean;
-  /** Called on every non-bootstrap shared-key request (deprecation signal). */
-  onSharedKeyUse?: (info: { path: string }) => void;
+  /**
+   * OIDC-verified subjects allowed to bootstrap the first platform-admin
+   * operator while zero operators exist (PLA-442 fix 3). Inert thereafter.
+   */
+  bootstrapSubjects?: string[];
   allowedOrigins?: string[];
   /**
    * Data-plane hook for POST /cloud/v1/environments/{id}/credentials/rotate
@@ -68,9 +79,31 @@ function bearer(request: IncomingMessage): string | undefined {
   return value?.startsWith("Bearer ") ? value.slice(7) : undefined;
 }
 
+/**
+ * The audit-only on-behalf-of annotation. Validated before it ever reaches
+ * audit metadata (PLA-442 fix 8): bounded length, no control characters or
+ * newlines. It is never used for authorization.
+ */
 function subjectHeader(request: IncomingMessage): string | undefined {
   const value = request.headers["x-lip-cloud-subject"];
-  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+  if (typeof value !== "string" || !value.trim()) return undefined;
+  const trimmed = value.trim();
+  if (trimmed.length > maxSubjectHeaderLength) {
+    throw new CloudError(
+      400,
+      "invalid_subject_header",
+      `X-LIP-Cloud-Subject must be at most ${maxSubjectHeaderLength} characters`
+    );
+  }
+  // eslint-disable-next-line no-control-regex
+  if (/[\u0000-\u001f\u007f]/.test(trimmed)) {
+    throw new CloudError(
+      400,
+      "invalid_subject_header",
+      "X-LIP-Cloud-Subject must not contain control characters"
+    );
+  }
+  return trimmed;
 }
 
 /** True for the one route the deprecated shared key legitimately serves. */
@@ -111,20 +144,32 @@ async function principal(
         : {})
     });
     // A verified subject with an active operator record gains that
-    // operator's scope; anyone else stays a plain member principal.
+    // operator's scope; anyone else stays a plain member principal. A verified
+    // subject in the bootstrap allowlist, while zero operators exist, is
+    // flagged to create the first platform-admin for itself (PLA-442 fix 3).
     const operator = await options.operators?.operatorForSubject(verified.subject);
+    const bootstrapAdmin =
+      !operator &&
+      Boolean(options.bootstrapSubjects?.includes(verified.subject)) &&
+      Boolean(options.operators) &&
+      (await options.operators!.countOperators()) === 0;
     return {
       ...verified,
       ...(operator ? { operator: operatorScope(operator) } : {}),
+      ...(bootstrapAdmin ? { bootstrap_admin: true } : {}),
       ...(claimed && claimed !== verified.subject
         ? { on_behalf_of: claimed }
         : {})
     };
   }
 
-  // Legacy shared trusted-gateway key: the caller-chosen subject header is
-  // still honored for backward compatibility, but only until the key is
-  // disabled — every non-bootstrap use is reported as deprecated.
+  // Legacy shared trusted-gateway key (PLA-442 fix 1): retired to a
+  // bootstrap-only credential. It authenticates NOTHING except the
+  // first-operator bootstrap route, and only while zero operators exist. Once
+  // any operator exists — or on any other route — it is rejected. It never
+  // produces a general data-plane principal again, and the bootstrap request
+  // needs no X-LIP-Cloud-Subject header (fix 2): the new operator's identity
+  // comes from the request body.
   if (!secret || !options.apiKey || !secureEqual(secret, options.apiKey)) {
     throw new CloudError(401, "unauthorized", "Valid Cloud API credentials are required");
   }
@@ -132,22 +177,24 @@ async function principal(
     throw new CloudError(
       401,
       "shared_key_disabled",
-      "The shared Cloud API key is disabled; use an operator API key"
+      "The shared Cloud API key is disabled; use an operator API key (lip_ok_...)"
     );
   }
-  if (!isOperatorBootstrap(context.method, context.path)) {
-    options.onSharedKeyUse?.({ path: context.path });
-  }
-  const email = request.headers["x-lip-cloud-email"];
-  if (!claimed) {
-    throw new CloudError(401, "unauthorized", "x-lip-cloud-subject is required");
+  const operatorCount = options.operators
+    ? await options.operators.countOperators()
+    : 0;
+  if (!isOperatorBootstrap(context.method, context.path) || operatorCount > 0) {
+    throw new CloudError(
+      401,
+      "shared_key_retired",
+      "The shared Cloud API key is retired; it only bootstraps the first " +
+      "operator while none exist. Authenticate with an operator API key (lip_ok_...)."
+    );
   }
   return {
     issuer: TRUSTED_GATEWAY_ISSUER,
-    subject: claimed,
-    ...(typeof email === "string" && email.trim()
-      ? { email: email.trim().toLowerCase() }
-      : {})
+    subject: CLOUD_BOOTSTRAP_SUBJECT,
+    ...(claimed ? { on_behalf_of: claimed } : {})
   };
 }
 
@@ -393,16 +440,11 @@ export function createCloudServer(
   if (options.apiKey && options.apiKey.length < 16) {
     throw new Error("Cloud API key must contain at least 16 characters");
   }
-  const resolvedOptions: CloudServerOptions = {
-    ...options,
-    onSharedKeyUse: options.onSharedKeyUse ?? ((info) => {
-      console.warn(JSON.stringify({
-        event: "cloud_shared_key_used",
-        message: "Deprecated shared LIP_CLOUD_API_KEY used; migrate to operator API keys (PLA-442)",
-        path: info.path
-      }));
-    })
-  };
+  // The shared key can no longer reach data routes (PLA-442 fix 1), so there
+  // is no per-request deprecation signal to throttle (fix 10): the boot-time
+  // `cloud_shared_key_deprecated` notice in cli.ts is the single, once-per-boot
+  // deprecation warning.
+  const resolvedOptions: CloudServerOptions = options;
   return createServer((request, response) => {
     const method = request.method ?? "GET";
     const url = new URL(request.url ?? "/", "http://cloud.local");

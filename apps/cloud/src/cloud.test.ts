@@ -12,10 +12,12 @@ import { describe, expect, it } from "vitest";
 import { createDemoPlatform, startReferenceServer } from "@loyalty-interchange/server";
 import { OidcAuthenticator } from "./auth.js";
 import { MemoryCloudRepository } from "./memory-repository.js";
+import { CloudOperatorService } from "./operator-service.js";
 import { PostgresCloudRepository } from "./postgres-repository.js";
 import { CloudProvisioningWorker } from "./provisioning.js";
 import { CloudControlPlane, CloudError } from "./service.js";
 import { startCloudServer } from "./server.js";
+import { TRUSTED_GATEWAY_ISSUER } from "./types.js";
 
 const fixedNow = new Date("2026-07-15T12:00:00.000Z");
 const owner = {
@@ -23,6 +25,35 @@ const owner = {
   subject: "user_clerk_001",
   email: "owner@example.com"
 };
+
+const OIDC_AUDIENCE = "lip-cloud";
+
+/**
+ * A verified-identity harness. Since PLA-442 the shared key cannot mint a
+ * principal for a caller-chosen subject, so tests that need several distinct
+ * identities issue a real signed token per identity.
+ */
+async function oidcHarness() {
+  const kid = "cloud-test-key";
+  const { privateKey, publicKey } = await generateKeyPair("RS256");
+  const jwk = await exportJWK(publicKey);
+  jwk.kid = kid;
+  const authenticator = new OidcAuthenticator({
+    issuer: owner.issuer,
+    audience: OIDC_AUDIENCE,
+    key: createLocalJWKSet({ keys: [jwk] })
+  });
+  const tokenFor = async (subject: string, email: string) =>
+    new SignJWT({ email, email_verified: true })
+      .setProtectedHeader({ alg: "RS256", kid })
+      .setIssuer(owner.issuer)
+      .setAudience(OIDC_AUDIENCE)
+      .setSubject(subject)
+      .setIssuedAt()
+      .setExpirationTime("5m")
+      .sign(privateKey);
+  return { authenticator, tokenFor };
+}
 
 async function fixture() {
   const repository = new MemoryCloudRepository();
@@ -302,15 +333,14 @@ describe("Cloud control plane", () => {
       repository,
       now: () => new Date(fixedNow)
     });
+    const { authenticator, tokenFor } = await oidcHarness();
     const running = await startCloudServer(cloud, {
-      apiKey: "cloud-test-api-key",
+      authenticator,
       port: 0
     });
     const headers = {
-      authorization: "Bearer cloud-test-api-key",
-      "content-type": "application/json",
-      "x-lip-cloud-subject": owner.subject,
-      "x-lip-cloud-email": owner.email
+      authorization: `Bearer ${await tokenFor(owner.subject, owner.email)}`,
+      "content-type": "application/json"
     };
     try {
       expect(await fetch(`${running.url}/health`).then((response) => response.status))
@@ -362,8 +392,7 @@ describe("Cloud control plane", () => {
       };
       const memberHeaders = {
         ...headers,
-        "x-lip-cloud-subject": "api-member-001",
-        "x-lip-cloud-email": "api-member@example.com"
+        authorization: `Bearer ${await tokenFor("api-member-001", "api-member@example.com")}`
       };
       const acceptResponse = await fetch(
         `${running.url}/cloud/v1/invitations/accept`,
@@ -380,7 +409,7 @@ describe("Cloud control plane", () => {
           method: "PATCH",
           headers,
           body: JSON.stringify({
-            issuer: "urn:lip:trusted-gateway",
+            issuer: owner.issuer,
             subject: "api-member-001",
             role: "developer"
           })
@@ -416,23 +445,23 @@ describe("Cloud control plane", () => {
       repository,
       now: () => new Date(fixedNow)
     });
+    const operators = new CloudOperatorService({ repository });
     const running = await startCloudServer(cloud, {
       apiKey: "cloud-attach-test-api-key",
+      operators,
       port: 0
     });
-    // The apiKey auth mode derives the actor's issuer as the trusted gateway
-    // (see principal() in server.ts), so the operator's membership must be
-    // created under that same issuer for the HTTP requests below to match it.
-    const operator = {
-      issuer: "urn:lip:trusted-gateway",
-      subject: "attach-operator-001",
-      email: "attach-operator@example.com"
-    };
+    // PLA-442: the attach route is driven by a platform-admin operator key,
+    // which carries its own verified identity and gets virtual owner scope on
+    // every organization — no membership wiring or subject header needed.
+    const admin = await operators.createOperator(
+      { issuer: TRUSTED_GATEWAY_ISSUER, subject: "bootstrap" },
+      { subject: "attach-operator-001", role: "platform-admin" }
+    );
+    const operator = operators.principalFor(admin.operator);
     const operatorHeaders = {
-      authorization: "Bearer cloud-attach-test-api-key",
-      "content-type": "application/json",
-      "x-lip-cloud-subject": operator.subject,
-      "x-lip-cloud-email": operator.email
+      authorization: `Bearer ${admin.secret}`,
+      "content-type": "application/json"
     };
     try {
       const dashboard = await cloud.createOrganization(operator, {

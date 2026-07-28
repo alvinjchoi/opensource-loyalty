@@ -11,11 +11,23 @@ import {
 } from "./tenant-onboarding.js";
 import { TRUSTED_GATEWAY_ISSUER } from "./types.js";
 
-const apiKey = "cloud-onboarding-test-key";
-const target = (url: string, overrides: Partial<{ apiKey: string; subject: string }> = {}) => ({
+/**
+ * Legacy shared trusted-gateway key. Since PLA-442 it authenticates nothing
+ * but the first-operator bootstrap, so tests use it only to mint the operator
+ * key below and to assert the retired-key behavior itself.
+ */
+const sharedKey = "cloud-onboarding-test-key";
+
+/** Subject of the platform-admin operator every fixture bootstraps. */
+const OPERATOR_SUBJECT = "operator_biz_manager";
+
+/**
+ * Onboarding client target. An operator key (`lip_ok_...`) carries its own
+ * verified identity, so no subject flag is threaded through.
+ */
+const target = (url: string, apiKey: string) => ({
   cloudUrl: url,
-  apiKey: overrides.apiKey ?? apiKey,
-  subject: overrides.subject ?? "operator_biz_manager",
+  apiKey,
   email: "ops@example.com"
 });
 
@@ -36,7 +48,13 @@ async function fixture() {
   const repository = new MemoryCloudRepository();
   const operators = new CloudOperatorService({ repository });
   const cloud = new CloudControlPlane({ repository, regions: ["us-east-1"] });
-  const running = await startCloudServer(cloud, { apiKey, operators, port: 0 });
+  const running = await startCloudServer(cloud, { apiKey: sharedKey, operators, port: 0 });
+  // PLA-442: the shared key spends its single use bootstrapping the first
+  // platform-admin; every later request authenticates with that operator key.
+  const bootstrap = await operators.createOperator(
+    { issuer: TRUSTED_GATEWAY_ISSUER, subject: "bootstrap" },
+    { subject: OPERATOR_SUBJECT, role: "platform-admin" }
+  );
   const worker = new CloudProvisioningWorker({
     repository,
     workerId: "onboarding-test-worker",
@@ -58,15 +76,15 @@ async function fixture() {
     await running.close();
     await cloud.close();
   };
-  return { url: running.url, operators, drive, close };
+  return { url: running.url, operators, operatorKey: bootstrap.secret, drive, close };
 }
 
 describe("provisionTenant", () => {
   it("creates org, project, and environment, then reports the ready tenant", async () => {
-    const { url, drive, close } = await fixture();
+    const { url, operatorKey, drive, close } = await fixture();
     try {
       const [result] = await Promise.all([
-        provisionTenant(target(url), request()),
+        provisionTenant(target(url, operatorKey), request()),
         drive()
       ]);
       expect(result.tenant_id).toMatch(/^tenant_/);
@@ -80,13 +98,13 @@ describe("provisionTenant", () => {
   });
 
   it("is idempotent: re-running with the same slugs reuses every resource", async () => {
-    const { url, drive, close } = await fixture();
+    const { url, operatorKey, drive, close } = await fixture();
     try {
       const [first] = await Promise.all([
-        provisionTenant(target(url), request()),
+        provisionTenant(target(url, operatorKey), request()),
         drive()
       ]);
-      const second = await provisionTenant(target(url), request());
+      const second = await provisionTenant(target(url, operatorKey), request());
       expect(second.tenant_id).toBe(first.tenant_id);
       expect(second.environment_id).toBe(first.environment_id);
       expect(second.status).toBe("ready");
@@ -97,11 +115,11 @@ describe("provisionTenant", () => {
   });
 
   it("rejects reusing an environment slug for a different program", async () => {
-    const { url, drive, close } = await fixture();
+    const { url, operatorKey, drive, close } = await fixture();
     try {
-      await Promise.all([provisionTenant(target(url), request()), drive()]);
+      await Promise.all([provisionTenant(target(url, operatorKey), request()), drive()]);
       await expect(
-        provisionTenant(target(url), request({ programId: "other-program" }))
+        provisionTenant(target(url, operatorKey), request({ programId: "other-program" }))
       ).rejects.toMatchObject({ code: "program_mismatch", status: 409 });
     } finally {
       await close();
@@ -109,9 +127,9 @@ describe("provisionTenant", () => {
   });
 
   it("returns a pending, timed-out result when no provisioning worker runs", async () => {
-    const { url, close } = await fixture();
+    const { url, operatorKey, close } = await fixture();
     try {
-      const result = await provisionTenant(target(url), {
+      const result = await provisionTenant(target(url, operatorKey), {
         ...request(),
         poll: { timeoutMs: 100, intervalMs: 20 }
       });
@@ -124,28 +142,21 @@ describe("provisionTenant", () => {
   });
 
   it("rejects an invalid webhook configuration before touching the control plane", async () => {
-    await expect(provisionTenant(target("http://127.0.0.1:9"), {
+    await expect(provisionTenant(target("http://127.0.0.1:9", "lip_ok_unused_client_side_validation"), {
       ...request(),
       webhook: { url: "https://hooks.example.com/loyalty", secret: "short" }
     })).rejects.toThrow(/16/);
-    await expect(provisionTenant(target("http://127.0.0.1:9"), {
+    await expect(provisionTenant(target("http://127.0.0.1:9", "lip_ok_unused_client_side_validation"), {
       ...request(),
       webhook: { url: "ftp://hooks.example.com/loyalty", secret: "a-webhook-secret-16ch" }
     })).rejects.toThrow(/HTTP/i);
   });
 
   it("onboards with an operator API key and no subject flag (PLA-442)", async () => {
-    const { url, operators, drive, close } = await fixture();
+    const { url, operatorKey, drive, close } = await fixture();
     try {
-      const bootstrap = await operators.createOperator(
-        { issuer: TRUSTED_GATEWAY_ISSUER, subject: "bootstrap" },
-        { subject: "onboarding-operator-001", role: "platform-admin" }
-      );
       const [result] = await Promise.all([
-        provisionTenant(
-          { cloudUrl: url, apiKey: bootstrap.secret },
-          request()
-        ),
+        provisionTenant({ cloudUrl: url, apiKey: operatorKey }, request()),
         drive()
       ]);
       expect(result.status).toBe("ready");
@@ -155,9 +166,21 @@ describe("provisionTenant", () => {
     }
   });
 
+  it("retires the shared key once the first operator exists (PLA-442)", async () => {
+    const { url, close } = await fixture();
+    try {
+      await expect(provisionTenant(
+        { cloudUrl: url, apiKey: sharedKey, subject: "operator_biz_manager" },
+        request()
+      )).rejects.toMatchObject({ status: 401, code: "shared_key_retired" });
+    } finally {
+      await close();
+    }
+  });
+
   it("still requires an operator subject with the legacy shared key", async () => {
     await expect(provisionTenant(
-      { cloudUrl: "http://127.0.0.1:9", apiKey },
+      { cloudUrl: "http://127.0.0.1:9", apiKey: sharedKey },
       request()
     )).rejects.toThrow(/subject/i);
   });
@@ -166,10 +189,10 @@ describe("provisionTenant", () => {
     const { url, close } = await fixture();
     try {
       await expect(
-        provisionTenant(target(url, { apiKey: "wrong-key-wrong-key" }), request())
+        provisionTenant(target(url, "lip_ok_unregistered_operator_key"), request())
       ).rejects.toBeInstanceOf(TenantOnboardingError);
       await expect(
-        provisionTenant(target(url, { apiKey: "wrong-key-wrong-key" }), request())
+        provisionTenant(target(url, "lip_ok_unregistered_operator_key"), request())
       ).rejects.toMatchObject({ status: 401 });
     } finally {
       await close();
@@ -187,7 +210,7 @@ describe("rotateTenantCredentials", () => {
       options: { subject: string; overlap_seconds?: number };
     }> = [];
     const running = await startCloudServer(cloud, {
-      apiKey,
+      apiKey: sharedKey,
       operators,
       port: 0,
       rotateEnvironmentCredentials: async (environmentId, options) => {
@@ -213,9 +236,16 @@ describe("rotateTenantCredentials", () => {
         })
       }
     });
+    // PLA-442: bootstrap the platform-admin whose key drives every rotation
+    // below, and whose subject is the expected attribution subject.
+    const admin = await operators.createOperator(
+      { issuer: TRUSTED_GATEWAY_ISSUER, subject: "bootstrap" },
+      { subject: OPERATOR_SUBJECT, role: "platform-admin" }
+    );
+    const operatorKey = admin.secret;
     try {
       const [provisioned] = await Promise.all([
-        provisionTenant(target(running.url), request()),
+        provisionTenant(target(running.url, operatorKey), request()),
         (async () => {
           for (let attempt = 0; attempt < 100; attempt += 1) {
             if (await worker.runOnce() === "succeeded") return;
@@ -224,7 +254,7 @@ describe("rotateTenantCredentials", () => {
         })()
       ]);
       const rotated = await rotateTenantCredentials(
-        target(running.url),
+        target(running.url, operatorKey),
         provisioned.environment_id
       );
       expect(rotated).toMatchObject({
@@ -241,25 +271,25 @@ describe("rotateTenantCredentials", () => {
 
       // An explicit overlap (emergency cutover) reaches the data plane.
       await rotateTenantCredentials(
-        target(running.url),
+        target(running.url, operatorKey),
         provisioned.environment_id,
         { overlapSeconds: 0 }
       );
       expect(rotateCalls.at(-1)?.options.overlap_seconds).toBe(0);
 
-      await expect(rotateTenantCredentials(target(running.url), "env_unknown"))
+      await expect(rotateTenantCredentials(target(running.url, operatorKey), "env_unknown"))
         .rejects.toMatchObject({ status: 404 });
 
       // Under an operator key the tenant-side attribution subject is the
       // VERIFIED operator, regardless of any claimed subject.
-      const bootstrap = await operators.createOperator(
-        { issuer: TRUSTED_GATEWAY_ISSUER, subject: "bootstrap" },
+      const second = await operators.createOperator(
+        operators.principalFor(admin.operator),
         { subject: "rotation-operator-001", role: "platform-admin" }
       );
       await rotateTenantCredentials(
         {
           cloudUrl: running.url,
-          apiKey: bootstrap.secret,
+          apiKey: second.secret,
           subject: "claimed-someone-else"
         },
         provisioned.environment_id

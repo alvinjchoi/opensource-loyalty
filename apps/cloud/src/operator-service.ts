@@ -6,6 +6,7 @@ import {
 import { CloudError } from "./service.js";
 import {
   CloudRepositoryConflictError,
+  LastPlatformAdminError,
   TRUSTED_GATEWAY_ISSUER,
   type CloudOperator,
   type CloudOperatorApiKey,
@@ -14,6 +15,27 @@ import {
   type CloudPrincipal,
   type CloudRepository
 } from "./types.js";
+
+/**
+ * Fail-fast guard for boot (PLA-442 fix 4): a control plane with zero
+ * operators and no way to create the first one can never be administered.
+ * Throws with an actionable message so the service refuses to start rather
+ * than silently stranding operator management.
+ */
+export function assertOperatorManagementReachable(input: {
+  operatorCount: number;
+  sharedKeyBootstrap: boolean;
+  oidcBootstrap: boolean;
+}): void {
+  if (input.operatorCount > 0) return;
+  if (input.sharedKeyBootstrap || input.oidcBootstrap) return;
+  throw new Error(
+    "Operator management is unreachable: zero operators exist and no bootstrap " +
+    "path is configured. Provide an enabled shared LIP_CLOUD_API_KEY, or set " +
+    "LIP_CLOUD_BOOTSTRAP_SUBJECT(S) with OIDC, to create the first operator " +
+    "(PLA-442)."
+  );
+}
 
 /** Issuer stamped on principals resolved from operator credentials. */
 export const OPERATOR_ISSUER = "urn:lip:operator";
@@ -110,6 +132,11 @@ export class CloudOperatorService {
     return this.principalFor(operator);
   }
 
+  /** Number of operator records — drives shared-key/OIDC bootstrap gating. */
+  public async countOperators(): Promise<number> {
+    return this.repository.countOperators();
+  }
+
   /** Active operator for a verified external subject (OIDC mapping). */
   public async operatorForSubject(subject: string): Promise<CloudOperator | undefined> {
     const operator = await this.repository.operatorBySubject(subject);
@@ -146,7 +173,10 @@ export class CloudOperatorService {
       key?: { name?: string; expires_at?: string };
     }
   ): Promise<{ operator: CloudOperator } & CreatedOperatorKey> {
-    await this.authorizeOperatorManagement(actor, { allowBootstrap: input.role });
+    const { bootstrap } = await this.authorizeOperatorManagement(actor, {
+      allowBootstrap: input.role,
+      subject: input.subject.trim()
+    });
     const subject = input.subject.trim();
     if (!subject || subject.length > 200) {
       throw new CloudError(422, "validation_failed", "A valid operator subject is required");
@@ -189,6 +219,7 @@ export class CloudOperatorService {
       await this.repository.createOperator({
         operator,
         key,
+        bootstrap,
         audit: this.auditEntry(actor, "cloud.operator.created", "operator", operator.operator_id, {
           subject,
           role: input.role,
@@ -219,26 +250,31 @@ export class CloudOperatorService {
   ): Promise<CloudOperator> {
     await this.authorizeOperatorManagement(actor);
     const existing = await this.requiredOperator(operatorId);
-    if (!input.active && existing.active && existing.role === "platform-admin") {
-      const admins = (await this.repository.listOperators()).filter(
-        (candidate) => candidate.active && candidate.role === "platform-admin"
-      );
-      if (admins.length <= 1) {
+    // The last-admin lockout guard is enforced atomically in the repository
+    // (PLA-442 fix 6) — a naive count-then-deactivate here would be TOCTOU.
+    const guardLastPlatformAdmin =
+      !input.active && existing.active && existing.role === "platform-admin";
+    let updated: CloudOperator | undefined;
+    try {
+      updated = await this.repository.updateOperator({
+        operatorId,
+        active: input.active,
+        updatedAt: this.clock().toISOString(),
+        guardLastPlatformAdmin,
+        audit: this.auditEntry(actor, "cloud.operator.updated", "operator", operatorId, {
+          active: input.active
+        })
+      });
+    } catch (error) {
+      if (error instanceof LastPlatformAdminError) {
         throw new CloudError(
           409,
           "operator_lockout",
           "The last active platform-admin operator cannot be deactivated"
         );
       }
+      throw error;
     }
-    const updated = await this.repository.updateOperator({
-      operatorId,
-      active: input.active,
-      updatedAt: this.clock().toISOString(),
-      audit: this.auditEntry(actor, "cloud.operator.updated", "operator", operatorId, {
-        active: input.active
-      })
-    });
     if (!updated) throw new CloudError(404, "not_found", "Operator was not found");
     return updated;
   }
@@ -413,16 +449,21 @@ export class CloudOperatorService {
   }
 
   /**
-   * Operator management requires a platform-admin operator. The legacy
-   * shared-gateway principal is accepted only as the bootstrap path: creating
-   * the FIRST operator, which must be a platform-admin.
+   * Operator management requires a platform-admin operator. Two bootstrap
+   * credentials may create only the FIRST operator (a platform-admin): the
+   * legacy shared gateway (PLA-442 fix 1) and an OIDC-verified subject in the
+   * configured bootstrap allowlist (fix 3). An OIDC bootstrap may only mint an
+   * operator for its own verified subject. Returns whether this call is a
+   * bootstrap so the repository can serialize it atomically (fix 5).
    */
   private async authorizeOperatorManagement(
     actor: CloudPrincipal,
-    bootstrap?: { allowBootstrap: CloudOperatorRole }
-  ): Promise<void> {
-    if (actor.operator?.role === "platform-admin") return;
-    if (bootstrap && actor.issuer === TRUSTED_GATEWAY_ISSUER) {
+    bootstrap?: { allowBootstrap: CloudOperatorRole; subject: string }
+  ): Promise<{ bootstrap: boolean }> {
+    if (actor.operator?.role === "platform-admin") return { bootstrap: false };
+    const gatewayBootstrap = actor.issuer === TRUSTED_GATEWAY_ISSUER;
+    const oidcBootstrap = actor.bootstrap_admin === true;
+    if (bootstrap && (gatewayBootstrap || oidcBootstrap)) {
       if (await this.repository.countOperators() > 0) {
         throw new CloudError(
           403,
@@ -437,7 +478,14 @@ export class CloudOperatorService {
           "The bootstrap operator must be a platform-admin"
         );
       }
-      return;
+      if (oidcBootstrap && !gatewayBootstrap && bootstrap.subject !== actor.subject) {
+        throw new CloudError(
+          403,
+          "forbidden",
+          "OIDC bootstrap may only create the first operator for the verified subject"
+        );
+      }
+      return { bootstrap: true };
     }
     throw new CloudError(
       403,

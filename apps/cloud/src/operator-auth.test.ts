@@ -6,7 +6,7 @@ import {
   exportJWK,
   generateKeyPair
 } from "jose";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { OidcAuthenticator } from "./auth.js";
 import { MemoryCloudRepository } from "./memory-repository.js";
 import { CloudOperatorService, OPERATOR_ISSUER } from "./operator-service.js";
@@ -259,7 +259,6 @@ describe("CloudOperatorService", () => {
 describe("Cloud server operator auth", () => {
   async function httpFixture(options: {
     sharedKeyDisabled?: boolean;
-    onSharedKeyUse?: (info: { path: string }) => void;
     rotateSubjects?: string[];
   } = {}) {
     const { repository, operators, cloud } = fixture();
@@ -269,7 +268,6 @@ describe("Cloud server operator auth", () => {
       operators,
       port: 0,
       ...(options.sharedKeyDisabled ? { sharedKeyDisabled: true } : {}),
-      ...(options.onSharedKeyUse ? { onSharedKeyUse: options.onSharedKeyUse } : {}),
       rotateEnvironmentCredentials: async (environmentId, rotateOptions) => {
         rotateSubjects.push(rotateOptions.subject);
         return {
@@ -289,12 +287,13 @@ describe("Cloud server operator auth", () => {
   it("bootstraps the first operator over HTTP with the shared key, once", async () => {
     const { running, cloud } = await httpFixture();
     try {
+      // Fix 2: the bootstrap request carries NO X-LIP-Cloud-Subject header —
+      // the operator identity comes from the body, exactly as the CLI sends it.
       const bootstrap = await fetch(`${running.url}/cloud/v1/operators`, {
         method: "POST",
         headers: {
           authorization: `Bearer ${sharedKey}`,
-          "content-type": "application/json",
-          "x-lip-cloud-subject": "bootstrap-runner"
+          "content-type": "application/json"
         },
         body: JSON.stringify({
           subject: "admin-operator-001",
@@ -308,16 +307,17 @@ describe("Cloud server operator auth", () => {
       }).data;
       expect(created.secret).toMatch(/^lip_ok_/);
 
+      // A second shared-key request is now retired (an operator exists).
       const again = await fetch(`${running.url}/cloud/v1/operators`, {
         method: "POST",
         headers: {
           authorization: `Bearer ${sharedKey}`,
-          "content-type": "application/json",
-          "x-lip-cloud-subject": "bootstrap-runner"
+          "content-type": "application/json"
         },
         body: JSON.stringify({ subject: "admin-operator-002", role: "platform-admin" })
       });
-      expect(again.status).toBe(403);
+      expect(again.status).toBe(401);
+      expect((await again.json() as { code: string }).code).toBe("shared_key_retired");
 
       // The minted operator key manages operators from here on.
       const list = await fetch(`${running.url}/cloud/v1/operators`, {
@@ -553,22 +553,41 @@ describe("Cloud server operator auth", () => {
     }
   });
 
-  it("keeps the shared key working with a deprecation warning until disabled", async () => {
-    const onSharedKeyUse = vi.fn();
-    const { running, cloud } = await httpFixture({ onSharedKeyUse });
+  it("retires the shared key to bootstrap-only: no general data-plane access", async () => {
+    const { operators, running, cloud } = await httpFixture();
     try {
       const legacyHeaders = {
         authorization: `Bearer ${sharedKey}`,
         "content-type": "application/json",
         "x-lip-cloud-subject": "legacy-operator"
       };
-      // Legacy mode still works during the migration window...
-      expect((await fetch(`${running.url}/cloud/v1/plans`, { headers: legacyHeaders })).status)
-        .toBe(200);
-      // ...but every non-bootstrap use is flagged.
-      expect(onSharedKeyUse).toHaveBeenCalledWith(
-        expect.objectContaining({ path: "/cloud/v1/plans" })
-      );
+      // With zero operators the shared key still cannot reach a data route —
+      // it is not a general trusted-gateway credential (PLA-442 fix 1).
+      const beforeBootstrap = await fetch(`${running.url}/cloud/v1/plans`, {
+        headers: legacyHeaders
+      });
+      expect(beforeBootstrap.status).toBe(401);
+      expect((await beforeBootstrap.json() as { code: string }).code)
+        .toBe("shared_key_retired");
+
+      // Bootstrap the first operator with the shared key (its one job).
+      await bootstrapAdmin(operators, "shared-retire-admin");
+
+      // Once an operator exists the shared key is fully retired everywhere,
+      // including the operators route.
+      const afterData = await fetch(`${running.url}/cloud/v1/plans`, {
+        headers: legacyHeaders
+      });
+      expect(afterData.status).toBe(401);
+      expect((await afterData.json() as { code: string }).code).toBe("shared_key_retired");
+      const afterOperators = await fetch(`${running.url}/cloud/v1/operators`, {
+        method: "POST",
+        headers: legacyHeaders,
+        body: JSON.stringify({ subject: "second-admin", role: "platform-admin" })
+      });
+      expect(afterOperators.status).toBe(401);
+      expect((await afterOperators.json() as { code: string }).code)
+        .toBe("shared_key_retired");
     } finally {
       await running.close();
       await cloud.close();

@@ -3,7 +3,10 @@
 import { hostname } from "node:os";
 import { OidcAuthenticator } from "./auth.js";
 import { LocalDataPlaneProvisioner } from "./data-plane-provisioner.js";
-import { CloudOperatorService } from "./operator-service.js";
+import {
+  CloudOperatorService,
+  assertOperatorManagementReachable
+} from "./operator-service.js";
 import { PostgresCloudRepository } from "./postgres-repository.js";
 import { CloudProvisioningWorker } from "./provisioning.js";
 import { CloudControlPlane } from "./service.js";
@@ -25,6 +28,15 @@ const oidcAudience = process.env["LIP_CLOUD_OIDC_AUDIENCE"];
 if (Boolean(oidcIssuer) !== Boolean(oidcAudience)) {
   throw new Error("LIP_CLOUD_OIDC_ISSUER and LIP_CLOUD_OIDC_AUDIENCE must be set together");
 }
+// OIDC subjects allowed to bootstrap the first operator (PLA-442 fix 3).
+const bootstrapSubjects = (
+  process.env["LIP_CLOUD_BOOTSTRAP_SUBJECTS"] ??
+  process.env["LIP_CLOUD_BOOTSTRAP_SUBJECT"] ??
+  ""
+)
+  .split(",")
+  .map((value) => value.trim())
+  .filter(Boolean);
 if (!oidcIssuer && !sharedKeyDisabled && (!apiKey || apiKey.length < 16)) {
   throw new Error(
     "LIP_CLOUD_API_KEY must contain at least 16 characters " +
@@ -62,6 +74,15 @@ const controlPlane = new CloudControlPlane({
   defaultPlanId: process.env["LIP_CLOUD_DEFAULT_PLAN"] ?? "free"
 });
 await controlPlane.migrate();
+
+// Fail-fast (PLA-442 fix 4): refuse to boot if the control plane has zero
+// operators and no viable path to create the first one — otherwise operator
+// management would be silently unreachable.
+assertOperatorManagementReachable({
+  operatorCount: await operators.countOperators(),
+  sharedKeyBootstrap: Boolean(apiKey) && !sharedKeyDisabled,
+  oidcBootstrap: Boolean(authenticator) && bootstrapSubjects.length > 0
+});
 
 const programDirectory = process.env["LIP_CLOUD_PROGRAM_DIR"];
 let provisioner: LocalDataPlaneProvisioner | undefined;
@@ -117,6 +138,7 @@ const running = await startCloudServer(controlPlane, {
     : apiKey ? { apiKey } : {}),
   operators,
   ...(sharedKeyDisabled ? { sharedKeyDisabled: true } : {}),
+  ...(bootstrapSubjects.length > 0 ? { bootstrapSubjects } : {}),
   ...(provisioner
     ? {
         rotateEnvironmentCredentials: (
