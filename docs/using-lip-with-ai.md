@@ -266,16 +266,30 @@ Curated prompts help agents implement LIP correctly on the first pass — enroll
 flows, checkout lifecycle, webhook receivers, refund adjustments, and
 conformance checks. See [AI prompts](ai-prompts.md).
 
-## What is not in LIP (agent pitfalls)
+## What is not in the protocol (agent pitfalls)
 
-Agents often assume platform features that LIP does not provide. Do not
-implement these against LIP directly; build them in your BFF or a future
-platform module:
+Agents often assume `/lip/v1` provides platform features it deliberately
+leaves out. Do not implement these against the protocol:
 
-- Customer sign-in, OTP, or social auth (merchant-key API only)
-- Campaigns, segments, push notifications, or CRM
-- Program editing at runtime (boot-time `--program` or Admin read-only today)
-- Issued coupon wallets or QR check-in flows
+- Customer sign-in, OTP, or social auth. LIP is a merchant-key API;
+  customer authentication belongs in your BFF. See
+  [Customer identity](customer-identity.md).
+- Issued coupon wallets or QR check-in flows. Build these in your BFF on
+  top of the portable issued-reward and redemption operations.
+- Push or email delivery itself. The platform signs, retries, and journals
+  messages, but provider SDKs plug in through `MessagingConnectorAdapter`.
+
+Several features agents expect **do** exist — as non-normative platform
+features under `/admin/api/v1`, not as portable protocol operations. Use them
+to operate a deployment; do not depend on them for cross-vendor portability:
+
+- Campaigns and segments, including dynamic segments and a scheduler
+- Program editing at runtime: versioned drafts, validation, optimistic
+  publish, retained revision history, and rollback in the Admin Configure
+  view (boot-time `--program` remains available for a fixed program)
+- CRM member exports as JSON or formula-safe CSV, and persisted messaging jobs
+
+See [Reference platform](reference-platform.md) for the full platform layer.
 
 See [Punchh compatibility](punchh-compatibility.md) for migration mapping and
 [API and documentation gap analysis](api-docs-gap-analysis.md) for the full
