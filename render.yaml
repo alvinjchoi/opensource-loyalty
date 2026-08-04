@@ -28,7 +28,12 @@ previews:
 
 databases:
   - name: lip-shared-postgres
-    plan: basic-1gb # smallest paid tier with PITR; resize without data loss later
+    # Every PAID plan has point-in-time recovery; only Free has none. The tier
+    # sets the recovery window (3 days here, 7 on Pro and above), not whether
+    # PITR exists — an earlier comment here claimed basic-1gb was the cheapest
+    # tier with PITR, which is not so. Sized for tenant #1; Postgres resizes up
+    # without data loss, so buy the window and the RAM when tenants arrive.
+    plan: basic-256mb
     region: oregon
     postgresMajorVersion: "17" # matches compose.yaml (postgres:17-alpine)
     databaseName: loyalty
@@ -40,7 +45,11 @@ services:
     name: lip-shared-data-plane
     runtime: docker
     region: oregon # ONE regional cluster; a second region is a second blueprint
-    plan: standard # hosts N in-process tenant runtimes; starter is too small
+    # standard (2GB) is sized for N in-process tenant runtimes. Tenant #1 is
+    # the only one, so start on starter (512MB, 0.5 CPU) and move up when a
+    # second tenant lands or RSS approaches the cap — instance type changes
+    # without data loss. Watch memory before onboarding tenant #2.
+    plan: starter
     numInstances: 1 # REQUIRED: one platform instance per tenant (docs/postgres.md)
     autoDeploy: false # promote deliberately; loyalty state is financial data
     dockerfilePath: ./Dockerfile
@@ -53,7 +62,10 @@ services:
     disk:
       name: lip-cloud-data
       mountPath: /data
-      sizeGB: 10 # program JSONs, per-environment credentials, ports.json
+      # program JSONs, per-environment credentials, ports.json — kilobytes per
+      # tenant. Render disks grow but never shrink, so start at the floor and
+      # expand on demand rather than paying for 10GB of headroom from day one.
+      sizeGB: 1
     envVars:
       # --- shared Postgres: control plane + every tenant's engine rows ---
       - key: LIP_CLOUD_DATABASE_URL
@@ -71,11 +83,34 @@ services:
         value: "10000" # Render's default detected port
       - key: HEALTH_PORT
         value: "10000"
-      # Trusted-gateway shared key (>= 16 chars). INTERIM AUTH: tenant-scoped
-      # API keys are pending PLA-416; until then every management call uses
-      # this one key plus an X-LIP-Cloud-Subject header. Never expose it to
-      # browsers or mobile apps.
+      # Bootstrap-only shared key (>= 16 chars). PLA-442 retired it as a
+      # general credential: it can create the FIRST operator and nothing else.
+      # Onboarding and rotation calls made with it are rejected. The
+      # X-LIP-Cloud-Subject header it used to pair with is gone — a caller can
+      # no longer name itself.
+      #
+      # First deploy: set this, create the first operator with
+      #   npm run cloud:operator -- create
+      # then move every caller to its own lip_ok_… key and set
+      # LIP_CLOUD_SHARED_KEY_DISABLED=true below. Never expose it to browsers
+      # or mobile apps.
       - key: LIP_CLOUD_API_KEY
+        sync: false
+      # Flip to "true" once the first operator exists. Leaving it false past
+      # bootstrap keeps a standing credential that can mint platform admins.
+      - key: LIP_CLOUD_SHARED_KEY_DISABLED
+        value: "false"
+      # OIDC is the supported production auth path and removes the shared key
+      # from the boot sequence entirely. Issuer and audience must be set
+      # together or the process refuses to start. BOOTSTRAP_SUBJECTS lists the
+      # identities allowed to create the first operator while none exists.
+      - key: LIP_CLOUD_OIDC_ISSUER
+        sync: false
+      - key: LIP_CLOUD_OIDC_AUDIENCE
+        sync: false
+      - key: LIP_CLOUD_OIDC_JWKS_URI
+        sync: false
+      - key: LIP_CLOUD_BOOTSTRAP_SUBJECTS
         sync: false
       - key: LIP_CLOUD_ALLOWED_ORIGINS
         sync: false # e.g. https://dashboard.craveup.com
