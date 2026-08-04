@@ -28,7 +28,12 @@ previews:
 
 databases:
   - name: lip-shared-postgres
-    plan: basic-1gb # smallest paid tier with PITR; resize without data loss later
+    # Every PAID plan has point-in-time recovery; only Free has none. The tier
+    # sets the recovery window (3 days here, 7 on Pro and above), not whether
+    # PITR exists — an earlier comment here claimed basic-1gb was the cheapest
+    # tier with PITR, which is not so. Sized for tenant #1; Postgres resizes up
+    # without data loss, so buy the window and the RAM when tenants arrive.
+    plan: basic-256mb
     region: oregon
     postgresMajorVersion: "17" # matches compose.yaml (postgres:17-alpine)
     databaseName: loyalty
@@ -40,7 +45,11 @@ services:
     name: lip-shared-data-plane
     runtime: docker
     region: oregon # ONE regional cluster; a second region is a second blueprint
-    plan: standard # hosts N in-process tenant runtimes; starter is too small
+    # standard (2GB) is sized for N in-process tenant runtimes. Tenant #1 is
+    # the only one, so start on starter (512MB, 0.5 CPU) and move up when a
+    # second tenant lands or RSS approaches the cap — instance type changes
+    # without data loss. Watch memory before onboarding tenant #2.
+    plan: starter
     numInstances: 1 # REQUIRED: one platform instance per tenant (docs/postgres.md)
     autoDeploy: false # promote deliberately; loyalty state is financial data
     dockerfilePath: ./Dockerfile
@@ -53,7 +62,10 @@ services:
     disk:
       name: lip-cloud-data
       mountPath: /data
-      sizeGB: 10 # program JSONs, per-environment credentials, ports.json
+      # program JSONs, per-environment credentials, ports.json — kilobytes per
+      # tenant. Render disks grow but never shrink, so start at the floor and
+      # expand on demand rather than paying for 10GB of headroom from day one.
+      sizeGB: 1
     envVars:
       # --- shared Postgres: control plane + every tenant's engine rows ---
       - key: LIP_CLOUD_DATABASE_URL
